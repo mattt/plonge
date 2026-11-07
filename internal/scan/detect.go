@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mattt/plonge/internal/rules"
 )
@@ -25,6 +26,8 @@ type Root struct {
 	Skipped    string // why the root was skipped, or empty
 	Candidates []Candidate
 	Errors     []string // Git failures; the candidates they affect are left out
+	// LastActivity is the modification time of the Git HEAD log, else of HEAD.
+	LastActivity time.Time
 }
 
 // Detect walks root and returns the candidates that Git ignores
@@ -38,9 +41,13 @@ func Detect(ctx context.Context, root string, r rules.Rules) Root {
 		res.Skipped = "not a directory"
 		return res
 	}
-	if _, _, err := git(ctx, root, nil, "rev-parse", "--show-toplevel"); err != nil {
+	out, _, err := git(ctx, root, nil, "rev-parse", "--show-toplevel", "--git-path", "logs/HEAD", "--git-path", "HEAD")
+	if err != nil {
 		res.Skipped = "not in a Git work tree"
 		return res
+	}
+	if lines := strings.Split(strings.TrimSpace(string(out)), "\n"); len(lines) == 3 {
+		res.LastActivity = lastActivity(root, lines[1:])
 	}
 
 	found, repos := walk(root, r)
