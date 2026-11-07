@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/mattt/plonge/internal/mise"
+	"github.com/mattt/plonge/internal/rules"
 )
 
 const usage = `Usage: plonge <command> [options]
@@ -125,11 +126,17 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return code
 	}
-	roots, broken, err := collectRoots(opts, mise.EnvFromOS())
+	env := mise.EnvFromOS()
+	rs, err := rules.Load(rules.UserPath(env.XDGConfigHome, env.Home))
 	if err != nil {
 		fmt.Fprintf(stderr, "plonge scan: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "%d roots, %d broken links\n", len(roots), broken)
+	roots, broken, err := collectRoots(opts, env)
+	if err != nil {
+		fmt.Fprintf(stderr, "plonge scan: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "%d roots, %d broken links, %d rule names\n", len(roots), broken, len(rs.Names))
 	return 0
 }

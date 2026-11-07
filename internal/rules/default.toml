@@ -1,0 +1,10 @@
+names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
+         ".pytest_cache", ".ruff_cache", ".svelte-kit", ".turbo", ".venv",
+         "DerivedData", "__pycache__", "dist", "node_modules", "target", "venv"]
+quiet_hours = 24
+
+# A generic name counts only next to one of these project files.
+[beside]
+dist = ["package.json"]
+target = ["Cargo.toml", "pom.xml"]
+venv = ["pyproject.toml", "requirements.txt", "setup.py"]
