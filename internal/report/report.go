@@ -1,0 +1,214 @@
+// Package report turns scan results into a table or JSON.
+package report
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"path/filepath"
+	"sort"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/mattt/plonge/internal/scan"
+)
+
+// Cache is one cache directory in the report.
+type Cache struct {
+	Path         string     `json:"path"`
+	Bytes        int64      `json:"bytes"`
+	Project      string     `json:"project"`
+	LastActivity *time.Time `json:"last_activity"`
+	Quiet        bool       `json:"quiet"`
+	Rule         string     `json:"rule"`
+}
+
+// SkippedRoot is a root that plonge did not scan.
+type SkippedRoot struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
+// Totals sums the caches in the report.
+type Totals struct {
+	Caches      int   `json:"caches"`
+	Bytes       int64 `json:"bytes"`
+	QuietCaches int   `json:"quiet_caches"`
+	QuietBytes  int64 `json:"quiet_bytes"`
+}
+
+// Report is the data that plonge scan prints.
+type Report struct {
+	GeneratedAt  time.Time     `json:"generated_at"`
+	QuietHours   float64       `json:"quiet_hours"`
+	Caches       []Cache       `json:"caches"`
+	Totals       Totals        `json:"totals"`
+	Roots        int           `json:"roots"`
+	SkippedRoots []SkippedRoot `json:"skipped_roots"`
+	BrokenLinks  int           `json:"broken_links"`
+	Errors       []string      `json:"errors"`
+}
+
+// Build makes a report from scan results and the size of each candidate.
+// sizes holds one slice per root, in the order of the candidates.
+func Build(roots []scan.Root, sizes [][]int64, quietHours float64, brokenLinks int, now time.Time) Report {
+	r := Report{
+		GeneratedAt:  now,
+		QuietHours:   quietHours,
+		Caches:       []Cache{},
+		Roots:        len(roots),
+		SkippedRoots: []SkippedRoot{},
+		BrokenLinks:  brokenLinks,
+		Errors:       []string{},
+	}
+	for i, root := range roots {
+		if root.Skipped != "" {
+			r.SkippedRoots = append(r.SkippedRoots, SkippedRoot{Path: root.Path, Reason: root.Skipped})
+			continue
+		}
+		r.Errors = append(r.Errors, root.Errors...)
+		var last *time.Time
+		if !root.LastActivity.IsZero() {
+			t := root.LastActivity
+			last = &t
+		}
+		quiet := scan.Quiet(root.LastActivity, now, quietHours)
+		for j, c := range root.Candidates {
+			cache := Cache{
+				Path:         c.Path,
+				Bytes:        sizes[i][j],
+				Project:      root.Path,
+				LastActivity: last,
+				Quiet:        quiet,
+				Rule:         c.Rule,
+			}
+			r.Caches = append(r.Caches, cache)
+			r.Totals.Caches++
+			r.Totals.Bytes += cache.Bytes
+			if quiet {
+				r.Totals.QuietCaches++
+				r.Totals.QuietBytes += cache.Bytes
+			}
+		}
+	}
+	sort.SliceStable(r.Caches, func(a, b int) bool {
+		ca, cb := r.Caches[a], r.Caches[b]
+		if ca.Bytes != cb.Bytes {
+			return ca.Bytes > cb.Bytes
+		}
+		ta, tb := activityKey(ca), activityKey(cb)
+		if !ta.Equal(tb) {
+			return ta.Before(tb) // older first
+		}
+		return ca.Path < cb.Path
+	})
+	return r
+}
+
+// activityKey sorts an unknown activity time before all others.
+func activityKey(c Cache) time.Time {
+	if c.LastActivity == nil {
+		return time.Time{}
+	}
+	return *c.LastActivity
+}
+
+// WriteJSON prints the report as indented JSON.
+func WriteJSON(w io.Writer, r Report) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(r)
+}
+
+// WriteTable prints the report as a table followed by totals.
+// Paths inside home are shown with ~.
+func WriteTable(w io.Writer, r Report, home string) error {
+	if len(r.Caches) > 0 {
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "PATH\tSIZE\tPROJECT\tLAST ACTIVITY\tQUIET\tRULE")
+		for _, c := range r.Caches {
+			quiet := "no"
+			if c.Quiet {
+				quiet = "yes"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				Tilde(c.Path, home), HumanBytes(c.Bytes), Tilde(c.Project, home),
+				Age(c.LastActivity, r.GeneratedAt), quiet, c.Rule)
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+		fmt.Fprintln(w)
+	}
+	t := r.Totals
+	fmt.Fprintf(w, "Total: %s in %s\n", HumanBytes(t.Bytes), plural(t.Caches, "cache"))
+	fmt.Fprintf(w, "Quiet for %s or more: %s in %s\n",
+		hours(r.QuietHours), HumanBytes(t.QuietBytes), plural(t.QuietCaches, "cache"))
+	fmt.Fprintf(w, "Roots: %d scanned, %d skipped\n", r.Roots-len(r.SkippedRoots), len(r.SkippedRoots))
+	fmt.Fprintf(w, "Broken mise links: %d\n", r.BrokenLinks)
+	if len(r.Errors) > 0 {
+		fmt.Fprintf(w, "Git errors: %d (caches in those repositories are not listed)\n", len(r.Errors))
+	}
+	_, err := fmt.Fprintln(w, "Plonge only reports; it deleted nothing.")
+	return err
+}
+
+// Tilde replaces home at the start of path with ~.
+func Tilde(path, home string) string {
+	if home == "" || home == "/" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if rest, ok := strings.CutPrefix(path, home+string(filepath.Separator)); ok {
+		return "~" + string(filepath.Separator) + rest
+	}
+	return path
+}
+
+// HumanBytes formats n with binary units, as du -h does.
+func HumanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	v := float64(n)
+	units := []string{"KiB", "MiB", "GiB", "TiB", "PiB"}
+	i := -1
+	for v >= unit && i < len(units)-1 {
+		v /= unit
+		i++
+	}
+	return fmt.Sprintf("%.1f %s", v, units[i])
+}
+
+// Age formats how long before now t was.
+func Age(t *time.Time, now time.Time) string {
+	if t == nil {
+		return "unknown"
+	}
+	d := now.Sub(*t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+func hours(h float64) string {
+	return fmt.Sprintf("%gh", h)
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", word)
+	}
+	return fmt.Sprintf("%d %ss", n, word)
+}

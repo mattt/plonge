@@ -9,8 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mattt/plonge/internal/mise"
+	"github.com/mattt/plonge/internal/report"
 	"github.com/mattt/plonge/internal/rules"
 	"github.com/mattt/plonge/internal/scan"
 )
@@ -140,16 +142,36 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	results := scan.Run(context.Background(), roots, rs)
-	cands, skipped := 0, 0
-	for _, r := range results {
-		cands += len(r.Candidates)
-		for _, e := range r.Errors {
+	rep := build(results, rs.QuietHours, broken, time.Now())
+	if opts.json {
+		err = report.WriteJSON(stdout, rep)
+	} else {
+		for _, e := range rep.Errors {
 			fmt.Fprintf(stderr, "plonge scan: %s\n", e)
 		}
-		if r.Skipped != "" {
-			skipped++
+		err = report.WriteTable(stdout, rep, env.Home)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "plonge scan: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// build sizes every candidate across all roots at once and makes the report.
+func build(results []scan.Root, quietHours float64, broken int, now time.Time) report.Report {
+	var dirs []string
+	for _, r := range results {
+		for _, c := range r.Candidates {
+			dirs = append(dirs, c.Path)
 		}
 	}
-	fmt.Fprintf(stdout, "%d caches in %d roots; %d roots skipped, %d broken links\n", cands, len(roots), skipped, broken)
-	return 0
+	flat := scan.Sizes(dirs)
+	sizes := make([][]int64, len(results))
+	k := 0
+	for i, r := range results {
+		sizes[i] = flat[k : k+len(r.Candidates)]
+		k += len(r.Candidates)
+	}
+	return report.Build(results, sizes, quietHours, broken, now)
 }
