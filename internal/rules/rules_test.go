@@ -1,0 +1,132 @@
+package rules
+
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
+)
+
+func TestDefault(t *testing.T) {
+	r := Default()
+	if len(r.Names) != 17 || r.QuietHours != 24 {
+		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
+	}
+	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
+		t.Errorf("beside target = %q", r.Beside["target"])
+	}
+}
+
+func writeRules(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "rules.toml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLoad(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantNames  []string // names that must be present
+		wantBeside map[string][]string
+		wantQuiet  float64
+		wantErr    bool
+	}{
+		{
+			name:      "names add to defaults",
+			body:      `names = [".cache", "node_modules"]`,
+			wantNames: []string{".cache", "node_modules", "dist"},
+			wantQuiet: 24,
+		},
+		{
+			name: "beside entry replaces default",
+			body: "[beside]\ndist = [\"vite.config.ts\"]\nbuild = [\"build.gradle\"]\n",
+			wantBeside: map[string][]string{
+				"dist":   {"vite.config.ts"},
+				"build":  {"build.gradle"},
+				"target": {"Cargo.toml", "pom.xml"},
+			},
+			wantQuiet: 24,
+		},
+		{name: "quiet hours", body: "quiet_hours = 72", wantQuiet: 72},
+		{name: "unknown key", body: "nmaes = [\"x\"]", wantErr: true},
+		{name: "name with slash", body: `names = ["a/b"]`, wantErr: true},
+		{name: "negative quiet hours", body: "quiet_hours = -1", wantErr: true},
+		{name: "bad toml", body: "names = [", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, err := Load(writeRules(t, tt.body))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("want an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, n := range tt.wantNames {
+				if !slices.Contains(r.Names, n) {
+					t.Errorf("names %q lack %q", r.Names, n)
+				}
+			}
+			if !slices.IsSorted(r.Names) || len(slices.Compact(slices.Clone(r.Names))) != len(r.Names) {
+				t.Errorf("names %q are not sorted and unique", r.Names)
+			}
+			for k, v := range tt.wantBeside {
+				if !slices.Equal(r.Beside[k], v) {
+					t.Errorf("beside %s = %q, want %q", k, r.Beside[k], v)
+				}
+			}
+			if r.QuietHours != tt.wantQuiet {
+				t.Errorf("quiet hours = %g, want %g", r.QuietHours, tt.wantQuiet)
+			}
+		})
+	}
+	// Loading must not change the defaults.
+	if !slices.Equal(Default().Beside["dist"], []string{"package.json"}) {
+		t.Error("Load changed the default rules")
+	}
+}
+
+func TestLoadMissing(t *testing.T) {
+	r, err := Load(filepath.Join(t.TempDir(), "none.toml"))
+	if err != nil || len(r.Names) != len(Default().Names) {
+		t.Errorf("got %v, %v; want the defaults", r.Names, err)
+	}
+}
+
+func TestUserPath(t *testing.T) {
+	if got := UserPath("/x", "/h"); got != "/x/plonge/rules.toml" {
+		t.Errorf("got %q", got)
+	}
+	if got := UserPath("", "/h"); got != "/h/.config/plonge/rules.toml" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestMatch(t *testing.T) {
+	r := Default()
+	tests := []struct {
+		name     string
+		siblings []string
+		want     string
+	}{
+		{"node_modules", nil, "node_modules"},
+		{"dist", nil, ""},
+		{"dist", []string{"package.json"}, "dist beside package.json"},
+		{"target", []string{"pom.xml"}, "target beside pom.xml"},
+		{"target", []string{"package.json"}, ""},
+		{"src", []string{"package.json"}, ""},
+	}
+	for _, tt := range tests {
+		got := r.Match(tt.name, func(m string) bool { return slices.Contains(tt.siblings, m) })
+		if got != tt.want {
+			t.Errorf("Match(%q, %q) = %q, want %q", tt.name, tt.siblings, got, tt.want)
+		}
+	}
+}
