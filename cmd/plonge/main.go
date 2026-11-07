@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/mattt/plonge/internal/mise"
 	"github.com/mattt/plonge/internal/rules"
+	"github.com/mattt/plonge/internal/scan"
 )
 
 const usage = `Usage: plonge <command> [options]
@@ -137,6 +139,17 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "plonge scan: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "%d roots, %d broken links, %d rule names\n", len(roots), broken, len(rs.Names))
+	results := scan.Run(context.Background(), roots, rs)
+	cands, skipped := 0, 0
+	for _, r := range results {
+		cands += len(r.Candidates)
+		for _, e := range r.Errors {
+			fmt.Fprintf(stderr, "plonge scan: %s\n", e)
+		}
+		if r.Skipped != "" {
+			skipped++
+		}
+	}
+	fmt.Fprintf(stdout, "%d caches in %d roots; %d roots skipped, %d broken links\n", cands, len(roots), skipped, broken)
 	return 0
 }
