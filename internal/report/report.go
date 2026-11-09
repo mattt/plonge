@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/mattt/plonge/internal/clean"
 	"github.com/mattt/plonge/internal/scan"
 )
 
@@ -115,7 +116,7 @@ func activityKey(c Cache) time.Time {
 }
 
 // WriteJSON prints the report as indented JSON.
-func WriteJSON(w io.Writer, r Report) error {
+func WriteJSON(w io.Writer, r any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(r)
@@ -151,6 +152,49 @@ func WriteTable(w io.Writer, r Report, home string) error {
 		fmt.Fprintf(w, "Git errors: %d (caches in those repositories are not listed)\n", len(r.Errors))
 	}
 	_, err := fmt.Fprintln(w, "Plonge only reports; it deleted nothing.")
+	return err
+}
+
+// WriteClean prints the outcome of a clean and ends with the space freed.
+func WriteClean(w io.Writer, r clean.Result, home string) error {
+	if len(r.Items) > 0 {
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "PATH\tSIZE\tPROJECT\tRULE\tSTATUS")
+		for _, it := range r.Items {
+			status := it.Status
+			if it.Reason != "" {
+				status += ": " + it.Reason
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+				Tilde(it.Path, home), HumanBytes(it.Bytes), Tilde(it.Project, home), it.Rule, status)
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+		fmt.Fprintln(w)
+	}
+	n := r.NotSelected
+	if n.Active.Caches > 0 {
+		fmt.Fprintf(w, "Not selected, active project: %s in %s (use --include-active)\n",
+			HumanBytes(n.Active.Bytes), plural(n.Active.Caches, "cache"))
+	}
+	if n.BelowSize.Caches > 0 {
+		fmt.Fprintf(w, "Not selected, below --min-size: %s in %s\n",
+			HumanBytes(n.BelowSize.Bytes), plural(n.BelowSize.Caches, "cache"))
+	}
+	if r.Skipped > 0 {
+		fmt.Fprintf(w, "Skipped: %d\n", r.Skipped)
+	}
+	if r.Failed > 0 {
+		fmt.Fprintf(w, "Failed: %d\n", r.Failed)
+	}
+	var err error
+	if r.Applied {
+		_, err = fmt.Fprintf(w, "Freed: %s\n", HumanBytes(r.FreedBytes))
+	} else {
+		fmt.Fprintf(w, "Would delete: %s in %s\n", HumanBytes(r.Selected.Bytes), plural(r.Selected.Caches, "cache"))
+		_, err = fmt.Fprintln(w, "Dry run; nothing was deleted. Use --apply to delete.")
+	}
 	return err
 }
 

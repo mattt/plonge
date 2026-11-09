@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // setup gives the command a temporary home, mise state, and Git configuration.
@@ -116,6 +117,120 @@ func TestScanTable(t *testing.T) {
 	}
 }
 
+// quietRepo makes a repository with an ignored node_modules and no commits,
+// so that its activity is old once HEAD's time is moved back.
+func quietRepo(t *testing.T, dir string) {
+	t.Helper()
+	gitInit(t, dir)
+	mkfile(t, filepath.Join(dir, ".gitignore"), "node_modules/\n")
+	mkfile(t, filepath.Join(dir, "node_modules", "x.js"), "x")
+	old := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, ".git", "HEAD"), old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClean(t *testing.T) {
+	home := setup(t)
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	project := filepath.Join(home, "code", "app")
+	quietRepo(t, project)
+	cache := filepath.Join(project, "node_modules")
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"clean", "--no-mise", "--root", project}
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"~/code/app/node_modules", "would delete", "Would delete:", "in 1 cache", "Dry run"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry run lacks %q:\n%s", want, out)
+		}
+	}
+	if _, err := os.Stat(cache); err != nil {
+		t.Fatalf("the dry run touched the cache: %v", err)
+	}
+
+	stdout.Reset()
+	if code := run(append(args, "--apply"), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Freed: ") {
+		t.Errorf("output:\n%s", stdout.String())
+	}
+	if _, err := os.Stat(cache); !os.IsNotExist(err) {
+		t.Errorf("the cache is still there: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, ".gitignore")); err != nil {
+		t.Errorf("a project file is gone: %v", err)
+	}
+}
+
+func TestCleanActiveAndJSON(t *testing.T) {
+	home := setup(t)
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	project := filepath.Join(home, "app")
+	quietRepo(t, project)
+	now := time.Now()
+	if err := os.Chtimes(filepath.Join(project, ".git", "HEAD"), now, now); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(project, "node_modules")
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"clean", "--no-mise", "--root", project, "--json", "--apply"}
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	var got struct {
+		Applied     bool
+		NotSelected struct {
+			Active struct{ Caches int }
+		} `json:"not_selected"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("%v\n%s", err, stdout.String())
+	}
+	if !got.Applied || got.NotSelected.Active.Caches != 1 {
+		t.Errorf("result = %+v", got)
+	}
+	if _, err := os.Stat(cache); err != nil {
+		t.Fatalf("an active cache was deleted: %v", err)
+	}
+
+	stdout.Reset()
+	if code := run(append(args, "--include-active"), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(cache); !os.IsNotExist(err) {
+		t.Errorf("--include-active kept the cache: %v", err)
+	}
+}
+
+func TestCleanExitsNonZeroOnFailure(t *testing.T) {
+	home := setup(t)
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	project := filepath.Join(home, "app")
+	quietRepo(t, project)
+	mkfile(t, filepath.Join(project, ".gitignore"), "node_modules/\n")
+	mkfile(t, filepath.Join(project, "locked", "node_modules", "y.js"), "y")
+	locked := filepath.Join(project, "locked")
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"clean", "--no-mise", "--root", project, "--apply"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stdout.String(), "Failed: 1") {
+		t.Errorf("exit %d:\n%s%s", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(project, "node_modules")); !os.IsNotExist(err) {
+		t.Errorf("clean stopped at the failure: %v", err)
+	}
+}
+
 func TestDisk(t *testing.T) {
 	setup(t)
 	tests := []struct {
@@ -163,7 +278,10 @@ func TestUsage(t *testing.T) {
 		{[]string{"--help"}, 0, "Usage: plonge"},
 		{[]string{"scan", "--help"}, 0, "--no-mise"},
 		{nil, 2, ""},
-		{[]string{"clean"}, 2, ""},
+		{[]string{"nope"}, 2, ""},
+		{[]string{"clean", "--help"}, 0, "--include-active"},
+		{[]string{"clean", "--no-mise"}, 2, ""},
+		{[]string{"clean", "--min-size", "lots"}, 2, ""},
 		{[]string{"scan", "--no-mise"}, 2, ""},
 		{[]string{"scan", "extra"}, 2, ""},
 		{[]string{"disk", "--help"}, 0, "--warn-below"},

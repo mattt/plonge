@@ -5,9 +5,8 @@ leave on disk, with rules that you can extend.
 It pairs with [mise](https://mise.jdx.dev/):
 mise en place is the preparation, and the plonge is where the dishes get done.
 
-This version only reports.
-`plonge scan` reads your projects and prints what it finds;
-it deletes nothing.
+`plonge scan` reads your projects and prints what it finds; it deletes nothing.
+`plonge clean` deletes what it finds, and only when you give `--apply`.
 
 ## Install
 
@@ -62,6 +61,33 @@ for `quiet_hours` (by default, 24 hours).
 The totals at the end give the size of all caches and of quiet ones.
 
 Use `--json` to get the same data as JSON.
+
+## Clean
+
+```console
+plonge clean
+plonge clean --apply
+```
+
+`plonge clean` selects caches as `scan` does and takes the same
+`--root`, `--no-mise`, and `--json` options.
+By default it is a dry run: it prints what it would delete and the total.
+`--apply` deletes.
+
+Only caches in quiet projects qualify.
+`--include-active` adds the others,
+and `--min-size` (such as `--min-size 100MiB`) leaves out smaller caches.
+
+Right before each deletion, plonge checks again that the path is still a directory,
+is not a symlink, is inside its project,
+is ignored by Git, and holds no tracked file.
+If a check does not pass, plonge skips the path and reports the reason.
+Plonge makes read-only files and directories writable when removal needs it,
+as Go's module cache does.
+After an error, it reports the error, goes on, and exits with a non-zero status.
+It ends with the space freed.
+Sizes count each hard-linked file once,
+so a cache whose files are also linked elsewhere can free less than its size.
 
 ## Disk
 

@@ -9,22 +9,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/mattt/plonge/internal/disk"
+	"github.com/mattt/plonge/internal/engine"
 	"github.com/mattt/plonge/internal/mise"
 	"github.com/mattt/plonge/internal/report"
-	"github.com/mattt/plonge/internal/rules"
-	"github.com/mattt/plonge/internal/scan"
 )
 
 const usage = `Usage: plonge <command> [options]
 
 Plonge finds the caches that developer tools and coding agents leave on disk.
-This version only reports; it deletes nothing.
 
 Commands:
   scan    Report caches in mise projects and other roots
+  clean   Delete caches in quiet projects (a dry run unless --apply)
   disk    Print the free space on your home directory's volume
 
 Run "plonge <command> --help" for the options of a command.
@@ -45,6 +43,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "scan":
 		return runScan(args[1:], stdout, stderr)
+	case "clean":
+		return runClean(args[1:], stdout, stderr)
 	case "disk":
 		return runDisk(args[1:], stdout, stderr)
 	default:
@@ -81,82 +81,134 @@ type scanOptions struct {
 	json   bool
 }
 
-func parseScan(args []string, stdout, stderr io.Writer) (scanOptions, int, bool) {
-	var opts scanOptions
-	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+func (o *scanOptions) bind(fs *flag.FlagSet) {
+	fs.Var(&o.roots, "root", "add a project `dir` to scan (repeatable)")
+	fs.BoolVar(&o.noMise, "no-mise", false, "scan only the --root directories")
+	fs.BoolVar(&o.json, "json", false, "print the report as JSON")
+}
+
+func (o *scanOptions) selection() engine.Selection {
+	return engine.Selection{Roots: o.roots, NoMise: o.noMise}
+}
+
+// parse parses args with fs and reports whether the command should go on.
+// When it should not, code is the exit code.
+func parse(fs *flag.FlagSet, usage string, args []string, stdout, stderr io.Writer) (code int, ok bool) {
 	var parseOut strings.Builder
 	fs.SetOutput(&parseOut)
-	fs.Var(&opts.roots, "root", "add a project `dir` to scan (repeatable)")
-	fs.BoolVar(&opts.noMise, "no-mise", false, "scan only the --root directories")
-	fs.BoolVar(&opts.json, "json", false, "print the report as JSON")
 	fs.Usage = func() {
-		fmt.Fprint(fs.Output(), scanUsage)
+		fmt.Fprint(fs.Output(), usage)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			fs.SetOutput(stdout)
 			fs.Usage()
-			return opts, 0, false
+			return 0, false
 		}
 		fmt.Fprint(stderr, parseOut.String())
-		return opts, 2, false
+		return 2, false
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintf(stderr, "plonge scan: unexpected argument %q\n", fs.Arg(0))
-		return opts, 2, false
+		fmt.Fprintf(stderr, "plonge %s: unexpected argument %q\n", fs.Name(), fs.Arg(0))
+		return 2, false
 	}
-	if opts.noMise && len(opts.roots) == 0 {
-		fmt.Fprintln(stderr, "plonge scan: --no-mise needs at least one --root")
-		return opts, 2, false
-	}
-	return opts, 0, true
+	return 0, true
 }
 
-// collectRoots combines mise's projects with the --root directories.
-func collectRoots(opts scanOptions, env mise.Env) ([]string, int, error) {
-	var roots []string
-	broken := 0
-	if !opts.noMise {
-		p, err := mise.ReadProjects(env)
-		if err != nil {
-			return nil, 0, err
-		}
-		roots = append(roots, p.Roots...)
-		broken = p.BrokenLinks
+func checkRoots(name string, o scanOptions, stderr io.Writer) bool {
+	if o.noMise && len(o.roots) == 0 {
+		fmt.Fprintf(stderr, "plonge %s: --no-mise needs at least one --root\n", name)
+		return false
 	}
-	roots = append(roots, opts.roots...)
-	return mise.DropNested(roots), broken, nil
+	return true
 }
 
 func runScan(args []string, stdout, stderr io.Writer) int {
-	opts, code, ok := parseScan(args, stdout, stderr)
-	if !ok {
+	var opts scanOptions
+	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+	opts.bind(fs)
+	if code, ok := parse(fs, scanUsage, args, stdout, stderr); !ok {
 		return code
 	}
-	env := mise.EnvFromOS()
-	rs, err := rules.Load(rules.UserPath(env.XDGConfigHome, env.Home))
+	if !checkRoots("scan", opts, stderr) {
+		return 2
+	}
+	inv, err := engine.Inspect(context.Background(), opts.selection())
 	if err != nil {
 		fmt.Fprintf(stderr, "plonge scan: %v\n", err)
 		return 1
 	}
-	roots, broken, err := collectRoots(opts, env)
-	if err != nil {
-		fmt.Fprintf(stderr, "plonge scan: %v\n", err)
-		return 1
-	}
-	results := scan.Run(context.Background(), roots, rs)
-	rep := build(results, rs.QuietHours, broken, time.Now())
+	rep := inv.Report
 	if opts.json {
 		err = report.WriteJSON(stdout, rep)
 	} else {
 		for _, e := range rep.Errors {
 			fmt.Fprintf(stderr, "plonge scan: %s\n", e)
 		}
-		err = report.WriteTable(stdout, rep, env.Home)
+		err = report.WriteTable(stdout, rep, inv.Env.Home)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "plonge scan: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+const cleanUsage = `Usage: plonge clean [--apply] [--include-active] [--min-size <size>]
+                    [--root <dir>]... [--no-mise] [--json]
+
+Clean selects caches as scan does and prints what it would delete.
+With --apply, it deletes them. Only caches in quiet projects qualify,
+unless you give --include-active.
+
+Options:
+`
+
+func runClean(args []string, stdout, stderr io.Writer) int {
+	var opts scanOptions
+	fs := flag.NewFlagSet("clean", flag.ContinueOnError)
+	opts.bind(fs)
+	apply := fs.Bool("apply", false, "delete the caches; without it, only print them")
+	includeActive := fs.Bool("include-active", false, "also delete caches in projects that are not quiet")
+	minSize := fs.String("min-size", "", "skip caches smaller than `size`, such as 100MiB")
+	if code, ok := parse(fs, cleanUsage, args, stdout, stderr); !ok {
+		return code
+	}
+	if !checkRoots("clean", opts, stderr) {
+		return 2
+	}
+	var floor int64
+	if *minSize != "" {
+		var err error
+		if floor, err = disk.ParseSize(*minSize); err != nil {
+			fmt.Fprintf(stderr, "plonge clean: --min-size: %v\n", err)
+			return 2
+		}
+	}
+	res, inv, err := engine.Clean(context.Background(), engine.CleanOptions{
+		Selection:     opts.selection(),
+		Apply:         *apply,
+		IncludeActive: *includeActive,
+		MinSize:       floor,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "plonge clean: %v\n", err)
+		return 1
+	}
+	if opts.json {
+		err = report.WriteJSON(stdout, res)
+	} else {
+		for _, e := range res.Errors {
+			fmt.Fprintf(stderr, "plonge clean: %s\n", e)
+		}
+		err = report.WriteClean(stdout, res, inv.Env.Home)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "plonge clean: %v\n", err)
+		return 1
+	}
+	if res.Failed > 0 || len(res.Errors) > 0 {
 		return 1
 	}
 	return 0
@@ -173,25 +225,9 @@ Options:
 
 func runDisk(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("disk", flag.ContinueOnError)
-	var parseOut strings.Builder
-	fs.SetOutput(&parseOut)
 	warnBelow := fs.String("warn-below", "", "warn only when free space is below `size`, such as 20GiB")
-	fs.Usage = func() {
-		fmt.Fprint(fs.Output(), diskUsage)
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(args); err != nil {
-		if err == flag.ErrHelp {
-			fs.SetOutput(stdout)
-			fs.Usage()
-			return 0
-		}
-		fmt.Fprint(stderr, parseOut.String())
-		return 2
-	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(stderr, "plonge disk: unexpected argument %q\n", fs.Arg(0))
-		return 2
+	if code, ok := parse(fs, diskUsage, args, stdout, stderr); !ok {
+		return code
 	}
 	// A hook must not fail because of plonge, so --warn-below always exits 0.
 	failed := 1
@@ -219,22 +255,4 @@ func runDisk(args []string, stdout, stderr io.Writer) int {
 			report.HumanBytes(free), report.HumanBytes(floor))
 	}
 	return 0
-}
-
-// build sizes every candidate across all roots at once and makes the report.
-func build(results []scan.Root, quietHours float64, broken int, now time.Time) report.Report {
-	var dirs []string
-	for _, r := range results {
-		for _, c := range r.Candidates {
-			dirs = append(dirs, c.Path)
-		}
-	}
-	flat := scan.Sizes(dirs)
-	sizes := make([][]int64, len(results))
-	k := 0
-	for i, r := range results {
-		sizes[i] = flat[k : k+len(r.Candidates)]
-		k += len(r.Candidates)
-	}
-	return report.Build(results, sizes, quietHours, broken, now)
 }
