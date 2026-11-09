@@ -172,8 +172,8 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 
 // usage measures path, which may be a symlink to the cache directory.
 func usage(path string) int64 {
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		path = real
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		path = p
 	}
 	return scan.DiskUsage(path)
 }
@@ -183,8 +183,8 @@ func measure(entries []Entry) {
 	var index []int
 	for i, e := range entries {
 		if e.Skipped == "" {
-			if real, err := filepath.EvalSymlinks(e.Path); err == nil {
-				dirs = append(dirs, real)
+			if p, err := filepath.EvalSymlinks(e.Path); err == nil {
+				dirs = append(dirs, p)
 				index = append(index, i)
 			}
 		}

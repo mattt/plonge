@@ -28,6 +28,9 @@ type Options struct {
 	MinSize       int64
 	QuietHours    float64
 	Now           time.Time
+	// StillBusy, when set, asks again whether an agent works in a root.
+	// Run calls it once per root, before the first deletion there.
+	StillBusy func(root string) bool
 }
 
 // Item is one selected cache and what happened to it.
@@ -54,6 +57,7 @@ func (g *Group) add(n int64) {
 
 // NotSelected counts the caches that the options left out.
 type NotSelected struct {
+	Busy      Group `json:"busy"`
 	Active    Group `json:"active"`
 	BelowSize Group `json:"below_size"`
 }
@@ -68,6 +72,8 @@ type Result struct {
 	Skipped     int         `json:"skipped"`
 	Failed      int         `json:"failed"`
 	Errors      []string    `json:"errors"`
+
+	ActivitySources []scan.Source `json:"activity_sources"`
 }
 
 type planned struct {
@@ -79,7 +85,7 @@ type planned struct {
 // Run selects caches from the scan results and, with Apply, deletes them.
 // sizes holds one slice per root, in the order of the candidates.
 func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) Result {
-	res := Result{Applied: opts.Apply, Items: []Item{}, Errors: []string{}}
+	res := Result{Applied: opts.Apply, Items: []Item{}, Errors: []string{}, ActivitySources: []scan.Source{}}
 	var plan []planned
 	for i, root := range roots {
 		if root.Skipped != "" {
@@ -90,6 +96,9 @@ func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) 
 		for j, c := range root.Candidates {
 			n := sizes[i][j]
 			switch {
+			case root.Busy:
+				res.NotSelected.Busy.add(n)
+				continue
 			case !quiet && !opts.IncludeActive:
 				res.NotSelected.Active.add(n)
 				continue
@@ -111,9 +120,19 @@ func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) 
 		}
 		return plan[a].item.Path < plan[b].item.Path
 	})
+	busy := map[string]bool{}
 	for _, p := range plan {
 		if opts.Apply {
-			apply(ctx, &p)
+			if opts.StillBusy != nil {
+				if _, asked := busy[p.root]; !asked {
+					busy[p.root] = opts.StillBusy(p.root)
+				}
+			}
+			if busy[p.root] {
+				p.item.Status, p.item.Reason = Skipped, "an agent is now working in this project"
+			} else {
+				apply(ctx, &p)
+			}
 		}
 		res.Items = append(res.Items, p.item)
 		res.FreedBytes += p.item.FreedBytes

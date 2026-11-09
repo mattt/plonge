@@ -36,7 +36,7 @@ func setup(t *testing.T) (home string) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
-	for _, name := range []string{"MISE_STATE_DIR", "MISE_CONFIG_DIR", "MISE_GLOBAL_CONFIG_FILE"} {
+	for _, name := range []string{"MISE_STATE_DIR", "MISE_CONFIG_DIR", "MISE_GLOBAL_CONFIG_FILE", "CLAUDE_CONFIG_DIR"} {
 		t.Setenv(name, "")
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
@@ -246,6 +246,67 @@ func TestCleanExitsNonZeroOnFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(project, "node_modules")); !os.IsNotExist(err) {
 		t.Errorf("clean stopped at the failure: %v", err)
+	}
+}
+
+func TestCleanKeepsBusyRootAndReportsSources(t *testing.T) {
+	home := setup(t)
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	project := filepath.Join(home, "app")
+	quietRepo(t, project)
+	fakeTool(t, "paseo", fmt.Sprintf(`echo '[{"cwd":%q,"status":"running"}]'`, project))
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"clean", "--no-mise", "--root", project, "--apply", "--include-active"}
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"an agent is working there", "1 cache", "Activity source skipped: claude", "Freed: 0 B"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(project, "node_modules")); err != nil {
+		t.Errorf("a cache in a busy root was deleted: %v", err)
+	}
+
+	stdout.Reset()
+	if code := run([]string{"scan", "--no-mise", "--root", project, "--json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	var rep struct {
+		Caches []struct {
+			Busy           bool
+			Quiet          bool
+			ActivitySource string `json:"activity_source"`
+		} `json:"caches"`
+		Sources []struct{ Name, Status string } `json:"activity_sources"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Caches) != 1 || !rep.Caches[0].Busy || rep.Caches[0].Quiet || rep.Caches[0].ActivitySource != "paseo" {
+		t.Errorf("caches = %+v", rep.Caches)
+	}
+	if len(rep.Sources) != 2 {
+		t.Errorf("sources = %+v", rep.Sources)
+	}
+}
+
+func TestScanTableShowsActivitySource(t *testing.T) {
+	home := setup(t)
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	project := filepath.Join(home, "app")
+	quietRepo(t, project)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"scan", "--no-mise", "--root", project}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	for _, want := range []string{"SOURCE", " git ", "Activity source skipped: paseo (paseo is not on PATH)"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, stdout.String())
+		}
 	}
 }
 

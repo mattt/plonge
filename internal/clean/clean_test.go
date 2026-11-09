@@ -148,6 +148,36 @@ func TestSelection(t *testing.T) {
 	}
 }
 
+func TestBusyRootIsNeverSelected(t *testing.T) {
+	root := repoWith(t)
+	roots, sizes := scanOne(t, root)
+	roots[0].Busy = true
+	opts := quietOpts(true)
+	opts.IncludeActive = true
+	res := Run(context.Background(), roots, sizes, opts)
+	if len(res.Items) != 0 || res.NotSelected.Busy.Caches != 2 {
+		t.Errorf("result = %+v", res)
+	}
+	if !exists(filepath.Join(root, "node_modules")) {
+		t.Error("a cache in a busy root was deleted")
+	}
+}
+
+func TestStillBusyStopsDeletion(t *testing.T) {
+	root := repoWith(t)
+	roots, sizes := scanOne(t, root)
+	calls := 0
+	opts := quietOpts(true)
+	opts.StillBusy = func(string) bool { calls++; return true }
+	res := Run(context.Background(), roots, sizes, opts)
+	if calls != 1 || res.Skipped != 2 || res.Items[0].Status != Skipped {
+		t.Errorf("%d calls, result = %+v", calls, res)
+	}
+	if !exists(filepath.Join(root, "node_modules")) {
+		t.Error("a cache was deleted after an agent started")
+	}
+}
+
 // TestRecheck changes a cache after the scan and before the deletion.
 func TestRecheck(t *testing.T) {
 	tests := []struct {

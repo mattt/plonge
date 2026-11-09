@@ -27,8 +27,29 @@ type Root struct {
 	Skipped    string // why the root was skipped, or empty
 	Candidates []Candidate
 	Errors     []string // Git failures; the candidates they affect are left out
-	// LastActivity is the modification time of the Git HEAD log, else of HEAD.
+	// LastActivity is the newest activity that any source saw.
+	// Detect sets it to the modification time of the Git HEAD log, else of HEAD.
 	LastActivity time.Time
+	// ActivitySource names the source that set LastActivity.
+	ActivitySource string
+	// Busy is true when a coding agent is working in the root right now.
+	Busy bool
+}
+
+// SourceGit is the activity source for a project's Git history.
+const SourceGit = "git"
+
+// The statuses of a Source.
+const (
+	SourceUsed    = "used"
+	SourceSkipped = "skipped"
+)
+
+// Source says whether plonge could read one source of agent activity.
+type Source struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // Detect walks root and returns the candidates that Git ignores
@@ -49,6 +70,9 @@ func Detect(ctx context.Context, root string, r rules.Rules) Root {
 	}
 	if lines := strings.Split(strings.TrimSpace(string(out)), "\n"); len(lines) == 3 {
 		res.LastActivity = lastActivity(root, lines[1:])
+		if !res.LastActivity.IsZero() {
+			res.ActivitySource = SourceGit
+		}
 	}
 
 	found, repos := walk(root, r)

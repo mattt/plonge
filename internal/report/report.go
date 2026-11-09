@@ -22,8 +22,11 @@ type Cache struct {
 	Bytes        int64      `json:"bytes"`
 	Project      string     `json:"project"`
 	LastActivity *time.Time `json:"last_activity"`
-	Quiet        bool       `json:"quiet"`
-	Rule         string     `json:"rule"`
+	// ActivitySource names the source that set LastActivity, or is empty.
+	ActivitySource string `json:"activity_source"`
+	Quiet          bool   `json:"quiet"`
+	Busy           bool   `json:"busy"`
+	Rule           string `json:"rule"`
 }
 
 // SkippedRoot is a root that plonge did not scan.
@@ -50,6 +53,8 @@ type Report struct {
 	SkippedRoots []SkippedRoot `json:"skipped_roots"`
 	BrokenLinks  int           `json:"broken_links"`
 	Errors       []string      `json:"errors"`
+	// ActivitySources reports each source of agent activity.
+	ActivitySources []scan.Source `json:"activity_sources"`
 	// Global lists the global caches; it is nil unless they were requested.
 	Global []global.Entry `json:"global,omitempty"`
 }
@@ -65,6 +70,8 @@ func Build(roots []scan.Root, sizes [][]int64, quietHours float64, brokenLinks i
 		SkippedRoots: []SkippedRoot{},
 		BrokenLinks:  brokenLinks,
 		Errors:       []string{},
+
+		ActivitySources: []scan.Source{},
 	}
 	for i, root := range roots {
 		if root.Skipped != "" {
@@ -84,13 +91,16 @@ func Build(roots []scan.Root, sizes [][]int64, quietHours float64, brokenLinks i
 				Bytes:        sizes[i][j],
 				Project:      root.Path,
 				LastActivity: last,
-				Quiet:        quiet,
+				Quiet:        quiet && !root.Busy,
 				Rule:         c.Rule,
+
+				ActivitySource: root.ActivitySource,
+				Busy:           root.Busy,
 			}
 			r.Caches = append(r.Caches, cache)
 			r.Totals.Caches++
 			r.Totals.Bytes += cache.Bytes
-			if quiet {
+			if cache.Quiet {
 				r.Totals.QuietCaches++
 				r.Totals.QuietBytes += cache.Bytes
 			}
@@ -130,15 +140,17 @@ func WriteJSON(w io.Writer, r any) error {
 func WriteTable(w io.Writer, r Report, home string) error {
 	if len(r.Caches) > 0 {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "PATH\tSIZE\tPROJECT\tLAST ACTIVITY\tQUIET\tRULE")
+		fmt.Fprintln(tw, "PATH\tSIZE\tPROJECT\tLAST ACTIVITY\tSOURCE\tQUIET\tRULE")
 		for _, c := range r.Caches {
 			quiet := "no"
-			if c.Quiet {
+			if c.Busy {
+				quiet = "busy"
+			} else if c.Quiet {
 				quiet = "yes"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				Tilde(c.Path, home), HumanBytes(c.Bytes), Tilde(c.Project, home),
-				Age(c.LastActivity, r.GeneratedAt), quiet, c.Rule)
+				Age(c.LastActivity, r.GeneratedAt), c.ActivitySource, quiet, c.Rule)
 		}
 		if err := tw.Flush(); err != nil {
 			return err
@@ -154,6 +166,7 @@ func WriteTable(w io.Writer, r Report, home string) error {
 	if len(r.Errors) > 0 {
 		fmt.Fprintf(w, "Git errors: %d (caches in those repositories are not listed)\n", len(r.Errors))
 	}
+	writeSkippedSources(w, r.ActivitySources)
 	if r.Global != nil {
 		if err := writeGlobal(w, r.Global, home); err != nil {
 			return err
@@ -161,6 +174,14 @@ func WriteTable(w io.Writer, r Report, home string) error {
 	}
 	_, err := fmt.Fprintln(w, "Plonge only reports; it deleted nothing.")
 	return err
+}
+
+func writeSkippedSources(w io.Writer, sources []scan.Source) {
+	for _, s := range sources {
+		if s.Status == scan.SourceSkipped {
+			fmt.Fprintf(w, "Activity source skipped: %s (%s)\n", s.Name, s.Reason)
+		}
+	}
 }
 
 func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
@@ -235,6 +256,10 @@ func WriteClean(w io.Writer, r clean.Result, home string) error {
 		fmt.Fprintln(w)
 	}
 	n := r.NotSelected
+	if n.Busy.Caches > 0 {
+		fmt.Fprintf(w, "Not selected, an agent is working there: %s in %s\n",
+			HumanBytes(n.Busy.Bytes), plural(n.Busy.Caches, "cache"))
+	}
 	if n.Active.Caches > 0 {
 		fmt.Fprintf(w, "Not selected, active project: %s in %s (use --include-active)\n",
 			HumanBytes(n.Active.Bytes), plural(n.Active.Caches, "cache"))
@@ -249,6 +274,7 @@ func WriteClean(w io.Writer, r clean.Result, home string) error {
 	if r.Failed > 0 {
 		fmt.Fprintf(w, "Failed: %d\n", r.Failed)
 	}
+	writeSkippedSources(w, r.ActivitySources)
 	var err error
 	if r.Applied {
 		_, err = fmt.Fprintf(w, "Freed: %s\n", HumanBytes(r.FreedBytes))

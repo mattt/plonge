@@ -54,11 +54,26 @@ and no tracked file is inside it.
 A root that is not in a Git work tree is skipped.
 
 The report lists each cache with its size on disk, its project,
-the project's last Git activity, whether the project is quiet,
+the project's last activity and its source, whether the project is quiet,
 and the rule that matched.
-A project is quiet when its Git HEAD log has not changed
+A project is quiet when no source has seen activity
 for `quiet_hours` (by default, 24 hours).
 The totals at the end give the size of all caches and of quiet ones.
+
+Plonge reads activity from these sources and reports which one set each project's last activity:
+
+- `git`: the modification time of the project's Git HEAD log, else of `HEAD`.
+- `claude`: the newest transcript in `~/.claude/projects/`
+  (or `$CLAUDE_CONFIG_DIR/projects`) for the project or a directory below it.
+  Claude Code names each folder by replacing every character except letters and digits
+  with a hyphen, so a sibling such as `app-two` can also count for `app`.
+  That can only make a project look more active.
+- `paseo`: `paseo ls --json --global --background`.
+  A project with a `running` or `initializing` agent at or below it is busy.
+  Plonge shows `busy` in the report and never deletes in that project,
+  even with `--include-active`.
+
+A source that is missing or fails is skipped, and the report says so.
 
 Use `--json` to get the same data as JSON.
 
@@ -81,6 +96,7 @@ and `--min-size` (such as `--min-size 100MiB`) leaves out smaller caches.
 Right before each deletion, plonge checks again that the path is still a directory,
 is not a symlink, is inside its project,
 is ignored by Git, and holds no tracked file.
+It also asks Paseo again, once per project, before it deletes there.
 If a check does not pass, plonge skips the path and reports the reason.
 Plonge makes read-only files and directories writable when removal needs it,
 as Go's module cache does.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/mattt/plonge/internal/agents"
 	"github.com/mattt/plonge/internal/clean"
 	"github.com/mattt/plonge/internal/global"
 	"github.com/mattt/plonge/internal/mise"
@@ -28,6 +29,8 @@ type Inventory struct {
 	Sizes  [][]int64
 	Report report.Report
 	Now    time.Time
+	// Sources reports each source of agent activity.
+	Sources []scan.Source
 }
 
 // LoadRules reads the default and user rules.
@@ -55,8 +58,10 @@ func Inspect(ctx context.Context, sel Selection) (Inventory, error) {
 	}
 	paths = mise.DropNested(append(paths, sel.Roots...))
 	inv.Roots = scan.Run(ctx, paths, inv.Rules)
+	inv.Sources = agents.Apply(ctx, inv.Roots, env.Home, inv.Now)
 	inv.Sizes = measure(inv.Roots)
 	inv.Report = report.Build(inv.Roots, inv.Sizes, inv.Rules.QuietHours, broken, inv.Now)
+	inv.Report.ActivitySources = inv.Sources
 	if sel.Global {
 		inv.Report.Global = global.New(env.Home).List(ctx, inv.Rules.Global)
 	}
@@ -101,7 +106,9 @@ func Clean(ctx context.Context, opts CleanOptions) (clean.Result, Inventory, err
 		MinSize:       opts.MinSize,
 		QuietHours:    inv.Rules.QuietHours,
 		Now:           inv.Now,
+		StillBusy:     func(root string) bool { return agents.Busy(ctx, root) },
 	})
+	res.ActivitySources = inv.Sources
 	return res, inv, nil
 }
 
