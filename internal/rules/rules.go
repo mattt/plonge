@@ -29,6 +29,24 @@ type Rules struct {
 	// Skip are directory names that the walk never enters.
 	// A name in Names still matches; plonge reports it and does not enter it.
 	Skip []string
+	// Global are the caches outside any project.
+	Global []Global
+}
+
+// The kinds of a global rule.
+const (
+	KindPrune = "prune" // removes only what nothing uses
+	KindClear = "clear" // removes everything; the next build downloads it again
+)
+
+// Global describes a cache that a tool's own command cleans.
+type Global struct {
+	ID    string `toml:"id"`
+	Tool  string `toml:"tool"`  // the command that must be available
+	Path  string `toml:"path"`  // a command that prints the path, or a fixed path
+	Clean string `toml:"clean"` // the command that cleans the cache
+	Kind  string `toml:"kind"`
+	OS    string `toml:"os"` // when set, the rule applies only on this GOOS
 }
 
 type file struct {
@@ -36,6 +54,7 @@ type file struct {
 	QuietHours *float64            `toml:"quiet_hours"`
 	Beside     map[string][]string `toml:"beside"`
 	Skip       []string            `toml:"skip"`
+	Global     []Global            `toml:"global"`
 }
 
 // versionControlDirs hold a project's history, so no rule may name them as caches.
@@ -71,10 +90,48 @@ func parse(data, name string) (file, error) {
 			return f, fmt.Errorf("%s: invalid skip name %q", name, n)
 		}
 	}
+	seen := map[string]bool{}
+	for _, g := range f.Global {
+		if err := g.validate(); err != nil {
+			return f, fmt.Errorf("%s: %w", name, err)
+		}
+		if seen[g.ID] {
+			return f, fmt.Errorf("%s: global rule %q appears twice", name, g.ID)
+		}
+		seen[g.ID] = true
+	}
 	if f.QuietHours != nil && *f.QuietHours < 0 {
 		return f, fmt.Errorf("%s: quiet_hours must not be negative", name)
 	}
 	return f, nil
+}
+
+func (g Global) validate() error {
+	if g.ID == "" {
+		return fmt.Errorf("a global rule has no id")
+	}
+	if g.Tool == "" || len(strings.Fields(g.Tool)) != 1 {
+		return fmt.Errorf("global rule %q: tool must be one command name", g.ID)
+	}
+	if g.Kind != KindPrune && g.Kind != KindClear {
+		return fmt.Errorf("global rule %q: kind must be %q or %q", g.ID, KindPrune, KindClear)
+	}
+	if !g.fixedPath() && !g.startsWithTool(g.Path) {
+		return fmt.Errorf("global rule %q: path must be an absolute path, a ~/ path, or a %s command", g.ID, g.Tool)
+	}
+	if !g.startsWithTool(g.Clean) {
+		return fmt.Errorf("global rule %q: clean must be a %s command", g.ID, g.Tool)
+	}
+	return nil
+}
+
+func (g Global) fixedPath() bool {
+	return filepath.IsAbs(g.Path) || strings.HasPrefix(g.Path, "~/")
+}
+
+func (g Global) startsWithTool(cmd string) bool {
+	words := strings.Fields(cmd)
+	return len(words) > 0 && words[0] == g.Tool
 }
 
 // Default returns the built-in rules.
@@ -86,7 +143,8 @@ func Default() Rules {
 	return merge(Rules{Beside: map[string][]string{}}, f)
 }
 
-// merge adds the names and skip names in f to r, replaces each beside entry in f,
+// merge adds the names and skip names in f to r, replaces each beside entry
+// and each global rule with the same id, adds new global rules,
 // and sets the quiet period when f has one.
 func merge(r Rules, f file) Rules {
 	out := Rules{
@@ -94,6 +152,7 @@ func merge(r Rules, f file) Rules {
 		Beside:     make(map[string][]string, len(r.Beside)+len(f.Beside)),
 		QuietHours: r.QuietHours,
 		Skip:       slices.Clone(r.Skip),
+		Global:     slices.Clone(r.Global),
 	}
 	for k, v := range r.Beside {
 		out.Beside[k] = v
@@ -113,6 +172,14 @@ func merge(r Rules, f file) Rules {
 	}
 	if f.QuietHours != nil {
 		out.QuietHours = *f.QuietHours
+	}
+	for _, g := range f.Global {
+		i := slices.IndexFunc(out.Global, func(o Global) bool { return o.ID == g.ID })
+		if i >= 0 {
+			out.Global[i] = g
+		} else {
+			out.Global = append(out.Global, g)
+		}
 	}
 	slices.Sort(out.Names)
 	slices.Sort(out.Skip)

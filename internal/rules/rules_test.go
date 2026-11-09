@@ -150,3 +150,57 @@ func TestSkip(t *testing.T) {
 		}
 	}
 }
+
+func TestGlobal(t *testing.T) {
+	r, err := Load(writeRules(t, `
+[[global]]
+id = "uv"
+tool = "uv"
+path = "/fixed/uv"
+clean = "uv cache clean"
+kind = "clear"
+
+[[global]]
+id = "mine"
+tool = "mytool"
+path = "~/.mytool/cache"
+clean = "mytool gc --all"
+kind = "prune"
+os = "darwin"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Global{}
+	for _, g := range r.Global {
+		byID[g.ID] = g
+	}
+	if len(r.Global) != len(Default().Global)+1 {
+		t.Errorf("%d global rules", len(r.Global))
+	}
+	if g := byID["uv"]; g.Path != "/fixed/uv" || g.Kind != KindClear {
+		t.Errorf("uv = %+v", g)
+	}
+	if g := byID["mine"]; g.OS != "darwin" {
+		t.Errorf("mine = %+v", g)
+	}
+	if g := byID["pnpm"]; g.Clean != "pnpm store prune" {
+		t.Errorf("pnpm = %+v", g)
+	}
+
+	base := "tool = \"t\"\npath = \"t p\"\nclean = \"t c\"\nkind = \"prune\"\n"
+	bad := map[string]string{
+		"no id":        "[[global]]\n" + base,
+		"bad kind":     "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"t c\"\nkind = \"nuke\"\n",
+		"other clean":  "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"rm -rf /\"\nkind = \"prune\"\n",
+		"other path":   "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"echo /x\"\nclean = \"t c\"\nkind = \"prune\"\n",
+		"empty tool":   "[[global]]\nid = \"a\"\ntool = \"\"\npath = \"/x\"\nclean = \"t c\"\nkind = \"prune\"\n",
+		"unknown key":  "[[global]]\nid = \"a\"\nnope = 1\n" + base,
+		"duplicate id": "[[global]]\nid = \"a\"\n" + base + "[[global]]\nid = \"a\"\n" + base,
+	}
+	for name, body := range bad {
+		if _, err := Load(writeRules(t, body)); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+}

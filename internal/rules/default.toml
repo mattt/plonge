@@ -11,3 +11,79 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 dist = ["package.json"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
+
+# Global caches. Each command starts with the tool and runs without a shell.
+# prune removes only what nothing uses.
+# clear removes everything, so the next build downloads it again.
+
+# mise has no command that prints its data directory.
+[[global]]
+id = "mise-tools"
+tool = "mise"
+path = "~/.local/share/mise/installs"
+clean = "mise prune --tools"
+kind = "prune"
+
+[[global]]
+id = "mise-cache"
+tool = "mise"
+path = "mise cache path"
+clean = "mise cache prune"
+kind = "prune"
+
+[[global]]
+id = "uv"
+tool = "uv"
+path = "uv cache dir"
+clean = "uv cache prune"
+kind = "prune"
+
+[[global]]
+id = "go-modules"
+tool = "go"
+path = "go env GOMODCACHE"
+clean = "go clean -modcache"
+kind = "clear"
+
+[[global]]
+id = "go-build"
+tool = "go"
+path = "go env GOCACHE"
+clean = "go clean -cache"
+kind = "clear"
+
+[[global]]
+id = "npm"
+tool = "npm"
+path = "npm config get cache"
+clean = "npm cache clean --force"
+kind = "clear"
+
+[[global]]
+id = "pnpm"
+tool = "pnpm"
+path = "pnpm store path"
+clean = "pnpm store prune"
+kind = "prune"
+
+# These are the commands of Yarn 1. Yarn 2 and later have no "yarn cache dir".
+[[global]]
+id = "yarn"
+tool = "yarn"
+path = "yarn cache dir"
+clean = "yarn cache clean"
+kind = "clear"
+
+[[global]]
+id = "pip"
+tool = "pip"
+path = "pip cache dir"
+clean = "pip cache purge"
+kind = "clear"
+
+[[global]]
+id = "homebrew"
+tool = "brew"
+path = "brew --cache"
+clean = "brew cleanup --prune=all"
+kind = "clear"
