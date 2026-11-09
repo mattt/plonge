@@ -129,7 +129,7 @@ it runs only with `--include-clear`.
 
 | ID | Kind | Command |
 | --- | --- | --- |
-| `mise-tools` | prune | `mise prune --tools` (`mise ls --prunable` lists the versions) |
+| `mise-tools` | prune | `mise prune --tools --yes` |
 | `mise-cache` | prune | `mise cache prune` |
 | `uv` | prune | `uv cache prune` |
 | `pnpm` | prune | `pnpm store prune` |
@@ -144,6 +144,12 @@ Plonge runs a tool through `mise exec --` when `mise which` finds it from your h
 and otherwise from `PATH`, passing over mise's shims.
 It runs commands from your home directory, without a shell.
 A rule whose tool is missing is skipped and reported.
+
+mise does not count a tracked config that it cannot load,
+so a prune can remove a version that such a config pins.
+Plonge runs `mise prune --tools --dry-run` first,
+and skips `mise-tools` when mise reports that it cannot load a tracked config that still exists.
+The report and the JSON list those configs.
 
 On macOS, a built-in rule, `xcode-derived-data`, cleans stale Xcode build data.
 Xcode has no prune command,
@@ -160,8 +166,12 @@ in `rules.toml`:
 id = "mise-tools"
 tool = "mise"
 path = "~/data/mise/installs" # for a custom MISE_DATA_DIR
-clean = "mise prune --tools"
+clean = "mise prune --tools --yes"
 kind = "prune"
+check = "mise prune --tools --dry-run"
+check_env = ["MISE_QUIET=0", "MISE_LOG_LEVEL=info"]
+refuse = 'error loading tracked config file (?P<path>.+)$'
+refuse_reason = "tracked configs that mise cannot load"
 
 [[global]]
 id = "mytool"

@@ -17,12 +17,20 @@ venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 # clear removes everything, so the next build downloads it again.
 
 # mise has no command that prints its data directory.
+# A tracked config that mise cannot load does not keep its tools,
+# so a prune can remove a version that a project needs.
+# mise prints the load warnings only at the info log level or lower,
+# so the check sets that level even when the user turns the warnings off.
 [[global]]
 id = "mise-tools"
 tool = "mise"
 path = "~/.local/share/mise/installs"
-clean = "mise prune --tools"
+clean = "mise prune --tools --yes"
 kind = "prune"
+check = "mise prune --tools --dry-run"
+check_env = ["MISE_QUIET=0", "MISE_LOG_LEVEL=info"]
+refuse = 'error loading tracked config file (?P<path>.+)$'
+refuse_reason = "tracked configs that mise cannot load"
 
 [[global]]
 id = "mise-cache"
