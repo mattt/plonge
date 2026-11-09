@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/mise"
 	"github.com/mattt/plonge/internal/report"
 	"github.com/mattt/plonge/internal/rules"
@@ -24,8 +25,9 @@ This version only reports; it deletes nothing.
 
 Commands:
   scan    Report caches in mise projects and other roots
+  disk    Print the free space on your home directory's volume
 
-Run "plonge scan --help" for the options of scan.
+Run "plonge <command> --help" for the options of a command.
 `
 
 func main() {
@@ -43,6 +45,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "scan":
 		return runScan(args[1:], stdout, stderr)
+	case "disk":
+		return runDisk(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "plonge: unknown command %q\n\n%s", args[0], usage)
 		return 2
@@ -154,6 +158,65 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "plonge scan: %v\n", err)
 		return 1
+	}
+	return 0
+}
+
+const diskUsage = `Usage: plonge disk [--warn-below <size>]
+
+Disk prints the free space on your home directory's volume.
+With --warn-below, it prints one warning line only when free space is below
+the size, and always exits 0, so that hooks can call it.
+
+Options:
+`
+
+func runDisk(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("disk", flag.ContinueOnError)
+	var parseOut strings.Builder
+	fs.SetOutput(&parseOut)
+	warnBelow := fs.String("warn-below", "", "warn only when free space is below `size`, such as 20GiB")
+	fs.Usage = func() {
+		fmt.Fprint(fs.Output(), diskUsage)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			fs.SetOutput(stdout)
+			fs.Usage()
+			return 0
+		}
+		fmt.Fprint(stderr, parseOut.String())
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "plonge disk: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+	// A hook must not fail because of plonge, so --warn-below always exits 0.
+	failed := 1
+	if *warnBelow != "" {
+		failed = 0
+	}
+	var floor int64
+	if *warnBelow != "" {
+		var err error
+		if floor, err = disk.ParseSize(*warnBelow); err != nil {
+			fmt.Fprintf(stderr, "plonge disk: %v\n", err)
+			return failed
+		}
+	}
+	home := mise.EnvFromOS().Home
+	free, err := disk.Free(home)
+	if err != nil {
+		fmt.Fprintf(stderr, "plonge disk: %v\n", err)
+		return failed
+	}
+	if *warnBelow == "" {
+		fmt.Fprintf(stdout, "Free space on ~: %s\n", report.HumanBytes(free))
+	} else if free < floor {
+		fmt.Fprintf(stdout, "Warning: only %s free on ~, below %s. Run plonge scan to find caches.\n",
+			report.HumanBytes(free), report.HumanBytes(floor))
 	}
 	return 0
 }

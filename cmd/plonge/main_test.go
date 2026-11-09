@@ -116,6 +116,44 @@ func TestScanTable(t *testing.T) {
 	}
 }
 
+func TestDisk(t *testing.T) {
+	setup(t)
+	tests := []struct {
+		name string
+		args []string
+		code int
+		out  string
+		errs string
+	}{
+		{"plain", []string{"disk"}, 0, "Free space on ~: ", ""},
+		{"below the size", []string{"disk", "--warn-below", "1000000TiB"}, 0, "Warning: only", ""},
+		{"above the size", []string{"disk", "--warn-below", "0"}, 0, "", ""},
+		{"bad size still exits 0", []string{"disk", "--warn-below", "lots"}, 0, "", "invalid size"},
+	}
+	for _, tt := range tests {
+		var stdout, stderr bytes.Buffer
+		code := run(tt.args, &stdout, &stderr)
+		if code != tt.code || !strings.Contains(stdout.String(), tt.out) || !strings.Contains(stderr.String(), tt.errs) {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q", tt.name, code, stdout.String(), stderr.String())
+		}
+		if tt.out == "" && stdout.Len() != 0 {
+			t.Errorf("%s: stdout %q, want none", tt.name, stdout.String())
+		}
+	}
+}
+
+func TestDiskWarnBelowExitsZeroWhenHomeIsMissing(t *testing.T) {
+	setup(t)
+	t.Setenv("HOME", filepath.Join(t.TempDir(), "gone"))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"disk", "--warn-below", "1GiB"}, &stdout, &stderr); code != 0 {
+		t.Errorf("exit %d, want 0", code)
+	}
+	if code := run([]string{"disk"}, &stdout, &stderr); code != 1 {
+		t.Errorf("without --warn-below, exit %d, want 1", code)
+	}
+}
+
 func TestUsage(t *testing.T) {
 	tests := []struct {
 		args []string
@@ -128,6 +166,8 @@ func TestUsage(t *testing.T) {
 		{[]string{"clean"}, 2, ""},
 		{[]string{"scan", "--no-mise"}, 2, ""},
 		{[]string{"scan", "extra"}, 2, ""},
+		{[]string{"disk", "--help"}, 0, "--warn-below"},
+		{[]string{"disk", "extra"}, 2, ""},
 	}
 	for _, tt := range tests {
 		var stdout, stderr bytes.Buffer

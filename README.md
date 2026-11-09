@@ -63,6 +63,20 @@ The totals at the end give the size of all caches and of quiet ones.
 
 Use `--json` to get the same data as JSON.
 
+## Disk
+
+`plonge disk` prints the free space on your home directory's volume.
+
+```console
+plonge disk
+plonge disk --warn-below 20GiB
+```
+
+With `--warn-below`, plonge prints one warning line only when free space
+is below that size, and it always exits 0, so that hooks can call it.
+Sizes accept `KiB`, `MiB`, `GiB`, and `TiB` (and `K`, `M`, `G`, and `T`) as powers of 1024,
+and `KB`, `MB`, `GB`, and `TB` as powers of 1000.
+
 ## Rules
 
 Plonge has these default rules:
