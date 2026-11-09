@@ -16,6 +16,23 @@ See [What Plonge covers](docs/coverage.md) for tool coverage and known gaps.
 
 ## Install
 
+With Homebrew:
+
+```console
+brew install mattt/tap/plonge
+```
+
+With mise, through its `github` backend:
+
+```console
+mise use -g github:mattt/plonge
+```
+
+Or download the archive for your platform from the
+[releases page](https://github.com/mattt/plonge/releases)
+and put the `plonge` binary on your `PATH`.
+Archives are available for macOS and Linux, on amd64 and arm64.
+
 With mise, through its `go` backend:
 
 ```console

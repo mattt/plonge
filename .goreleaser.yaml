@@ -1,0 +1,35 @@
+version: 2
+
+project_name: plonge
+
+builds:
+  - main: ./cmd/plonge
+    binary: plonge
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+# A separate Homebrew updater depends on the archive and checksum names.
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE.md
+      - README.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+release:
+  mode: keep-existing
+  # GoReleaser always sets an existing release's title to this template.
+  name_template: "{{ .Version }}"

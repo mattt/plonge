@@ -29,6 +29,7 @@ Commands:
   clean   Delete caches in quiet projects (a dry run unless --apply)
   disk    Print the free space on your home directory's volume
   mcp     Serve scan, clean, and disk to coding agents over stdio
+  version Print the version of Plonge (also --version)
 
 Run "plonge <command> --help" for the options of a command.
 `
@@ -46,6 +47,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
+	case "-version", "--version", "version":
+		return runVersion(args[1:], stdout, stderr)
 	case "scan":
 		return runScan(args[1:], stdout, stderr)
 	case "clean":
