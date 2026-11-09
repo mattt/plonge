@@ -477,6 +477,8 @@ func TestUsage(t *testing.T) {
 		{[]string{"scan", "extra"}, 2, ""},
 		{[]string{"disk", "--help"}, 0, "--warn-below"},
 		{[]string{"disk", "extra"}, 2, ""},
+		{[]string{"mcp", "--help"}, 0, "stdio"},
+		{[]string{"mcp", "extra"}, 2, ""},
 	}
 	for _, tt := range tests {
 		var stdout, stderr bytes.Buffer

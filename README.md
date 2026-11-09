@@ -191,6 +191,25 @@ is below that size, and it always exits 0, so that hooks can call it.
 Sizes accept `KiB`, `MiB`, `GiB`, and `TiB` (and `K`, `M`, `G`, and `T`) as powers of 1024,
 and `KB`, `MB`, `GB`, and `TB` as powers of 1000.
 
+## MCP server
+
+`plonge mcp` serves plonge to coding agents over stdio, with three tools:
+
+- `scan` reports caches; `global: true` adds the global caches.
+- `clean` is a dry run unless `apply: true`.
+  It takes `include_active`, `min_size`, `global`, and `include_clear`,
+  with the same rules as the command line.
+- `disk` reports free space.
+
+The tool descriptions tell agents to show the dry run to the user
+and get approval before `apply`.
+
+To add the server to Claude Code:
+
+```console
+claude mcp add plonge -- plonge mcp
+```
+
 ## Rules
 
 Plonge has these default rules:

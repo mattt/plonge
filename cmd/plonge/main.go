@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/engine"
 	"github.com/mattt/plonge/internal/global"
+	"github.com/mattt/plonge/internal/mcpserver"
 	"github.com/mattt/plonge/internal/mise"
 	"github.com/mattt/plonge/internal/report"
 )
@@ -25,6 +28,7 @@ Commands:
   scan    Report caches in mise projects and other roots
   clean   Delete caches in quiet projects (a dry run unless --apply)
   disk    Print the free space on your home directory's volume
+  mcp     Serve scan, clean, and disk to coding agents over stdio
 
 Run "plonge <command> --help" for the options of a command.
 `
@@ -48,6 +52,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runClean(args[1:], stdout, stderr)
 	case "disk":
 		return runDisk(args[1:], stdout, stderr)
+	case "mcp":
+		return runMCP(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "plonge: unknown command %q\n\n%s", args[0], usage)
 		return 2
@@ -233,6 +239,25 @@ func runClean(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if res.Failed > 0 || len(res.Errors) > 0 {
+		return 1
+	}
+	return 0
+}
+
+const mcpUsage = `Usage: plonge mcp
+
+Mcp serves the scan, clean, and disk tools to coding agents over stdio.
+`
+
+func runMCP(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	if code, ok := parse(fs, mcpUsage, args, stdout, stderr); !ok {
+		return code
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := mcpserver.Serve(ctx); err != nil && ctx.Err() == nil {
+		fmt.Fprintf(stderr, "plonge mcp: %v\n", err)
 		return 1
 	}
 	return 0
