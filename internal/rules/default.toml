@@ -3,21 +3,22 @@ names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
          "DerivedData", "__pycache__", "dist", "node_modules", "target", "venv"]
 quiet_hours = 24
 
-# Directories that the walk never enters.
+# Do not scan inside these directories.
 skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
-# A generic name counts only next to one of these project files.
+# Match these names only when a listed project file is in the same directory.
 [beside]
 dist = ["package.json"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 
 # Global caches. Each command starts with the tool and runs without a shell.
-# prune removes only what nothing uses.
-# clear removes everything, so the next build downloads it again.
+# prune uses the tool's policy to select unused or stale data.
+# clear can remove cached data still in use and requires --include-clear.
 
-# mise has no command that prints its data directory.
-# A tracked config that mise cannot load does not keep its tools,
+# This fixed path assumes mise's default installs directory.
+# Override this rule in rules.toml if mise uses a different directory.
+# A tracked config that mise cannot load does not protect its tool versions,
 # so a prune can remove a version that a project needs.
 # mise prints the load warnings only at the info log level or lower,
 # so the check sets that level even when the user turns the warnings off.
@@ -75,7 +76,7 @@ path = "pnpm store path"
 clean = "pnpm store prune"
 kind = "prune"
 
-# These are the commands of Yarn 1. Yarn 2 and later have no "yarn cache dir".
+# Yarn 1 only. Yarn 2 and later do not provide "yarn cache dir".
 [[global]]
 id = "yarn"
 tool = "yarn"

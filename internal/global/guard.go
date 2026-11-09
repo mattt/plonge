@@ -97,7 +97,7 @@ func (r Runner) evaluate(ctx context.Context, g *guard) (reason string, refused 
 func (r Runner) listTargets(ctx context.Context, e *Entry, t tool, g rules.Global) {
 	names, paths, err := r.targets(ctx, t, g)
 	if err != nil {
-		e.Note = "size is the whole folder: cannot list what would be removed: " + err.Error()
+		e.Note = "size is the whole directory: cannot list what would be removed: " + err.Error()
 		return
 	}
 	e.Targets, e.targetPaths, e.targeted = names, paths, true

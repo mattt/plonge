@@ -161,7 +161,7 @@ func TestClean(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"~/code/app/node_modules", "would delete", "Would delete:", "in 1 cache", "Dry run"} {
+	for _, want := range []string{"~/code/app/node_modules", "would delete", "Selected size:", "in 1 cache", "Dry run"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run lacks %q:\n%s", want, out)
 		}
@@ -174,7 +174,7 @@ func TestClean(t *testing.T) {
 	if code := run(append(args, "--apply"), &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Freed: ") {
+	if !strings.Contains(stdout.String(), "Estimated freed: ") {
 		t.Errorf("output:\n%s", stdout.String())
 	}
 	if _, err := os.Stat(cache); !os.IsNotExist(err) {
@@ -262,7 +262,7 @@ func TestCleanKeepsBusyRootAndReportsSources(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"an agent is working there", "1 cache", "Activity source skipped: claude", "Freed: 0 B"} {
+	for _, want := range []string{"busy project (Paseo)", "1 cache", "Activity source skipped: claude", "Estimated freed: 0 B"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -303,7 +303,7 @@ func TestScanTableShowsActivitySource(t *testing.T) {
 	if code := run([]string{"scan", "--no-mise", "--root", project}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	for _, want := range []string{"SOURCE", " git ", "Activity source skipped: paseo (paseo is not on PATH)"} {
+	for _, want := range []string{"Source", " git ", "Activity source skipped: paseo (paseo is not on PATH)"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, stdout.String())
 		}
@@ -384,7 +384,7 @@ func TestCleanGlobal(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	if out := stdout.String(); !strings.Contains(out, "go clean -cache") || !strings.Contains(out, "--include-clear") ||
-		!strings.Contains(out, "Dry run") {
+		!strings.Contains(out, "Dry run; no cleanup action ran.") {
 		t.Errorf("dry run:\n%s", out)
 	}
 
@@ -403,7 +403,7 @@ func TestCleanGlobal(t *testing.T) {
 	if _, err := os.Stat(blob); !os.IsNotExist(err) {
 		t.Errorf("the blob is still there: %v", err)
 	}
-	if out := stdout.String(); !strings.Contains(out, "Freed: ") || strings.Contains(out, "Freed: 0 B") {
+	if out := stdout.String(); !strings.Contains(out, "Estimated freed: ") || strings.Contains(out, "Estimated freed: 0 B") {
 		t.Errorf("output:\n%s", out)
 	}
 }

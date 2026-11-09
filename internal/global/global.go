@@ -262,7 +262,7 @@ func (r Runner) Clean(ctx context.Context, entries []Entry, opts Options) Result
 		case e.Skipped != "":
 			o.Status, o.Reason = Skipped, e.Skipped
 		case e.Kind == rules.KindClear && !opts.IncludeClear:
-			o.Status, o.Reason = Skipped, "a clear rule; needs --include-clear"
+			o.Status, o.Reason = Skipped, "clear rule requires --include-clear"
 		case opts.Apply:
 			r.apply(ctx, &o)
 		}

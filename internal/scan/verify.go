@@ -41,7 +41,7 @@ func Verify(ctx context.Context, root string, c Candidate) (reason string, err e
 		return "", err
 	}
 	if len(kept) == 0 {
-		return "is no longer ignored by Git, or now holds a tracked file", nil
+		return "is no longer ignored by Git, or now contains a tracked file", nil
 	}
 	return "", nil
 }

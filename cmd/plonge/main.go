@@ -25,7 +25,7 @@ const usage = `Usage: plonge <command> [options]
 Plonge finds the caches that developer tools and coding agents leave on disk.
 
 Commands:
-  scan    Report caches in mise projects and other roots
+  scan    Report project caches; delete nothing
   clean   Delete caches in quiet projects (a dry run unless --apply)
   disk    Print the free space on your home directory's volume
   mcp     Serve scan, clean, and disk to coding agents over stdio
@@ -62,8 +62,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 const scanUsage = `Usage: plonge scan [--root <dir>]... [--no-mise] [--global] [--json]
 
-Scan reports the caches in each project that mise tracks and in each --root.
-It only reads; it deletes nothing.
+Scan reports caches in projects recorded by mise and in each --root directory.
+A root is a directory to scan; it must be in a Git work tree.
+Scan deletes nothing. With --global, it also reports global caches.
 
 Options:
 `
@@ -169,13 +170,17 @@ const cleanUsage = `Usage: plonge clean [--apply] [--include-active] [--min-size
                     [--root <dir>]... [--no-mise] [--json]
        plonge clean --global [--apply] [--include-clear] [--json]
 
-Clean selects caches as scan does and prints what it would delete.
-With --apply, it deletes them. Only caches in quiet projects qualify,
-unless you give --include-active.
+Clean selects project caches as scan does. Without --apply, it deletes nothing.
+With --apply, it deletes selected directories that Git ignores and that contain
+no tracked files. A quiet project has known activity at least quiet_hours old
+(default: 24 hours). Active projects have newer or unknown activity.
+Use --include-active to select them too. Projects that Paseo reports as busy
+(with a running or initializing agent) are excluded.
 
 With --global, clean works only on caches outside projects:
-it lists each tool's cleanup command, and with --apply it runs them.
-A clear rule runs only with --include-clear.
+it lists each rule's cleanup action, and with --apply it runs eligible actions.
+Global cleanup does not check project activity. A clear rule requires
+--include-clear because it can remove cached data still in use.
 
 Options:
 `
@@ -184,10 +189,10 @@ func runClean(args []string, stdout, stderr io.Writer) int {
 	var opts scanOptions
 	fs := flag.NewFlagSet("clean", flag.ContinueOnError)
 	opts.bind(fs)
-	apply := fs.Bool("apply", false, "delete the caches; without it, only print them")
-	includeActive := fs.Bool("include-active", false, "also delete caches in projects that are not quiet")
+	apply := fs.Bool("apply", false, "delete selected caches; without it, show a dry run")
+	includeActive := fs.Bool("include-active", false, "also select active projects; exclude busy projects")
 	minSize := fs.String("min-size", "", "skip caches smaller than `size`, such as 100MiB")
-	withGlobal := fs.Bool("global", false, "run the cleanup commands of global caches instead")
+	withGlobal := fs.Bool("global", false, "select global cleanup actions instead of project caches")
 	includeClear := fs.Bool("include-clear", false, "with --global, also run clear rules")
 	if code, ok := parse(fs, cleanUsage, args, stdout, stderr); !ok {
 		return code
@@ -246,7 +251,7 @@ func runClean(args []string, stdout, stderr io.Writer) int {
 
 const mcpUsage = `Usage: plonge mcp
 
-Mcp serves the scan, clean, and disk tools to coding agents over stdio.
+Serve the scan, clean, and disk tools over standard input and output (stdio).
 `
 
 func runMCP(args []string, stdout, stderr io.Writer) int {
@@ -296,9 +301,10 @@ func runCleanGlobal(opts global.Options, asJSON bool, stdout, stderr io.Writer) 
 
 const diskUsage = `Usage: plonge disk [--warn-below <size>]
 
-Disk prints the free space on your home directory's volume.
-With --warn-below, it prints one warning line only when free space is below
-the size, and always exits 0, so that hooks can call it.
+Print free space on your home directory's volume.
+With a nonempty --warn-below value, print a warning when free space is below
+that size. Size and disk errors go to standard error and exit 0 in this mode.
+Command-line syntax errors still exit 2.
 
 Options:
 `

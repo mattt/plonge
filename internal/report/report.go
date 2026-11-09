@@ -140,7 +140,7 @@ func WriteJSON(w io.Writer, r any) error {
 func WriteTable(w io.Writer, r Report, home string) error {
 	if len(r.Caches) > 0 {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "PATH\tSIZE\tPROJECT\tLAST ACTIVITY\tSOURCE\tQUIET\tRULE")
+		fmt.Fprintln(tw, "Path\tSize\tProject\tLast activity\tSource\tQuiet\tRule")
 		for _, c := range r.Caches {
 			quiet := "no"
 			if c.Busy {
@@ -172,7 +172,7 @@ func WriteTable(w io.Writer, r Report, home string) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(w, "Plonge only reports; it deleted nothing.")
+	_, err := fmt.Fprintln(w, "Scan deleted nothing.")
 	return err
 }
 
@@ -204,7 +204,7 @@ func writeTargets(w io.Writer, e global.Entry) {
 func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
 	fmt.Fprintln(w, "\nGlobal caches:")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSIZE\tKIND\tPATH\tCOMMAND")
+	fmt.Fprintln(tw, "ID\tSize\tKind\tPath\tAction")
 	var total int64
 	n := 0
 	for _, e := range entries {
@@ -233,7 +233,7 @@ func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
 // WriteGlobalClean prints the outcome of a global clean and ends with the space freed.
 func WriteGlobalClean(w io.Writer, r global.Result, home string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSIZE\tKIND\tCOMMAND\tSTATUS")
+	fmt.Fprintln(tw, "ID\tSize\tKind\tAction\tStatus")
 	for _, o := range r.Outcomes {
 		status := o.Status
 		if o.Reason != "" {
@@ -256,10 +256,10 @@ func WriteGlobalClean(w io.Writer, r global.Result, home string) error {
 		fmt.Fprintf(w, "Failed: %d\n", r.Failed)
 	}
 	if r.Applied {
-		_, err := fmt.Fprintf(w, "Freed: %s\n", HumanBytes(r.FreedBytes))
+		_, err := fmt.Fprintf(w, "Estimated freed: %s\n", HumanBytes(r.FreedBytes))
 		return err
 	}
-	_, err := fmt.Fprintln(w, "Dry run; no command ran. Use --apply to run them.")
+	_, err := fmt.Fprintln(w, "Dry run; no cleanup action ran. Use --apply to run eligible actions.")
 	return err
 }
 
@@ -267,7 +267,7 @@ func WriteGlobalClean(w io.Writer, r global.Result, home string) error {
 func WriteClean(w io.Writer, r clean.Result, home string) error {
 	if len(r.Items) > 0 {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "PATH\tSIZE\tPROJECT\tRULE\tSTATUS")
+		fmt.Fprintln(tw, "Path\tSize\tProject\tRule\tStatus")
 		for _, it := range r.Items {
 			status := it.Status
 			if it.Reason != "" {
@@ -283,11 +283,11 @@ func WriteClean(w io.Writer, r clean.Result, home string) error {
 	}
 	n := r.NotSelected
 	if n.Busy.Caches > 0 {
-		fmt.Fprintf(w, "Not selected, an agent is working there: %s in %s\n",
+		fmt.Fprintf(w, "Not selected, busy project (Paseo): %s in %s\n",
 			HumanBytes(n.Busy.Bytes), plural(n.Busy.Caches, "cache"))
 	}
 	if n.Active.Caches > 0 {
-		fmt.Fprintf(w, "Not selected, active project: %s in %s (use --include-active)\n",
+		fmt.Fprintf(w, "Not selected, active project (recent or unknown activity): %s in %s (use --include-active)\n",
 			HumanBytes(n.Active.Bytes), plural(n.Active.Caches, "cache"))
 	}
 	if n.BelowSize.Caches > 0 {
@@ -303,9 +303,9 @@ func WriteClean(w io.Writer, r clean.Result, home string) error {
 	writeSkippedSources(w, r.ActivitySources)
 	var err error
 	if r.Applied {
-		_, err = fmt.Fprintf(w, "Freed: %s\n", HumanBytes(r.FreedBytes))
+		_, err = fmt.Fprintf(w, "Estimated freed: %s\n", HumanBytes(r.FreedBytes))
 	} else {
-		fmt.Fprintf(w, "Would delete: %s in %s\n", HumanBytes(r.Selected.Bytes), plural(r.Selected.Caches, "cache"))
+		fmt.Fprintf(w, "Selected size: %s in %s\n", HumanBytes(r.Selected.Bytes), plural(r.Selected.Caches, "cache"))
 		_, err = fmt.Fprintln(w, "Dry run; nothing was deleted. Use --apply to delete.")
 	}
 	return err

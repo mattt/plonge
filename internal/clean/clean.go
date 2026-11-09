@@ -129,7 +129,7 @@ func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) 
 				}
 			}
 			if busy[p.root] {
-				p.item.Status, p.item.Reason = Skipped, "an agent is now working in this project"
+				p.item.Status, p.item.Reason = Skipped, "Paseo now reports a running or initializing agent in this project"
 			} else {
 				apply(ctx, &p)
 			}

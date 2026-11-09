@@ -16,13 +16,13 @@ import (
 	"github.com/mattt/plonge/internal/report"
 )
 
-const scanDescription = `Report the caches that developer tools and coding agents leave on disk, with their sizes, projects, and last activity. It only reads. With global, it also lists caches outside projects and the command that cleans each one. Show the sizes to the user before you suggest a cleanup.`
+const scanDescription = `Report the caches that developer tools and coding agents leave on disk, with their sizes, projects, and last activity. It deletes nothing. A project is a root directory recorded by mise. With global, it also lists caches outside projects and each rule's cleanup action. Show the sizes to the user before you suggest a cleanup.`
 
 const cleanDescription = `Delete caches. This is a dry run unless apply is true. Always call it first without apply, show the dry run to the user, and get the user's approval before you call it with apply: true.
 
-By default it selects caches in quiet projects; include_active adds caches in other projects, and min_size (such as "100MiB") leaves out smaller ones. It never deletes in a project where an agent is running.
+A quiet project has known activity at least quiet_hours old (default: 24 hours). Active projects have newer or unknown activity; include_active selects them too. min_size (such as "100MiB") leaves out smaller caches. A busy project has a running or initializing Paseo agent and is excluded. If Paseo is unavailable, its busy check provides no protection.
 
-With global, it works only on caches outside projects and runs each tool's cleanup command. Rules of kind clear remove everything, so the next build downloads it again; they run only with include_clear. Tell the user this before you ask to include them.`
+With global, it selects only global cleanup actions, without checking project activity. apply runs eligible actions. A prune rule uses the tool's cleanup policy; a clear rule can also remove cached data still in use. Clear rules require include_clear. Later commands may need to download dependencies or rebuild files. Show this effect before asking for approval. Sizes and freed space are estimates.`
 
 const diskDescription = `Report the free space on the volume of the user's home directory. It only reads.`
 
@@ -32,10 +32,10 @@ type scanInput struct {
 
 type cleanInput struct {
 	Apply         bool   `json:"apply,omitempty" jsonschema:"delete; only after the user approves the dry run"`
-	IncludeActive bool   `json:"include_active,omitempty" jsonschema:"also select caches in projects that are not quiet"`
-	MinSize       string `json:"min_size,omitempty" jsonschema:"leave out caches smaller than this size, such as 100MiB"`
+	IncludeActive bool   `json:"include_active,omitempty" jsonschema:"also select active projects; exclude busy projects; requires global to be false"`
+	MinSize       string `json:"min_size,omitempty" jsonschema:"skip project caches smaller than this size, such as 100MiB; requires global to be false"`
 	Global        bool   `json:"global,omitempty" jsonschema:"work only on caches outside projects"`
-	IncludeClear  bool   `json:"include_clear,omitempty" jsonschema:"with global, also run rules that remove everything"`
+	IncludeClear  bool   `json:"include_clear,omitempty" jsonschema:"with global, also select clear rules, which can remove cached data still in use"`
 }
 
 type diskInput struct{}

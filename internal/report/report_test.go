@@ -115,7 +115,7 @@ func TestWriteTable(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"PATH", "~/code/old/.venv", "4.0 KiB", "~/code/old", "3d ago", "yes", "dist beside package.json",
+		"Path", "~/code/old/.venv", "4.0 KiB", "~/code/old", "3d ago", "yes", "dist beside package.json",
 		"Total: 9.0 KiB in 3 caches",
 		"Quiet for 24h or more: 4.0 KiB in 1 cache",
 		"Roots: 2 scanned, 1 skipped",
@@ -177,7 +177,7 @@ func TestWriteGlobalRefusedAndTargets(t *testing.T) {
 	err := writeGlobal(&buf, []global.Entry{
 		{ID: "a", Skipped: "configs: 1", Refused: []string{"~/x/mise.toml"}},
 		{ID: "b", Command: "b gc", Targets: []string{"bun@1", "go@2"}},
-		{ID: "c", Command: "c gc", Note: "size is the whole folder"},
+		{ID: "c", Command: "c gc", Note: "size is the whole directory"},
 	}, "/home")
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestWriteGlobalRefusedAndTargets(t *testing.T) {
 	for _, want := range []string{
 		"Skipped a: configs: 1\n  ~/x/mise.toml\n",
 		"b would remove: bun@1, go@2\n",
-		"c: size is the whole folder\n",
+		"c: size is the whole directory\n",
 	} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, buf.String())

@@ -188,7 +188,7 @@ func TestMiseFallsBackToFolderSize(t *testing.T) {
 			}
 			fakeMiseTargets(t, ":", listing)
 			e := r.List(context.Background(), []rules.Global{miseToolsRule(t)})[0]
-			if e.Skipped != "" || e.Bytes < 50_000 || len(e.Targets) != 0 || !strings.Contains(e.Note, "whole folder") {
+			if e.Skipped != "" || e.Bytes < 50_000 || len(e.Targets) != 0 || !strings.Contains(e.Note, "whole directory") {
 				t.Errorf("entry = %+v", e)
 			}
 		})
