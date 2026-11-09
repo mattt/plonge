@@ -412,3 +412,8 @@ mise exec -- make check
 `make build` writes `bin/plonge`.
 `make lint` runs `gofmt -l` and `go vet`.
 `make test` runs the tests with gotestsum.
+
+## License
+
+This project is available under the MIT license.
+See the LICENSE file for more info.
