@@ -1,12 +1,16 @@
 # Plonge
 
-Plonge finds the caches that developer tools and coding agents
-leave on disk, with rules that you can extend.
+Plonge finds developer caches, downloaded dependencies, and build output
+that its rules can clean up.
 It pairs with [mise](https://mise.jdx.dev/):
 mise en place is the preparation, and the plonge is where the dishes get done.
 
-`plonge scan` reads your projects and prints what it finds; it deletes nothing.
-`plonge clean` deletes what it finds, and only when you give `--apply`.
+`plonge scan` and `plonge clean` without `--apply` delete nothing.
+`plonge clean --apply` deletes selected project cache directories
+only if Git ignores them and they contain no tracked files.
+It excludes active and busy projects by default.
+`plonge clean --global --apply` instead runs global cleanup actions,
+which do not use those project checks.
 
 ## Install
 
@@ -22,94 +26,118 @@ With Go 1.26 or later:
 go install github.com/mattt/plonge/cmd/plonge@latest
 ```
 
-Plonge runs `git`, so Git must be on your `PATH`.
+Project scans need Git on `PATH`.
+Global cleanup needs the tool named by each rule.
+The `disk` command supports macOS and Linux.
 
-## Scan
+## Try a safe run
 
 ```console
 plonge scan
+plonge clean
 ```
 
-Plonge gets your projects from mise.
-mise records each config file that it loads
-in `$MISE_STATE_DIR/tracked-configs`
-(by default, `~/.local/state/mise/tracked-configs`).
-Plonge maps each file to its project root,
-skips mise's global config and links whose target is gone,
-and drops a root that is inside another root.
-
-Use `--root` to add a directory; you can give it more than once.
-Use `--no-mise` to scan only the `--root` directories.
+Plonge gets project directories from mise's record of loaded config files.
+A root is a directory to scan.
+The report calls each root a project, including any directories below it.
+Use `--root` to add a root, or `--no-mise` to use only the roots you give.
+Each root must be in a Git work tree.
+For example, from a project's directory:
 
 ```console
-plonge scan --root ~/Code/scratch
-plonge scan --no-mise --root ~/Code
+plonge scan --no-mise --root .
 ```
 
-In each root, plonge looks for directories with a cache name,
+A cache is a directory whose name matches a rule,
 such as `node_modules` or `.venv`.
-It does not follow symlinks or descend into a cache that it found.
-A directory counts as a cache only when Git ignores it
-and no tracked file is inside it.
-A root that is not in a Git work tree is skipped.
+Plonge reports it only if Git ignores it and it contains no tracked files.
+A rule defines a cache name, any required project file,
+or a global cleanup action.
 
-The report lists each cache with its size on disk, its project,
-the project's last activity and its source, whether the project is quiet,
-and the rule that matched.
-A project is quiet when no source has seen activity
-for `quiet_hours` (by default, 24 hours).
-The totals at the end give the size of all caches and of quiet ones.
+A quiet project has a known last activity time at least `quiet_hours` old
+(24 hours by default).
+An active project has more recent activity or an unknown activity time.
+A busy project has a Paseo agent with status `running` or `initializing`
+in the project or a directory below it.
+Busy projects are excluded from project cleanup even with `--include-active`.
+These states depend on the [activity sources](#project-discovery-and-activity),
+not on whether a build or editor is running.
 
-Plonge reads activity from these sources and reports which one set each project's last activity:
+`scan` lists sizes, projects, last activity, activity sources, and matched rules.
+`clean` shows which caches qualify for deletion.
+Use `--json` with either command for structured output.
 
-- `git`: the modification time of the project's Git HEAD log, else of `HEAD`.
-- `claude`: the newest transcript in `~/.claude/projects/`
-  (or `$CLAUDE_CONFIG_DIR/projects`) for the project or a directory below it.
-  Claude Code names each folder by replacing every character except letters and digits
-  with a hyphen, so a sibling such as `app-two` can also count for `app`.
-  That can only make a project look more active.
-- `paseo`: `paseo ls --json --global --background`.
-  A project with a `running` or `initializing` agent at or below it is busy.
-  Plonge shows `busy` in the report and never deletes in that project,
-  even with `--include-active`.
+## Delete project caches
 
-A source that is missing or fails is skipped, and the report says so.
-
-Use `--json` to get the same data as JSON.
-
-## Clean
+Review the dry run, then add `--apply` with the same selection options:
 
 ```console
 plonge clean
 plonge clean --apply
 ```
 
-`plonge clean` selects caches as `scan` does and takes the same
-`--root`, `--no-mise`, and `--json` options.
-By default it is a dry run: it prints what it would delete and the total.
-`--apply` deletes.
+By default, only caches in quiet projects qualify.
+`--include-active` also selects active projects.
+`--min-size 100MiB` skips caches smaller than 100 MiB.
+You can repeat `--root`; `--no-mise` requires at least one root.
 
-Only caches in quiet projects qualify.
-`--include-active` adds the others,
-and `--min-size` (such as `--min-size 100MiB`) leaves out smaller caches.
+Before each deletion, Plonge checks that the path is still a directory,
+is not a symlink, is inside its root,
+is ignored by Git, and contains no tracked files.
+It asks Paseo again once per project, before the first deletion there.
+If a path check does not pass, Plonge skips the path or reports an error.
+Plonge can make read-only files and directories writable to remove them.
+It continues after deletion errors and exits with a nonzero status.
 
-Right before each deletion, plonge checks again that the path is still a directory,
-is not a symlink, is inside its project,
-is ignored by Git, and holds no tracked file.
-It also asks Paseo again, once per project, before it deletes there.
-If a check does not pass, plonge skips the path and reports the reason.
-Plonge makes read-only files and directories writable when removal needs it,
-as Go's module cache does.
-After an error, it reports the error, goes on, and exits with a non-zero status.
-It ends with the space freed.
-Sizes count each hard-linked file once,
-so a cache whose files are also linked elsewhere can free less than its size.
+The report estimates the space freed; it does not measure volume free space.
+On Unix, sizes use allocated blocks and count a hard-linked file once per cache.
+On other platforms, sizes use file lengths.
+Files linked elsewhere, filesystem snapshots, and changes during cleanup
+can affect how much space becomes available.
+Global size totals can also overlap.
+Use `plonge disk` to check free space on your home directory's volume.
+
+## Project discovery and activity
+
+mise records loaded config files in `$MISE_STATE_DIR/tracked-configs`,
+or `$XDG_STATE_HOME/mise/tracked-configs`,
+with `~/.local/state/mise/tracked-configs` as the default.
+Plonge maps each config path to a project root.
+It skips global and system configs and unreadable or broken links,
+and removes duplicate roots and roots inside another root.
+A root outside a Git work tree is skipped,
+even if it contains Git repositories.
+
+The scan does not follow directory symlinks or enter a matched cache.
+The [rules](#rules) also exclude some directory names from the scan.
+Nested Git repositories use their own ignore and tracked-file checks,
+but share the root's activity status.
+
+Plonge uses the newest activity it can find from these sources:
+
+- `git`: the modification time of the root's Git HEAD log,
+  or of `HEAD` if the log is unavailable.
+  Uncommitted edits and build processes do not update this activity time.
+- `claude`: the newest transcript modification time under
+  `~/.claude/projects/`, or `$CLAUDE_CONFIG_DIR/projects`.
+  Plonge matches encoded directory names for the root and its descendants.
+  This can also match a sibling such as `app-two` for a root named `app`,
+  which can only make the root appear more active.
+- `paseo`: `paseo ls --json --global --background`.
+  A busy project gets the scan time as its last activity time.
+
+If Claude or Paseo is missing or its initial query fails,
+Plonge reports that source as skipped and continues.
+If Paseo is unavailable, Plonge cannot detect busy projects through it.
+A failed Paseo recheck before deletion also allows cleanup to continue,
+but is not reported.
 
 ## Global caches
 
-Some caches live outside your projects, and the tool that owns each one
-knows best how to clean it.
-`plonge scan --global` adds a section with each rule's path, size, kind, and command.
+Global caches are stored outside projects.
+Plonge uses cleanup commands from their tools,
+plus a built-in rule for Xcode build data on macOS.
+`plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
 plonge scan --global
@@ -120,12 +148,18 @@ plonge clean --global --apply --include-clear
 
 `plonge clean --global` works only on global caches and leaves your projects alone.
 By default it lists the commands as a dry run.
-`--apply` runs them, measures each cache again, and reports what was freed.
+`--apply` runs eligible actions and estimates the space freed.
+Global cleanup does not use the project activity or Git checks.
+It cannot be combined with `--root`, `--no-mise`, `--include-active`, or `--min-size`.
+Lookup and check commands run even during a scan or dry run.
 
 Each rule has a kind.
-A `prune` rule removes only what nothing uses.
-A `clear` rule removes everything, so the next build downloads it again;
-it runs only with `--include-clear`.
+A `prune` rule uses the tool's policy to select unused or stale data.
+For example, `mise cache prune` uses cache age.
+A `clear` rule can remove cached data still in use
+and requires `--include-clear`.
+Later commands may need to download dependencies or rebuild files.
+Neither kind guarantees that the whole reported size will be freed.
 
 | ID | Kind | Command |
 | --- | --- | --- |
@@ -139,8 +173,10 @@ it runs only with `--include-clear`.
 | `yarn` | clear | `yarn cache clean` (Yarn 1) |
 | `pip` | clear | `pip cache purge` |
 | `homebrew` | clear | `brew cleanup --prune=all` |
+| `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
 
-Plonge runs a tool through `mise exec --` when `mise which` finds it from your home directory,
+Plonge runs a tool through `mise exec --`
+when `mise which` finds it from your home directory,
 and otherwise from `PATH`, passing over mise's shims.
 It runs commands from your home directory, without a shell.
 A rule whose tool is missing is skipped and reported.
@@ -148,19 +184,27 @@ A rule whose tool is missing is skipped and reported.
 mise does not count a tracked config that it cannot load,
 so a prune can remove a version that such a config pins.
 Plonge runs `mise prune --tools --dry-run` first,
-and skips `mise-tools` when mise reports that it cannot load a tracked config that still exists.
+and skips `mise-tools` when mise reports that it cannot load
+a tracked config that may still exist.
 The report and the JSON list those configs.
-When the check passes, the size of `mise-tools` is the size of the versions that the prune would remove,
+When the check passes, `mise-tools` reports the size of the versions
+that mise lists as removable,
 and the report names them.
-They come from `mise ls --prunable --json`, which lists the same versions as the dry run.
-If that command fails, the size is the whole `installs` folder and a note in the report says so.
+The names and sizes come from `mise ls --prunable --json`.
+That command and the dry run are separate calls; their results can change.
+If the list command fails, Plonge reports the size of the configured
+`installs` directory and adds a note.
+The default path is `~/.local/share/mise/installs`.
+If mise uses a different installs directory, override the rule
+as shown below to correct the fallback size and freed-space estimate.
+The cleanup command still uses mise's environment and settings.
 
-On macOS, a built-in rule, `xcode-derived-data`, cleans stale Xcode build data.
+On macOS, a built-in rule, `xcode-derived-data`, selects stale Xcode build data.
 Xcode has no prune command,
-so plonge deletes only a folder in `~/Library/Developer/Xcode/DerivedData`
-whose `info.plist` names a `WorkspacePath` that no longer exists.
-It keeps a folder without a readable `WorkspacePath`,
-and a folder whose workspace is on a volume that is not mounted.
+so Plonge deletes only a directory in `~/Library/Developer/Xcode/DerivedData`
+whose XML `info.plist` names an absolute `WorkspacePath` that no longer exists.
+It keeps a directory without a readable `WorkspacePath`,
+and a directory whose workspace is on a volume that is not mounted.
 
 You can add a rule, or replace a default with the same `id`,
 in `rules.toml`:
@@ -188,9 +232,13 @@ os = "darwin"
 ```
 
 `tool` is the command that must be available.
-`path` is a command that prints the cache's path, or a fixed path that starts with `/` or `~/`.
+`path` is a command that prints the cache's path,
+or a fixed path that starts with `/` or `~/`.
 Both `path` and `clean` commands must start with `tool`.
-`os` limits a rule to one operating system, by its Go name, such as `darwin` or `linux`.
+Command strings are split at whitespace.
+Shell quoting, pipes, and variable expansion are not supported.
+`os` limits a rule to one operating system,
+by its Go name, such as `darwin` or `linux`.
 
 A rule can name a `check`, a command that must not change anything:
 
@@ -210,21 +258,26 @@ check_env = ["MYTOOL_LOG=info"]
 `check` must start with `tool`.
 Plonge runs it for `scan --global` and `clean --global`,
 and again right before `--apply` runs the rule.
-The rule is skipped when the check fails,
-and when a line of its standard output or standard error matches `refuse`,
+The rule is skipped when the check fails
+or a line of its standard output or standard error matches `refuse`,
 a regular expression.
 A skipped rule does not count toward the totals.
 
-A group named `path` in `refuse` makes a match count only when that file exists.
+A group named `path` in `refuse` limits matches to files that may still exist.
+For absolute paths and `~/` paths, missing files do not count.
+Permission errors and text that is not an absolute or `~/` path do count.
 The group can run past the path to the end of the line:
-plonge tries the text up to each `: ` in turn, and then the whole text.
+Plonge tries the text up to each `: ` in turn, and then the whole text.
 The report and the JSON (`refused`) list the files with `~`,
 and the reason ends with how many there are.
 `refuse_reason` is the text of that reason.
 `check_env` sets variables for the check only.
 
 `targets` is a command that prints what `clean` would remove,
-as a JSON object that maps each name to a list of `{"version": ..., "install_path": ...}` objects.
+as a JSON object that maps each name
+to a list of `{"version": ..., "install_path": ...}` objects.
+`targets` must start with `tool`.
+Each object needs a nonempty `version` and an absolute `install_path`.
 The rule's size is then the total of those directories, not its whole `path`.
 
 When your rule has the same `id` as a default, it replaces all of the default,
@@ -239,14 +292,18 @@ plonge disk
 plonge disk --warn-below 20GiB
 ```
 
-With `--warn-below`, plonge prints one warning line only when free space
-is below that size, and it always exits 0, so that hooks can call it.
-Sizes accept `KiB`, `MiB`, `GiB`, and `TiB` (and `K`, `M`, `G`, and `T`) as powers of 1024,
+With a nonempty `--warn-below` value, Plonge prints a warning only when
+free space is below that size.
+Size and disk errors are written to standard error and exit 0 in this mode.
+Command-line syntax errors still exit 2.
+Sizes accept `KiB`, `MiB`, `GiB`, and `TiB`
+(and `K`, `M`, `G`, and `T`) as powers of 1024,
 and `KB`, `MB`, `GB`, and `TB` as powers of 1000.
 
 ## MCP server
 
-`plonge mcp` serves plonge to coding agents over stdio, with three tools:
+`plonge mcp` serves Plonge to coding agents over standard input and output
+(stdio), with three tools:
 
 - `scan` reports caches; `global: true` adds the global caches.
 - `clean` is a dry run unless `apply: true`.
@@ -254,8 +311,10 @@ and `KB`, `MB`, `GB`, and `TB` as powers of 1000.
   with the same rules as the command line.
 - `disk` reports free space.
 
-The tool descriptions tell agents to show the dry run to the user
-and get approval before `apply`.
+The MCP tools use mise project discovery and do not accept `--root` or `--no-mise`.
+Their descriptions tell agents to show the dry run
+and get user approval before `apply`.
+The server does not enforce that approval.
 
 To add the server to Claude Code:
 
@@ -265,15 +324,15 @@ claude mcp add plonge -- plonge mcp
 
 ## Agent skill
 
-`skills/plonge/SKILL.md` tells coding agents when to use plonge
+`skills/plonge/SKILL.md` tells coding agents when to use Plonge
 (low disk space, cleanup requests), to scan first, to show sizes,
 and to ask you before `clean --apply`.
 To install it for Claude Code, copy `skills/plonge` to `~/.claude/skills/plonge`.
 
 ## Hooks
 
-`plonge disk --warn-below` always exits 0, so a hook can call it at any time.
 This Claude Code `SessionStart` hook warns when free space is low.
+It supplies a size to `--warn-below` so size and disk errors do not fail the hook.
 Add it to `~/.claude/settings.json`:
 
 ```json
@@ -306,10 +365,10 @@ names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
          "DerivedData", "__pycache__", "dist", "node_modules", "target", "venv"]
 quiet_hours = 24
 
-# Directories that the walk never enters.
+# Do not scan inside these directories.
 skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
-# A generic name counts only next to one of these project files.
+# Match these names only when a listed project file is in the same directory.
 [beside]
 dist = ["package.json"]
 target = ["Cargo.toml", "pom.xml"]
@@ -333,7 +392,7 @@ build = ["build.gradle", "build.gradle.kts"]
 dist = ["package.json", "pyproject.toml"]
 ```
 
-The walk never enters a directory in `skip`.
+The scan never enters a directory in `skip`.
 This keeps out caches that are nested in a tool's own cache,
 such as `__pycache__` inside a `.cache/uv` environment.
 A name in both `names` and `skip` is reported as a cache and is not entered.
@@ -349,4 +408,5 @@ mise exec -- make check
 ```
 
 `make build` writes `bin/plonge`.
-`make lint` runs `gofmt -l` and `go vet`, and `make test` runs the tests with gotestsum.
+`make lint` runs `gofmt -l` and `go vet`.
+`make test` runs the tests with gotestsum.
