@@ -2,9 +2,11 @@ package global
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,6 +90,44 @@ func (r Runner) evaluate(ctx context.Context, g *guard) (reason string, refused 
 		return g.reason + ": " + strconv.Itoa(len(refused)), refused
 	}
 	return "", nil
+}
+
+// listTargets records what the rule would remove.
+// When that cannot be known, the rule keeps the size of its whole path and says so.
+func (r Runner) listTargets(ctx context.Context, e *Entry, t tool, g rules.Global) {
+	names, paths, err := r.targets(ctx, t, g)
+	if err != nil {
+		e.Note = "size is the whole folder: cannot list what would be removed: " + err.Error()
+		return
+	}
+	e.Targets, e.targetPaths, e.targeted = names, paths, true
+}
+
+func (r Runner) targets(ctx context.Context, t tool, g rules.Global) (names, paths []string, err error) {
+	lookup, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	argv, _ := command(t, g.Targets)
+	out, err := r.run(lookup, argv)
+	if err != nil {
+		return nil, nil, err
+	}
+	var listed map[string][]struct {
+		Version     string `json:"version"`
+		InstallPath string `json:"install_path"`
+	}
+	if err := json.Unmarshal([]byte(out), &listed); err != nil {
+		return nil, nil, fmt.Errorf("invalid JSON: %w", err)
+	}
+	for _, name := range slices.Sorted(maps.Keys(listed)) {
+		for _, item := range listed[name] {
+			if item.Version == "" || !filepath.IsAbs(item.InstallPath) {
+				return nil, nil, fmt.Errorf("%s has no version or absolute install_path", name)
+			}
+			names = append(names, name+"@"+item.Version)
+			paths = append(paths, item.InstallPath)
+		}
+	}
+	return names, paths, nil
 }
 
 // runCombined runs argv from the home directory and returns everything that it printed.

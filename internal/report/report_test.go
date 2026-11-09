@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattt/plonge/internal/global"
 	"github.com/mattt/plonge/internal/scan"
 )
 
@@ -167,6 +168,27 @@ func TestAge(t *testing.T) {
 	for _, tt := range tests {
 		if got := Age(tt.t, now); got != tt.want {
 			t.Errorf("Age = %q, want %q", got, tt.want)
+		}
+	}
+}
+
+func TestWriteGlobalRefusedAndTargets(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeGlobal(&buf, []global.Entry{
+		{ID: "a", Skipped: "configs: 1", Refused: []string{"~/x/mise.toml"}},
+		{ID: "b", Command: "b gc", Targets: []string{"bun@1", "go@2"}},
+		{ID: "c", Command: "c gc", Note: "size is the whole folder"},
+	}, "/home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Skipped a: configs: 1\n  ~/x/mise.toml\n",
+		"b would remove: bun@1, go@2\n",
+		"c: size is the whole folder\n",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, buf.String())
 		}
 	}
 }

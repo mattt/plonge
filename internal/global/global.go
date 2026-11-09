@@ -31,10 +31,18 @@ type Entry struct {
 	Skipped string `json:"skipped,omitempty"`
 	// Refused are the files that made the rule's check refuse it, with ~ for the home directory.
 	Refused []string `json:"refused,omitempty"`
+	// Targets are the items that the rule's command would remove.
+	// When the rule lists them, Bytes is their size and not the size of Path.
+	Targets []string `json:"targets,omitempty"`
+	// Note says why Bytes is the size of Path although the rule has targets.
+	Note string `json:"note,omitempty"`
 
 	argv  []string
 	guard *guard
-	stale []string // for the built-in Xcode rule, the folders to delete
+	// targeted is true when targetPaths, and not Path, gives Bytes.
+	targeted    bool
+	targetPaths []string
+	stale       []string // for the built-in Xcode rule, the folders to delete
 }
 
 // Runner resolves tools and runs them from the home directory,
@@ -168,6 +176,9 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 			e.guard = newGuard(t, g)
 			r.passes(ctx, &e)
 		}
+		if e.Skipped == "" && g.Targets != "" {
+			r.listTargets(ctx, &e, t, g)
+		}
 		entries = append(entries, e)
 	}
 	measure(entries)
@@ -189,7 +200,17 @@ func measure(entries []Entry) {
 	var dirs []string
 	var index []int
 	for i, e := range entries {
-		if e.Skipped == "" {
+		switch {
+		case e.Skipped != "":
+		case e.targeted:
+			for _, p := range e.targetPaths {
+				// A link removes only itself, so its target does not count.
+				if info, err := os.Lstat(p); err == nil && info.IsDir() {
+					dirs = append(dirs, p)
+					index = append(index, i)
+				}
+			}
+		default:
 			if p, err := filepath.EvalSymlinks(e.Path); err == nil {
 				dirs = append(dirs, p)
 				index = append(index, i)
@@ -197,7 +218,7 @@ func measure(entries []Entry) {
 		}
 	}
 	for k, n := range scan.Sizes(dirs) {
-		entries[index[k]].Bytes = n
+		entries[index[k]].Bytes += n
 	}
 }
 
@@ -264,8 +285,12 @@ func (r Runner) apply(ctx context.Context, o *Outcome) {
 		applyXcode(ctx, o)
 		return
 	}
+	before := o.Bytes
+	if o.targeted {
+		before = usage(o.Path)
+	}
 	_, err := r.run(ctx, o.argv)
-	o.FreedBytes = max(0, o.Bytes-usage(o.Path))
+	o.FreedBytes = max(0, before-usage(o.Path))
 	if err != nil {
 		o.Status, o.Reason = Failed, err.Error()
 		return

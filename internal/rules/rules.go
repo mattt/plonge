@@ -63,6 +63,9 @@ type Global struct {
 	Refuse string `toml:"refuse"`
 	// RefuseReason says in the report what the matches of Refuse mean.
 	RefuseReason string `toml:"refuse_reason"`
+	// Targets is a command that prints, as JSON, what Clean would remove.
+	// The rule's size is then the size of those items, not of its whole path.
+	Targets string `toml:"targets"`
 }
 
 type file struct {
@@ -140,6 +143,9 @@ func (g Global) validate() error {
 	}
 	if !g.startsWithTool(g.Clean) {
 		return fmt.Errorf("global rule %q: clean must be a %s command", g.ID, g.Tool)
+	}
+	if g.Targets != "" && !g.startsWithTool(g.Targets) {
+		return fmt.Errorf("global rule %q: targets must be a %s command", g.ID, g.Tool)
 	}
 	return g.validateCheck()
 }

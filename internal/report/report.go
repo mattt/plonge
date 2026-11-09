@@ -191,6 +191,16 @@ func writeRefused(w io.Writer, e global.Entry) {
 	}
 }
 
+// writeTargets lists what a rule would remove, or says why its size is the whole folder.
+func writeTargets(w io.Writer, e global.Entry) {
+	if len(e.Targets) > 0 {
+		fmt.Fprintf(w, "%s would remove: %s\n", e.ID, strings.Join(e.Targets, ", "))
+	}
+	if e.Note != "" {
+		fmt.Fprintf(w, "%s: %s\n", e.ID, e.Note)
+	}
+}
+
 func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
 	fmt.Fprintln(w, "\nGlobal caches:")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -214,6 +224,7 @@ func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
 			fmt.Fprintf(w, "Skipped %s: %s\n", e.ID, e.Skipped)
 			writeRefused(w, e)
 		}
+		writeTargets(w, e)
 	}
 	_, err := fmt.Fprintf(w, "Global total: %s in %s\n", HumanBytes(total), plural(n, "rule"))
 	return err
@@ -238,6 +249,7 @@ func WriteGlobalClean(w io.Writer, r global.Result, home string) error {
 			fmt.Fprintf(w, "Skipped %s: %s\n", o.ID, o.Reason)
 			writeRefused(w, o.Entry)
 		}
+		writeTargets(w, o.Entry)
 	}
 	fmt.Fprintln(w)
 	if r.Failed > 0 {

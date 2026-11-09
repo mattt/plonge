@@ -31,6 +31,7 @@ check = "mise prune --tools --dry-run"
 check_env = ["MISE_QUIET=0", "MISE_LOG_LEVEL=info"]
 refuse = 'error loading tracked config file (?P<path>.+)$'
 refuse_reason = "tracked configs that mise cannot load"
+targets = "mise ls --prunable --json"
 
 [[global]]
 id = "mise-cache"

@@ -150,6 +150,10 @@ so a prune can remove a version that such a config pins.
 Plonge runs `mise prune --tools --dry-run` first,
 and skips `mise-tools` when mise reports that it cannot load a tracked config that still exists.
 The report and the JSON list those configs.
+When the check passes, the size of `mise-tools` is the size of the versions that the prune would remove,
+and the report names them.
+They come from `mise ls --prunable --json`, which lists the same versions as the dry run.
+If that command fails, the size is the whole `installs` folder and a note in the report says so.
 
 On macOS, a built-in rule, `xcode-derived-data`, cleans stale Xcode build data.
 Xcode has no prune command,
@@ -172,6 +176,7 @@ check = "mise prune --tools --dry-run"
 check_env = ["MISE_QUIET=0", "MISE_LOG_LEVEL=info"]
 refuse = 'error loading tracked config file (?P<path>.+)$'
 refuse_reason = "tracked configs that mise cannot load"
+targets = "mise ls --prunable --json"
 
 [[global]]
 id = "mytool"
@@ -218,8 +223,12 @@ and the reason ends with how many there are.
 `refuse_reason` is the text of that reason.
 `check_env` sets variables for the check only.
 
+`targets` is a command that prints what `clean` would remove,
+as a JSON object that maps each name to a list of `{"version": ..., "install_path": ...}` objects.
+The rule's size is then the total of those directories, not its whole `path`.
+
 When your rule has the same `id` as a default, it replaces all of the default,
-so copy the default's `check` to keep it.
+so copy the default's `check` and `targets` to keep them.
 
 ## Disk
 
