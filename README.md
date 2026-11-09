@@ -12,6 +12,8 @@ It excludes active and busy projects by default.
 `plonge clean --global --apply` instead runs global cleanup actions,
 which do not use those project checks.
 
+See [What Plonge covers](docs/coverage.md) for tool coverage and known gaps.
+
 ## Install
 
 With mise, through its `go` backend:
@@ -161,7 +163,7 @@ and requires `--include-clear`.
 Later commands may need to download dependencies or rebuild files.
 Neither kind guarantees that the whole reported size will be freed.
 
-| ID | Kind | Command |
+| ID | Kind | Action |
 | --- | --- | --- |
 | `mise-tools` | prune | `mise prune --tools --yes` |
 | `mise-cache` | prune | `mise cache prune` |

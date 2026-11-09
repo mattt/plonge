@@ -315,7 +315,7 @@ func runDisk(args []string, stdout, stderr io.Writer) int {
 	if code, ok := parse(fs, diskUsage, args, stdout, stderr); !ok {
 		return code
 	}
-	// A hook must not fail because of plonge, so --warn-below always exits 0.
+	// With a nonempty --warn-below value, size and disk errors exit 0.
 	failed := 1
 	if *warnBelow != "" {
 		failed = 0

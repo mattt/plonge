@@ -36,8 +36,8 @@ type Rules struct {
 
 // The kinds of a global rule.
 const (
-	KindPrune = "prune" // removes only what nothing uses
-	KindClear = "clear" // removes everything; the next build downloads it again
+	KindPrune = "prune" // selects unused or stale data by tool policy
+	KindClear = "clear" // can remove cached data still in use
 )
 
 // XcodeRuleID names the built-in rule for stale Xcode DerivedData folders.
@@ -58,8 +58,8 @@ type Global struct {
 	// CheckEnv are NAME=value pairs added to the environment of Check.
 	CheckEnv []string `toml:"check_env"`
 	// Refuse is a regular expression. A line of Check's output that matches it
-	// skips the rule. A group named path makes the match count only when
-	// the file that the group names exists.
+	// skips the rule. A group named path ignores files known to be missing;
+	// permission errors and unrecognized paths still count.
 	Refuse string `toml:"refuse"`
 	// RefuseReason says in the report what the matches of Refuse mean.
 	RefuseReason string `toml:"refuse_reason"`

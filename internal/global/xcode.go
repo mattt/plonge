@@ -39,7 +39,7 @@ func (r Runner) xcodeEntry() (Entry, bool) {
 	for _, n := range scan.Sizes(e.stale) {
 		e.Bytes += n
 	}
-	e.Command = fmt.Sprintf("delete %d stale DerivedData folders (built in)", len(e.stale))
+	e.Command = fmt.Sprintf("delete %d stale DerivedData directories (built in)", len(e.stale))
 	return e, true
 }
 
