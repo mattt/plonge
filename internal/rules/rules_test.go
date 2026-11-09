@@ -130,3 +130,23 @@ func TestMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestSkip(t *testing.T) {
+	want := []string{".cache", ".git", ".hg", ".jj", ".svn"}
+	if got := Default().Skip; !slices.Equal(got, want) {
+		t.Errorf("default skip = %q, want %q", got, want)
+	}
+	r, err := Load(writeRules(t, `skip = ["vendor", ".git"]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []string{".cache", ".git", ".hg", ".jj", ".svn", "vendor"}
+	if !slices.Equal(r.Skip, want) {
+		t.Errorf("merged skip = %q, want %q", r.Skip, want)
+	}
+	for _, body := range []string{`skip = ["a/b"]`, `skip = [""]`, `names = [".git"]`, `names = [".jj"]`} {
+		if _, err := Load(writeRules(t, body)); err == nil {
+			t.Errorf("Load(%s) gave no error", body)
+		}
+	}
+}

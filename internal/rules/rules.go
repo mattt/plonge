@@ -26,12 +26,23 @@ type Rules struct {
 	Beside map[string][]string
 	// QuietHours is how long a project must be inactive to be quiet.
 	QuietHours float64
+	// Skip are directory names that the walk never enters.
+	// A name in Names still matches; plonge reports it and does not enter it.
+	Skip []string
 }
 
 type file struct {
 	Names      []string            `toml:"names"`
 	QuietHours *float64            `toml:"quiet_hours"`
 	Beside     map[string][]string `toml:"beside"`
+	Skip       []string            `toml:"skip"`
+}
+
+// versionControlDirs hold a project's history, so no rule may name them as caches.
+var versionControlDirs = []string{".git", ".hg", ".jj", ".svn"}
+
+func validName(n string) bool {
+	return n != "" && n != "." && n != ".." && !strings.ContainsRune(n, '/')
 }
 
 func parse(data, name string) (file, error) {
@@ -48,8 +59,16 @@ func parse(data, name string) (file, error) {
 		return f, fmt.Errorf("%s: unknown keys: %s", name, strings.Join(keys, ", "))
 	}
 	for _, n := range f.Names {
-		if n == "" || n == "." || n == ".." || strings.ContainsRune(n, '/') {
+		if !validName(n) {
 			return f, fmt.Errorf("%s: invalid name %q", name, n)
+		}
+		if slices.Contains(versionControlDirs, n) {
+			return f, fmt.Errorf("%s: %q holds version control data and cannot be a cache", name, n)
+		}
+	}
+	for _, n := range f.Skip {
+		if !validName(n) {
+			return f, fmt.Errorf("%s: invalid skip name %q", name, n)
 		}
 	}
 	if f.QuietHours != nil && *f.QuietHours < 0 {
@@ -67,13 +86,14 @@ func Default() Rules {
 	return merge(Rules{Beside: map[string][]string{}}, f)
 }
 
-// merge adds the names in f to r, replaces each beside entry in f,
+// merge adds the names and skip names in f to r, replaces each beside entry in f,
 // and sets the quiet period when f has one.
 func merge(r Rules, f file) Rules {
 	out := Rules{
 		Names:      slices.Clone(r.Names),
 		Beside:     make(map[string][]string, len(r.Beside)+len(f.Beside)),
 		QuietHours: r.QuietHours,
+		Skip:       slices.Clone(r.Skip),
 	}
 	for k, v := range r.Beside {
 		out.Beside[k] = v
@@ -86,10 +106,16 @@ func merge(r Rules, f file) Rules {
 	for k, v := range f.Beside {
 		out.Beside[k] = v
 	}
+	for _, n := range f.Skip {
+		if !slices.Contains(out.Skip, n) {
+			out.Skip = append(out.Skip, n)
+		}
+	}
 	if f.QuietHours != nil {
 		out.QuietHours = *f.QuietHours
 	}
 	slices.Sort(out.Names)
+	slices.Sort(out.Skip)
 	return out
 }
 

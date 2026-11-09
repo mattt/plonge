@@ -3,6 +3,9 @@ names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
          "DerivedData", "__pycache__", "dist", "node_modules", "target", "venv"]
 quiet_hours = 24
 
+# Directories that the walk never enters.
+skip = [".cache", ".git", ".hg", ".jj", ".svn"]
+
 # A generic name counts only next to one of these project files.
 [beside]
 dist = ["package.json"]

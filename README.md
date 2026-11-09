@@ -73,6 +73,9 @@ names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
          "DerivedData", "__pycache__", "dist", "node_modules", "target", "venv"]
 quiet_hours = 24
 
+# Directories that the walk never enters.
+skip = [".cache", ".git", ".hg", ".jj", ".svn"]
+
 # A generic name counts only next to one of these project files.
 [beside]
 dist = ["package.json"]
@@ -82,7 +85,7 @@ venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 
 To add rules, write them to `$XDG_CONFIG_HOME/plonge/rules.toml`
 (by default, `~/.config/plonge/rules.toml`).
-Your `names` add to the defaults.
+Your `names` and `skip` add to the defaults.
 A `beside` entry in your file replaces the default entry for that name,
 and a `quiet_hours` value replaces the default.
 For example:
@@ -90,11 +93,18 @@ For example:
 ```toml
 names = [".cache", "build"]
 quiet_hours = 72
+skip = ["third_party"]
 
 [beside]
 build = ["build.gradle", "build.gradle.kts"]
 dist = ["package.json", "pyproject.toml"]
 ```
+
+The walk never enters a directory in `skip`.
+This keeps out caches that are nested in a tool's own cache,
+such as `__pycache__` inside a `.cache/uv` environment.
+A name in both `names` and `skip` is reported as a cache and is not entered.
+`.git`, `.hg`, `.jj`, and `.svn` cannot be added to `names`.
 
 ## Development
 

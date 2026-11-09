@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -32,7 +33,7 @@ type Root struct {
 
 // Detect walks root and returns the candidates that Git ignores
 // and that hold no tracked files.
-// It does not follow symlinks, does not enter .git,
+// It does not follow symlinks, does not enter a directory in the skip list,
 // and does not descend into a candidate.
 func Detect(ctx context.Context, root string, r rules.Rules) Root {
 	res := Root{Path: root}
@@ -87,13 +88,10 @@ func walk(root string, r rules.Rules) ([]Candidate, []string) {
 		if !d.IsDir() {
 			return nil
 		}
-		name := d.Name()
-		if name == ".git" {
-			return fs.SkipDir
-		}
 		if path == root {
 			return nil
 		}
+		name := d.Name()
 		parent := filepath.Dir(path)
 		rule := r.Match(name, func(marker string) bool {
 			_, err := os.Lstat(filepath.Join(parent, marker))
@@ -101,6 +99,9 @@ func walk(root string, r rules.Rules) ([]Candidate, []string) {
 		})
 		if rule != "" {
 			found = append(found, Candidate{Path: path, Rule: rule})
+			return fs.SkipDir
+		}
+		if slices.Contains(r.Skip, name) {
 			return fs.SkipDir
 		}
 		if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {

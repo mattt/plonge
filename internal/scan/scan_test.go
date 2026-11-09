@@ -193,6 +193,32 @@ func TestDetectDoesNotFollowSymlinks(t *testing.T) {
 	}
 }
 
+func TestDetectSkipList(t *testing.T) {
+	isolateGit(t)
+	root := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{
+		".gitignore":                          ".cache/\n__pycache__/\nvendor/\n",
+		".cache/uv/env/lib/__pycache__/m.pyc": "",
+		"vendor/lib/__pycache__/m.pyc":        "",
+		"src/__pycache__/m.pyc":               "",
+	})
+	r := rules.Default()
+	r.Skip = append(r.Skip, "vendor")
+	got := found(Detect(context.Background(), root, r))
+	want := map[string]string{"src/__pycache__": "__pycache__"}
+	if !mapsEqual(got, want) {
+		t.Errorf("found %v, want %v", got, want)
+	}
+
+	// A name that is both a rule and in the skip list is a cache.
+	r.Names = append(r.Names, ".cache")
+	got = found(Detect(context.Background(), root, r))
+	want[".cache"] = ".cache"
+	if !mapsEqual(got, want) {
+		t.Errorf("with a .cache rule, found %v, want %v", got, want)
+	}
+}
+
 func TestDetectSkipsRoots(t *testing.T) {
 	isolateGit(t)
 	tmp := t.TempDir()
