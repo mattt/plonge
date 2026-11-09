@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -50,6 +51,18 @@ type Global struct {
 	Clean string `toml:"clean"` // the command that cleans the cache
 	Kind  string `toml:"kind"`
 	OS    string `toml:"os"` // when set, the rule applies only on this GOOS
+
+	// Check is a command that must succeed before the rule runs.
+	// It must not change anything.
+	Check string `toml:"check"`
+	// CheckEnv are NAME=value pairs added to the environment of Check.
+	CheckEnv []string `toml:"check_env"`
+	// Refuse is a regular expression. A line of Check's output that matches it
+	// skips the rule. A group named path makes the match count only when
+	// the file that the group names exists.
+	Refuse string `toml:"refuse"`
+	// RefuseReason says in the report what the matches of Refuse mean.
+	RefuseReason string `toml:"refuse_reason"`
 }
 
 type file struct {
@@ -127,6 +140,30 @@ func (g Global) validate() error {
 	}
 	if !g.startsWithTool(g.Clean) {
 		return fmt.Errorf("global rule %q: clean must be a %s command", g.ID, g.Tool)
+	}
+	return g.validateCheck()
+}
+
+func (g Global) validateCheck() error {
+	if g.Check == "" {
+		if g.Refuse != "" || g.RefuseReason != "" || len(g.CheckEnv) > 0 {
+			return fmt.Errorf("global rule %q: refuse, refuse_reason, and check_env need check", g.ID)
+		}
+		return nil
+	}
+	if !g.startsWithTool(g.Check) {
+		return fmt.Errorf("global rule %q: check must be a %s command", g.ID, g.Tool)
+	}
+	if g.Refuse == "" && g.RefuseReason != "" {
+		return fmt.Errorf("global rule %q: refuse_reason needs refuse", g.ID)
+	}
+	if _, err := regexp.Compile(g.Refuse); err != nil {
+		return fmt.Errorf("global rule %q: refuse: %w", g.ID, err)
+	}
+	for _, kv := range g.CheckEnv {
+		if name, _, ok := strings.Cut(kv, "="); !ok || name == "" {
+			return fmt.Errorf("global rule %q: check_env entry %q must be NAME=value", g.ID, kv)
+		}
 	}
 	return nil
 }

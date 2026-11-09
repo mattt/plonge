@@ -177,6 +177,40 @@ os = "darwin"
 Both `path` and `clean` commands must start with `tool`.
 `os` limits a rule to one operating system, by its Go name, such as `darwin` or `linux`.
 
+A rule can name a `check`, a command that must not change anything:
+
+```toml
+[[global]]
+id = "mytool"
+tool = "mytool"
+path = "mytool cache path"
+clean = "mytool cache gc"
+kind = "prune"
+check = "mytool cache gc --dry-run"
+refuse = 'cannot read project (?P<path>.+)$'
+refuse_reason = "projects that mytool cannot read"
+check_env = ["MYTOOL_LOG=info"]
+```
+
+`check` must start with `tool`.
+Plonge runs it for `scan --global` and `clean --global`,
+and again right before `--apply` runs the rule.
+The rule is skipped when the check fails,
+and when a line of its standard output or standard error matches `refuse`,
+a regular expression.
+A skipped rule does not count toward the totals.
+
+A group named `path` in `refuse` makes a match count only when that file exists.
+The group can run past the path to the end of the line:
+plonge tries the text up to each `: ` in turn, and then the whole text.
+The report and the JSON (`refused`) list the files with `~`,
+and the reason ends with how many there are.
+`refuse_reason` is the text of that reason.
+`check_env` sets variables for the check only.
+
+When your rule has the same `id` as a default, it replaces all of the default,
+so copy the default's `check` to keep it.
+
 ## Disk
 
 `plonge disk` prints the free space on your home directory's volume.

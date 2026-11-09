@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -202,6 +203,34 @@ os = "darwin"
 	for name, body := range bad {
 		if _, err := Load(writeRules(t, body)); err == nil {
 			t.Errorf("%s: no error", name)
+		}
+	}
+}
+
+func TestGlobalCheckValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\nclean = \"t gc\"\nkind = \"prune\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"check = \"other run\"\n", "check must be a t command"},
+		{"refuse = \"x\"\n", "need check"},
+		{"check_env = [\"A=1\"]\n", "need check"},
+		{"check = \"t dry\"\nrefuse_reason = \"why\"\n", "refuse_reason needs refuse"},
+		{"check = \"t dry\"\nrefuse = \"(\"\n", "refuse:"},
+		{"check = \"t dry\"\ncheck_env = [\"NOVALUE\"]\n", "must be NAME=value"},
+		{"check = \"t dry\"\ncheck_env = [\"=x\"]\n", "must be NAME=value"},
+		{"check = \"t dry\"\nrefuse = 'bad (?P<path>.+)$'\nrefuse_reason = \"why\"\ncheck_env = [\"A=1\"]\n", ""},
+	}
+	for _, c := range cases {
+		_, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%q: %v", c.extra, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
 		}
 	}
 }

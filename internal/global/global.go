@@ -29,8 +29,11 @@ type Entry struct {
 	Command string `json:"command,omitempty"`
 	// Skipped is why plonge cannot use this rule here, or empty.
 	Skipped string `json:"skipped,omitempty"`
+	// Refused are the files that made the rule's check refuse it, with ~ for the home directory.
+	Refused []string `json:"refused,omitempty"`
 
 	argv  []string
+	guard *guard
 	stale []string // for the built-in Xcode rule, the folders to delete
 }
 
@@ -161,6 +164,10 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 			e.Command, e.argv = "", nil
 		}
 		e.Path = path
+		if e.Skipped == "" && g.Check != "" {
+			e.guard = newGuard(t, g)
+			r.passes(ctx, &e)
+		}
 		entries = append(entries, e)
 	}
 	measure(entries)
@@ -249,6 +256,10 @@ func (r Runner) Clean(ctx context.Context, entries []Entry, opts Options) Result
 
 // apply runs one rule's command and measures the cache again.
 func (r Runner) apply(ctx context.Context, o *Outcome) {
+	if !r.passes(ctx, &o.Entry) {
+		o.Status, o.Reason = Skipped, o.Skipped
+		return
+	}
 	if o.ID == rules.XcodeRuleID {
 		applyXcode(ctx, o)
 		return

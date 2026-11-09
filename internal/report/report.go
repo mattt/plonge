@@ -184,6 +184,13 @@ func writeSkippedSources(w io.Writer, sources []scan.Source) {
 	}
 }
 
+// writeRefused lists the files that made a rule's check refuse it.
+func writeRefused(w io.Writer, e global.Entry) {
+	for _, p := range e.Refused {
+		fmt.Fprintf(w, "  %s\n", p)
+	}
+}
+
 func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
 	fmt.Fprintln(w, "\nGlobal caches:")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -205,6 +212,7 @@ func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
 	for _, e := range entries {
 		if e.Skipped != "" {
 			fmt.Fprintf(w, "Skipped %s: %s\n", e.ID, e.Skipped)
+			writeRefused(w, e)
 		}
 	}
 	_, err := fmt.Fprintf(w, "Global total: %s in %s\n", HumanBytes(total), plural(n, "rule"))
@@ -224,6 +232,12 @@ func WriteGlobalClean(w io.Writer, r global.Result, home string) error {
 	}
 	if err := tw.Flush(); err != nil {
 		return err
+	}
+	for _, o := range r.Outcomes {
+		if len(o.Refused) > 0 {
+			fmt.Fprintf(w, "Skipped %s: %s\n", o.ID, o.Reason)
+			writeRefused(w, o.Entry)
+		}
 	}
 	fmt.Fprintln(w)
 	if r.Failed > 0 {
