@@ -89,6 +89,71 @@ It ends with the space freed.
 Sizes count each hard-linked file once,
 so a cache whose files are also linked elsewhere can free less than its size.
 
+## Global caches
+
+Some caches live outside your projects, and the tool that owns each one
+knows best how to clean it.
+`plonge scan --global` adds a section with each rule's path, size, kind, and command.
+
+```console
+plonge scan --global
+plonge clean --global
+plonge clean --global --apply
+plonge clean --global --apply --include-clear
+```
+
+`plonge clean --global` works only on global caches and leaves your projects alone.
+By default it lists the commands as a dry run.
+`--apply` runs them, measures each cache again, and reports what was freed.
+
+Each rule has a kind.
+A `prune` rule removes only what nothing uses.
+A `clear` rule removes everything, so the next build downloads it again;
+it runs only with `--include-clear`.
+
+| ID | Kind | Command |
+| --- | --- | --- |
+| `mise-tools` | prune | `mise prune --tools` (`mise ls --prunable` lists the versions) |
+| `mise-cache` | prune | `mise cache prune` |
+| `uv` | prune | `uv cache prune` |
+| `pnpm` | prune | `pnpm store prune` |
+| `go-modules` | clear | `go clean -modcache` |
+| `go-build` | clear | `go clean -cache` |
+| `npm` | clear | `npm cache clean --force` |
+| `yarn` | clear | `yarn cache clean` (Yarn 1) |
+| `pip` | clear | `pip cache purge` |
+| `homebrew` | clear | `brew cleanup --prune=all` |
+
+Plonge runs a tool through `mise exec --` when `mise which` finds it from your home directory,
+and otherwise from `PATH`, passing over mise's shims.
+It runs commands from your home directory, without a shell.
+A rule whose tool is missing is skipped and reported.
+
+You can add a rule, or replace a default with the same `id`,
+in `rules.toml`:
+
+```toml
+[[global]]
+id = "mise-tools"
+tool = "mise"
+path = "~/data/mise/installs" # for a custom MISE_DATA_DIR
+clean = "mise prune --tools"
+kind = "prune"
+
+[[global]]
+id = "mytool"
+tool = "mytool"
+path = "mytool cache path"
+clean = "mytool cache gc"
+kind = "prune"
+os = "darwin"
+```
+
+`tool` is the command that must be available.
+`path` is a command that prints the cache's path, or a fixed path that starts with `/` or `~/`.
+Both `path` and `clean` commands must start with `tool`.
+`os` limits a rule to one operating system, by its Go name, such as `darwin` or `linux`.
+
 ## Disk
 
 `plonge disk` prints the free space on your home directory's volume.

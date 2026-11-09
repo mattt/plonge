@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mattt/plonge/internal/clean"
+	"github.com/mattt/plonge/internal/global"
 	"github.com/mattt/plonge/internal/mise"
 	"github.com/mattt/plonge/internal/report"
 	"github.com/mattt/plonge/internal/rules"
@@ -16,6 +17,7 @@ import (
 type Selection struct {
 	Roots  []string // extra roots, as absolute paths
 	NoMise bool     // scan only Roots
+	Global bool     // also list the global caches
 }
 
 // Inventory is what one scan found.
@@ -55,6 +57,9 @@ func Inspect(ctx context.Context, sel Selection) (Inventory, error) {
 	inv.Roots = scan.Run(ctx, paths, inv.Rules)
 	inv.Sizes = measure(inv.Roots)
 	inv.Report = report.Build(inv.Roots, inv.Sizes, inv.Rules.QuietHours, broken, inv.Now)
+	if sel.Global {
+		inv.Report.Global = global.New(env.Home).List(ctx, inv.Rules.Global)
+	}
 	return inv, nil
 }
 
@@ -98,4 +103,15 @@ func Clean(ctx context.Context, opts CleanOptions) (clean.Result, Inventory, err
 		Now:           inv.Now,
 	})
 	return res, inv, nil
+}
+
+// CleanGlobal runs the global rules' clean commands, or lists them without Apply.
+func CleanGlobal(ctx context.Context, opts global.Options) (global.Result, mise.Env, error) {
+	env := mise.EnvFromOS()
+	rs, err := LoadRules(env)
+	if err != nil {
+		return global.Result{}, env, err
+	}
+	r := global.New(env.Home)
+	return r.Clean(ctx, r.List(ctx, rs.Global), opts), env, nil
 }

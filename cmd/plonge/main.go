@@ -12,6 +12,7 @@ import (
 
 	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/engine"
+	"github.com/mattt/plonge/internal/global"
 	"github.com/mattt/plonge/internal/mise"
 	"github.com/mattt/plonge/internal/report"
 )
@@ -53,7 +54,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-const scanUsage = `Usage: plonge scan [--root <dir>]... [--no-mise] [--json]
+const scanUsage = `Usage: plonge scan [--root <dir>]... [--no-mise] [--global] [--json]
 
 Scan reports the caches in each project that mise tracks and in each --root.
 It only reads; it deletes nothing.
@@ -128,13 +129,16 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 	var opts scanOptions
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	opts.bind(fs)
+	withGlobal := fs.Bool("global", false, "also report caches outside projects")
 	if code, ok := parse(fs, scanUsage, args, stdout, stderr); !ok {
 		return code
 	}
 	if !checkRoots("scan", opts, stderr) {
 		return 2
 	}
-	inv, err := engine.Inspect(context.Background(), opts.selection())
+	sel := opts.selection()
+	sel.Global = *withGlobal
+	inv, err := engine.Inspect(context.Background(), sel)
 	if err != nil {
 		fmt.Fprintf(stderr, "plonge scan: %v\n", err)
 		return 1
@@ -157,10 +161,15 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 
 const cleanUsage = `Usage: plonge clean [--apply] [--include-active] [--min-size <size>]
                     [--root <dir>]... [--no-mise] [--json]
+       plonge clean --global [--apply] [--include-clear] [--json]
 
 Clean selects caches as scan does and prints what it would delete.
 With --apply, it deletes them. Only caches in quiet projects qualify,
 unless you give --include-active.
+
+With --global, clean works only on caches outside projects:
+it lists each tool's cleanup command, and with --apply it runs them.
+A clear rule runs only with --include-clear.
 
 Options:
 `
@@ -172,8 +181,23 @@ func runClean(args []string, stdout, stderr io.Writer) int {
 	apply := fs.Bool("apply", false, "delete the caches; without it, only print them")
 	includeActive := fs.Bool("include-active", false, "also delete caches in projects that are not quiet")
 	minSize := fs.String("min-size", "", "skip caches smaller than `size`, such as 100MiB")
+	withGlobal := fs.Bool("global", false, "run the cleanup commands of global caches instead")
+	includeClear := fs.Bool("include-clear", false, "with --global, also run clear rules")
 	if code, ok := parse(fs, cleanUsage, args, stdout, stderr); !ok {
 		return code
+	}
+	if *withGlobal {
+		for _, name := range []string{"root", "no-mise", "include-active", "min-size"} {
+			if flagGiven(fs, name) {
+				fmt.Fprintf(stderr, "plonge clean: --%s does not apply with --global\n", name)
+				return 2
+			}
+		}
+		return runCleanGlobal(global.Options{Apply: *apply, IncludeClear: *includeClear}, opts.json, stdout, stderr)
+	}
+	if *includeClear {
+		fmt.Fprintln(stderr, "plonge clean: --include-clear needs --global")
+		return 2
 	}
 	if !checkRoots("clean", opts, stderr) {
 		return 2
@@ -209,6 +233,37 @@ func runClean(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if res.Failed > 0 || len(res.Errors) > 0 {
+		return 1
+	}
+	return 0
+}
+
+func flagGiven(fs *flag.FlagSet, name string) bool {
+	given := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			given = true
+		}
+	})
+	return given
+}
+
+func runCleanGlobal(opts global.Options, asJSON bool, stdout, stderr io.Writer) int {
+	res, env, err := engine.CleanGlobal(context.Background(), opts)
+	if err != nil {
+		fmt.Fprintf(stderr, "plonge clean: %v\n", err)
+		return 1
+	}
+	if asJSON {
+		err = report.WriteJSON(stdout, res)
+	} else {
+		err = report.WriteGlobalClean(stdout, res, env.Home)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "plonge clean: %v\n", err)
+		return 1
+	}
+	if res.Failed > 0 {
 		return 1
 	}
 	return 0

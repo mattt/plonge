@@ -4,7 +4,6 @@ package global
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -247,11 +246,7 @@ func (r Runner) Clean(ctx context.Context, entries []Entry, opts Options) Result
 // apply runs one rule's command and measures the cache again.
 func (r Runner) apply(ctx context.Context, o *Outcome) {
 	_, err := r.run(ctx, o.argv)
-	after := usage(o.Path)
-	if _, statErr := os.Lstat(o.Path); errors.Is(statErr, os.ErrNotExist) {
-		after = 0
-	}
-	o.FreedBytes = max(0, o.Bytes-after)
+	o.FreedBytes = max(0, o.Bytes-usage(o.Path))
 	if err != nil {
 		o.Status, o.Reason = Failed, err.Error()
 		return

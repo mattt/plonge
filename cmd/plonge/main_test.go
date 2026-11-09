@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,9 +12,26 @@ import (
 	"time"
 )
 
-// setup gives the command a temporary home, mise state, and Git configuration.
+// binDir is the only directory on PATH during a test.
+// It holds Git and fake tools, so that no test can run a real tool.
+func binDir(t *testing.T) string {
+	t.Helper()
+	git, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(git, filepath.Join(dir, "git")); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// setup gives the command a temporary home, mise state, and Git configuration,
+// and replaces PATH.
 func setup(t *testing.T) (home string) {
 	t.Helper()
+	t.Setenv("PATH", binDir(t))
 	home = t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
@@ -231,6 +249,115 @@ func TestCleanExitsNonZeroOnFailure(t *testing.T) {
 	}
 }
 
+func fakeTool(t *testing.T, name, script string) {
+	t.Helper()
+	dir := strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))[0]
+	body := "#!/bin/sh\n" + script + "\n"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fakeGo adds a fake go and returns its build cache, which holds one blob.
+// The fake removes the blob when asked to clean the cache.
+func fakeGo(t *testing.T, home string) string {
+	t.Helper()
+	cache := filepath.Join(home, "gocache")
+	mkfile(t, filepath.Join(cache, "blob"), strings.Repeat("x", 100_000))
+	fakeTool(t, "go", fmt.Sprintf(`case "$*" in
+"env GOCACHE") echo %q ;;
+"clean -cache") /bin/rm %q/blob ;;
+*) exit 9 ;;
+esac`, cache, cache))
+	return cache
+}
+
+func TestScanGlobal(t *testing.T) {
+	home := setup(t)
+	fakeGo(t, home)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"scan", "--no-mise", "--root", home, "--global"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"Global caches:", "go-build", "~/gocache", "clear", "go clean -cache",
+		"Skipped uv: tool not found", "Global total:", "deleted nothing",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+
+	stdout.Reset()
+	if code := run([]string{"scan", "--no-mise", "--root", home, "--global", "--json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	var got struct {
+		Global []struct {
+			ID, Path, Kind, Command, Skipped string
+			Bytes                            int64
+		} `json:"global"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("%v\n%s", err, stdout.String())
+	}
+	found := false
+	for _, e := range got.Global {
+		if e.ID == "go-build" {
+			found = e.Path == filepath.Join(home, "gocache") && e.Bytes >= 100_000 && e.Kind == "clear" && e.Skipped == ""
+		}
+	}
+	if !found {
+		t.Errorf("global = %+v", got.Global)
+	}
+}
+
+func TestCleanGlobal(t *testing.T) {
+	home := setup(t)
+	cache := fakeGo(t, home)
+	blob := filepath.Join(cache, "blob")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"clean", "--global"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if out := stdout.String(); !strings.Contains(out, "go clean -cache") || !strings.Contains(out, "--include-clear") ||
+		!strings.Contains(out, "Dry run") {
+		t.Errorf("dry run:\n%s", out)
+	}
+
+	stdout.Reset()
+	if code := run([]string{"clean", "--global", "--apply"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(blob); err != nil {
+		t.Fatalf("a clear rule ran without --include-clear: %v", err)
+	}
+
+	stdout.Reset()
+	if code := run([]string{"clean", "--global", "--apply", "--include-clear"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(blob); !os.IsNotExist(err) {
+		t.Errorf("the blob is still there: %v", err)
+	}
+	if out := stdout.String(); !strings.Contains(out, "Freed: ") || strings.Contains(out, "Freed: 0 B") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestCleanGlobalExitsNonZeroOnFailure(t *testing.T) {
+	home := setup(t)
+	fakeTool(t, "uv", `[ "$*" = "cache dir" ] && { echo /no/such/cache; exit 0; }; echo "cannot prune" >&2; exit 4`)
+	_ = home
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"clean", "--global", "--apply"}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stdout.String(), "cannot prune") || !strings.Contains(stdout.String(), "Failed: 1") {
+		t.Errorf("exit %d:\n%s", code, stdout.String())
+	}
+}
+
 func TestDisk(t *testing.T) {
 	setup(t)
 	tests := []struct {
@@ -282,6 +409,10 @@ func TestUsage(t *testing.T) {
 		{[]string{"clean", "--help"}, 0, "--include-active"},
 		{[]string{"clean", "--no-mise"}, 2, ""},
 		{[]string{"clean", "--min-size", "lots"}, 2, ""},
+		{[]string{"clean", "--global", "--include-active"}, 2, ""},
+		{[]string{"clean", "--global", "--min-size", "1G"}, 2, ""},
+		{[]string{"clean", "--global", "--root", "x"}, 2, ""},
+		{[]string{"clean", "--include-clear"}, 2, ""},
 		{[]string{"scan", "--no-mise"}, 2, ""},
 		{[]string{"scan", "extra"}, 2, ""},
 		{[]string{"disk", "--help"}, 0, "--warn-below"},

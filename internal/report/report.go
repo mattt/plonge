@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mattt/plonge/internal/clean"
+	"github.com/mattt/plonge/internal/global"
 	"github.com/mattt/plonge/internal/scan"
 )
 
@@ -49,6 +50,8 @@ type Report struct {
 	SkippedRoots []SkippedRoot `json:"skipped_roots"`
 	BrokenLinks  int           `json:"broken_links"`
 	Errors       []string      `json:"errors"`
+	// Global lists the global caches; it is nil unless they were requested.
+	Global []global.Entry `json:"global,omitempty"`
 }
 
 // Build makes a report from scan results and the size of each candidate.
@@ -151,7 +154,65 @@ func WriteTable(w io.Writer, r Report, home string) error {
 	if len(r.Errors) > 0 {
 		fmt.Fprintf(w, "Git errors: %d (caches in those repositories are not listed)\n", len(r.Errors))
 	}
+	if r.Global != nil {
+		if err := writeGlobal(w, r.Global, home); err != nil {
+			return err
+		}
+	}
 	_, err := fmt.Fprintln(w, "Plonge only reports; it deleted nothing.")
+	return err
+}
+
+func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
+	fmt.Fprintln(w, "\nGlobal caches:")
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tSIZE\tKIND\tPATH\tCOMMAND")
+	var total int64
+	n := 0
+	for _, e := range entries {
+		if e.Skipped != "" {
+			continue
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			e.ID, HumanBytes(e.Bytes), e.Kind, Tilde(e.Path, home), e.Command)
+		total += e.Bytes
+		n++
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.Skipped != "" {
+			fmt.Fprintf(w, "Skipped %s: %s\n", e.ID, e.Skipped)
+		}
+	}
+	_, err := fmt.Fprintf(w, "Global total: %s in %s\n", HumanBytes(total), plural(n, "rule"))
+	return err
+}
+
+// WriteGlobalClean prints the outcome of a global clean and ends with the space freed.
+func WriteGlobalClean(w io.Writer, r global.Result, home string) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tSIZE\tKIND\tCOMMAND\tSTATUS")
+	for _, o := range r.Outcomes {
+		status := o.Status
+		if o.Reason != "" {
+			status += ": " + o.Reason
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", o.ID, HumanBytes(o.Bytes), o.Kind, o.Command, status)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintln(w)
+	if r.Failed > 0 {
+		fmt.Fprintf(w, "Failed: %d\n", r.Failed)
+	}
+	if r.Applied {
+		_, err := fmt.Fprintf(w, "Freed: %s\n", HumanBytes(r.FreedBytes))
+		return err
+	}
+	_, err := fmt.Fprintln(w, "Dry run; no command ran. Use --apply to run them.")
 	return err
 }
 
