@@ -348,9 +348,8 @@ func TestCleanGlobal(t *testing.T) {
 }
 
 func TestCleanGlobalExitsNonZeroOnFailure(t *testing.T) {
-	home := setup(t)
+	setup(t)
 	fakeTool(t, "uv", `[ "$*" = "cache dir" ] && { echo /no/such/cache; exit 0; }; echo "cannot prune" >&2; exit 4`)
-	_ = home
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"clean", "--global", "--apply"}, &stdout, &stderr)
 	if code != 1 || !strings.Contains(stdout.String(), "cannot prune") || !strings.Contains(stdout.String(), "Failed: 1") {

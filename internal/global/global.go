@@ -30,7 +30,8 @@ type Entry struct {
 	// Skipped is why plonge cannot use this rule here, or empty.
 	Skipped string `json:"skipped,omitempty"`
 
-	argv []string
+	argv  []string
+	stale []string // for the built-in Xcode rule, the folders to delete
 }
 
 // Runner resolves tools and runs them from the home directory,
@@ -163,6 +164,9 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 		entries = append(entries, e)
 	}
 	measure(entries)
+	if e, ok := r.xcodeEntry(); ok {
+		entries = append(entries, e)
+	}
 	return entries
 }
 
@@ -245,6 +249,10 @@ func (r Runner) Clean(ctx context.Context, entries []Entry, opts Options) Result
 
 // apply runs one rule's command and measures the cache again.
 func (r Runner) apply(ctx context.Context, o *Outcome) {
+	if o.ID == rules.XcodeRuleID {
+		applyXcode(ctx, o)
+		return
+	}
 	_, err := r.run(ctx, o.argv)
 	o.FreedBytes = max(0, o.Bytes-usage(o.Path))
 	if err != nil {

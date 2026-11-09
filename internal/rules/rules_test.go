@@ -195,6 +195,7 @@ os = "darwin"
 		"other clean":  "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"rm -rf /\"\nkind = \"prune\"\n",
 		"other path":   "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"echo /x\"\nclean = \"t c\"\nkind = \"prune\"\n",
 		"empty tool":   "[[global]]\nid = \"a\"\ntool = \"\"\npath = \"/x\"\nclean = \"t c\"\nkind = \"prune\"\n",
+		"reserved id":  "[[global]]\nid = \"xcode-derived-data\"\n" + base,
 		"unknown key":  "[[global]]\nid = \"a\"\nnope = 1\n" + base,
 		"duplicate id": "[[global]]\nid = \"a\"\n" + base + "[[global]]\nid = \"a\"\n" + base,
 	}

@@ -129,6 +129,13 @@ and otherwise from `PATH`, passing over mise's shims.
 It runs commands from your home directory, without a shell.
 A rule whose tool is missing is skipped and reported.
 
+On macOS, a built-in rule, `xcode-derived-data`, cleans stale Xcode build data.
+Xcode has no prune command,
+so plonge deletes only a folder in `~/Library/Developer/Xcode/DerivedData`
+whose `info.plist` names a `WorkspacePath` that no longer exists.
+It keeps a folder without a readable `WorkspacePath`,
+and a folder whose workspace is on a volume that is not mounted.
+
 You can add a rule, or replace a default with the same `id`,
 in `rules.toml`:
 

@@ -39,6 +39,9 @@ const (
 	KindClear = "clear" // removes everything; the next build downloads it again
 )
 
+// XcodeRuleID names the built-in rule for stale Xcode DerivedData folders.
+const XcodeRuleID = "xcode-derived-data"
+
 // Global describes a cache that a tool's own command cleans.
 type Global struct {
 	ID    string `toml:"id"`
@@ -109,6 +112,9 @@ func parse(data, name string) (file, error) {
 func (g Global) validate() error {
 	if g.ID == "" {
 		return fmt.Errorf("a global rule has no id")
+	}
+	if g.ID == XcodeRuleID {
+		return fmt.Errorf("global rule id %q is reserved for a built-in rule", g.ID)
 	}
 	if g.Tool == "" || len(strings.Fields(g.Tool)) != 1 {
 		return fmt.Errorf("global rule %q: tool must be one command name", g.ID)
