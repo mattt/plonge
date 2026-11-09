@@ -210,6 +210,39 @@ To add the server to Claude Code:
 claude mcp add plonge -- plonge mcp
 ```
 
+## Agent skill
+
+`skills/plonge/SKILL.md` tells coding agents when to use plonge
+(low disk space, cleanup requests), to scan first, to show sizes,
+and to ask you before `clean --apply`.
+To install it for Claude Code, copy `skills/plonge` to `~/.claude/skills/plonge`.
+
+## Hooks
+
+`plonge disk --warn-below` always exits 0, so a hook can call it at any time.
+This Claude Code `SessionStart` hook warns when free space is low.
+Add it to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "plonge disk --warn-below 20GiB"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Claude Code adds the hook's output to the session,
+so the agent sees the warning and can offer to run the skill.
+
 ## Rules
 
 Plonge has these default rules:
