@@ -174,8 +174,9 @@ Plonge does not refuse these repositories when SwiftPM can make them again:
 - A bare clone directly in `repositories` must be bare,
   have no linked worktrees, and have one remote, `origin`,
   set up as a mirror of a `location` that a pin in `Package.resolved` names.
-  Plonge compares the two without case, scheme, user, port,
-  trailing slash, or `.git` suffix.
+  The origin URL must equal the `location` exactly,
+  except for one trailing slash;
+  for a local path, both must resolve, through symlinks, to the same directory.
   No commit may be held only by its reflogs.
 - A checkout directly in `checkouts` must have a `.git` directory,
   not a `.git` file or symlink, and one remote, `origin`,
@@ -207,8 +208,12 @@ that configuration could otherwise change.
 It checks when it measures the cache and again right before deletion.
 
 These checks run offline, so they cannot tell a commit that someone pushed
-into a bare clone from outside the cache from one that SwiftPM fetched.
-A push from the checkout is detected from the checkout's reflog.
+into a bare clone from one that SwiftPM fetched.
+Plonge reads only the reflogs of the checkout's `refs/remotes/origin` refs,
+where a branch push leaves an entry.
+A tag push leaves no entry there, so a local tag pushed from the checkout
+to its bare clone is not detected, and neither is a push into the bare clone
+from a repository outside the cache.
 A SwiftPM mirror set in `.swiftpm/configuration/mirrors.json`
 clones a URL that differs from the pin's `location`, so its clone is refused.
 
