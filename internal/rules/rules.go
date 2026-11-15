@@ -53,6 +53,10 @@ type Global struct {
 	Kind  string `toml:"kind"`
 	OS    string `toml:"os"` // when set, the rule applies only on this GOOS
 
+	// PathField names the string field that holds the path
+	// when the path command prints a JSON object.
+	PathField string `toml:"path_field"`
+
 	// DeleteContents makes plonge delete what is in Path, in place of Clean.
 	// It is for caches that have no cleanup command, and needs kind clear.
 	DeleteContents bool `toml:"delete_contents"`
@@ -145,6 +149,9 @@ func (g Global) validate() error {
 	}
 	if !g.fixedPath() && !g.startsWithTool(g.Path) {
 		return fmt.Errorf("global rule %q: path must be an absolute path, a ~/ path, or a %s command", g.ID, g.Tool)
+	}
+	if g.PathField != "" && g.fixedPath() {
+		return fmt.Errorf("global rule %q: path_field needs a path command", g.ID)
 	}
 	if g.DeleteContents {
 		if err := g.validateDelete(); err != nil {

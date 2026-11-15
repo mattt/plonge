@@ -4,6 +4,7 @@ package global
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -143,10 +144,32 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 		return "", err
 	}
 	path := lastLine(out)
+	if g.PathField != "" {
+		if path, err = jsonField(out, g.PathField); err != nil {
+			return "", err
+		}
+	}
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("printed %q, which is not an absolute path", path)
 	}
 	return filepath.Clean(path), nil
+}
+
+// jsonField returns the string field name of the JSON object in out.
+func jsonField(out, name string) (string, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &fields); err != nil {
+		return "", fmt.Errorf("printed invalid JSON: %w", err)
+	}
+	raw, ok := fields[name]
+	if !ok {
+		return "", fmt.Errorf("printed no %q field", name)
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf("printed a %q field that is not a string", name)
+	}
+	return value, nil
 }
 
 // List resolves each rule for this operating system and measures its cache.

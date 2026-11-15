@@ -262,3 +262,17 @@ func TestGlobalCheckValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestGlobalPathFieldValidation(t *testing.T) {
+	const rule = "[[global]]\nid = \"a\"\ntool = \"t\"\nclean = \"t c\"\nkind = \"prune\"\npath_field = \"dir\"\n"
+	f, err := parse(rule+"path = \"t info --json\"\n", "test")
+	if err != nil || f.Global[0].PathField != "dir" {
+		t.Errorf("path command: %+v, %v", f.Global, err)
+	}
+	for _, path := range []string{"~/c", "/c"} {
+		_, err := parse(rule+"path = \""+path+"\"\n", "test")
+		if err == nil || !strings.Contains(err.Error(), "path_field needs a path command") {
+			t.Errorf("%s: err = %v", path, err)
+		}
+	}
+}

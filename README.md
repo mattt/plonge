@@ -302,6 +302,10 @@ os = "darwin"
 `path` is a command that prints the cache's path,
 or a fixed path that starts with `/` or `~/`.
 Both `path` and `clean` commands must start with `tool`.
+Plonge uses the last line that a `path` command prints.
+If the command prints a JSON object instead,
+set `path_field` to the name of the string field that holds the path,
+such as `path_field = "npmCache"` for `deno info --json`.
 Command strings are split at whitespace.
 Shell quoting, pipes, and variable expansion are not supported.
 `os` limits a rule to one operating system,

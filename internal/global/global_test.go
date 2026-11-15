@@ -236,6 +236,30 @@ func TestFailuresAndFixedPath(t *testing.T) {
 	}
 }
 
+func TestPathField(t *testing.T) {
+	bin := fakeTools(t)
+	cache := cacheDir(t, 10)
+	addTool(t, bin, "ok", fmt.Sprintf(`printf '{\n  "version": 1,\n  "dir": %q\n}\n'`, cache))
+	addTool(t, bin, "text", fmt.Sprintf(`echo %q`, cache))
+	addTool(t, bin, "missing", `echo '{"other": "/x"}'`)
+	addTool(t, bin, "number", `echo '{"dir": 3}'`)
+	addTool(t, bin, "relative", `echo '{"dir": "x"}'`)
+	rule := func(tool string) rules.Global {
+		return rules.Global{ID: tool, Tool: tool, Path: tool + " info", PathField: "dir", Clean: tool + " clean", Kind: rules.KindPrune}
+	}
+	entries := runner(t).List(context.Background(), []rules.Global{
+		rule("ok"), rule("text"), rule("missing"), rule("number"), rule("relative"),
+	})
+	if e := entries[0]; e.Skipped != "" || e.Path != cache || e.Bytes < 10 {
+		t.Errorf("ok = %+v", e)
+	}
+	for i, want := range []string{"invalid JSON", `no "dir" field`, "not a string", "not an absolute path"} {
+		if e := entries[i+1]; !strings.Contains(e.Skipped, want) || e.Command != "" {
+			t.Errorf("%s = %+v, want %q", e.ID, e, want)
+		}
+	}
+}
+
 // TestDefaultRulesRunOnlyFakes checks the default rules with only fake tools on PATH.
 func TestDefaultRulesRunOnlyFakes(t *testing.T) {
 	bin := fakeTools(t)
