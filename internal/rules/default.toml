@@ -15,6 +15,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # Zig 0.13 renamed the local cache from zig-cache to .zig-cache.
 # zig-out is left out: it is install output, not a cache, and can hold
 # programs and libraries that a user runs or links from.
+# Gradle puts a project's output in build beside its build or settings file.
+# setuptools uses build beside pyproject.toml or setup.py.
 # Mix puts build output in _build. Mix keeps dependency sources in deps,
 # which is left out because an edited Hex package there has no Git data
 # that plonge can check. Rebar3 also uses _build, but it puts dependency
@@ -32,7 +34,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 ".zig-cache" = ["build.zig"]
 _build = ["mix.exs"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
-build = ["pyproject.toml", "setup.py"]
+build = ["build.gradle", "build.gradle.kts", "pyproject.toml", "settings.gradle",
+         "settings.gradle.kts", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
@@ -322,6 +325,47 @@ tool = "rebar3"
 path = "~/.cache/rebar3/hex"
 delete_contents = true
 kind = "clear"
+
+# Gradle has no command that cleans the caches in its user home, and none that
+# prints the user home, which is $GRADLE_USER_HOME, or ~/.gradle when it is
+# not set. Gradle deletes unused cache entries on its own when a daemon stops.
+# caches holds downloaded dependencies, transforms, the local build cache,
+# and the caches of each Gradle version, which later builds make again.
+# It also holds user-id.txt, an ID that Gradle writes again when it is missing.
+# The rule leaves out gradle.properties, which can hold credentials, init.d,
+# wrapper/dists, jdks, daemon, and native in the user home.
+# Many projects run Gradle only through gradlew, with no gradle on PATH,
+# so the rule needs java, which every Gradle build runs on.
+[[global]]
+id = "gradle-caches"
+tool = "java"
+path = "~/.gradle"
+path_env = "GRADLE_USER_HOME"
+path_subdir = "caches"
+delete_contents = true
+kind = "clear"
+
+# Maven has no command that cleans its local repository, and none that prints
+# its path without a plugin that it may have to download. The path can be set
+# in settings.xml, by maven.repo.local in MAVEN_OPTS, MAVEN_ARGS, or a
+# project's .mvn/maven.config, and, in Maven 4, in properties files,
+# so this rule uses Maven's default, ~/.m2/repository.
+# A moved repository is not covered.
+# The rule leaves out settings.xml, settings-security.xml, toolchains.xml,
+# and extensions.xml in ~/.m2.
+# mvn install and install:install-file put artifacts in the repository that
+# no remote repository may hold, and write maven-metadata-local.xml for them.
+# A download never writes that file, so the rule refuses a repository
+# that holds one.
+# Many projects run Maven only through mvnw, with no mvn on PATH,
+# so the rule needs java, which every Maven build runs on.
+[[global]]
+id = "maven-repository"
+tool = "java"
+path = "~/.m2/repository"
+delete_contents = true
+kind = "clear"
+refuse_names = ["maven-metadata-local.xml"]
 
 # RubyGems keeps a copy of each .gem file that it installs in the cache
 # directory of the gem directory, and has no command that removes the copies.

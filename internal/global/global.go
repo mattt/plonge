@@ -47,6 +47,8 @@ type Entry struct {
 	stale       []string // for the built-in Xcode rule, the folders to delete
 	// deleteContents is true when plonge deletes what is in Path itself.
 	deleteContents bool
+	// refuseNames are the rule's refuse_names.
+	refuseNames []string
 }
 
 // Runner resolves tools and runs them from the home directory,
@@ -264,7 +266,11 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 			e.Skipped = err.Error()
 		case g.DeleteContents:
 			e.deleteContents = true
+			e.refuseNames = g.RefuseNames
 			if e.Skipped = r.refuseDelete(ctx, path); e.Skipped == "" {
+				e.Skipped = refuseNames(path, e.refuseNames)
+			}
+			if e.Skipped == "" {
 				e.Command = r.deleteAction(path)
 			}
 		default:

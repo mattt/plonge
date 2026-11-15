@@ -54,6 +54,11 @@ func TestCoverageTableIncludesDefaultRules(t *testing.T) {
 		if !slices.ContainsFunc(rows, func(row map[string]bool) bool { return row[rule.ID] && row[action] }) {
 			t.Errorf("no coverage table row lists global rule %q with %q", rule.ID, action)
 		}
+		for _, n := range rule.RefuseNames {
+			if !slices.ContainsFunc(rows, func(row map[string]bool) bool { return row[rule.ID] && row[n] }) {
+				t.Errorf("no coverage table row lists global rule %q with refuse_names %q", rule.ID, n)
+			}
+		}
 	}
 	for name, paths := range r.RefuseInside {
 		for _, p := range paths {

@@ -17,7 +17,9 @@ func TestDefault(t *testing.T) {
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
 		t.Errorf("beside target = %q", r.Beside["target"])
 	}
-	if !slices.Equal(r.Beside["build"], []string{"pyproject.toml", "setup.py"}) {
+	wantBuild := []string{"build.gradle", "build.gradle.kts", "pyproject.toml",
+		"settings.gradle", "settings.gradle.kts", "setup.py"}
+	if !slices.Equal(r.Beside["build"], wantBuild) {
 		t.Errorf("beside build = %q", r.Beside["build"])
 	}
 	if !slices.Equal(r.Beside["_build"], []string{"mix.exs"}) {
@@ -155,7 +157,12 @@ func TestMatch(t *testing.T) {
 		{".tox", nil, ".tox"},
 		{".nox", nil, ".nox"},
 		{"build", nil, ""},
-		{"build", []string{"package.json", "build.gradle"}, ""},
+		{"build", []string{"package.json"}, ""},
+		{"build", []string{"build.gradle"}, "build beside build.gradle"},
+		{"build", []string{"build.gradle.kts"}, "build beside build.gradle.kts"},
+		{"build", []string{"settings.gradle"}, "build beside settings.gradle"},
+		{"build", []string{"settings.gradle.kts"}, "build beside settings.gradle.kts"},
+		{"build", []string{"build.gradle.dcl", "gradle.properties"}, ""},
 		{"build", []string{"pyproject.toml"}, "build beside pyproject.toml"},
 		{"build", []string{"setup.py"}, "build beside setup.py"},
 		{"vendor/bundle", []string{"Gemfile"}, "vendor/bundle beside Gemfile"},
@@ -552,5 +559,30 @@ func TestCargoRulesKeepCargoHomeState(t *testing.T) {
 	}
 	if len(want) > 0 {
 		t.Errorf("missing rules: %v", want)
+	}
+}
+
+func TestGlobalRefuseNamesValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\nkind = \"clear\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"delete_contents = true\nrefuse_names = [\"keep.xml\", \".keep\"]\n", ""},
+		{"clean = \"t gc\"\nrefuse_names = [\"keep.xml\"]\n", "refuse_names needs delete_contents"},
+		{"delete_contents = true\nrefuse_names = [\"a/b\"]\n", `invalid name "a/b"`},
+		{"delete_contents = true\nrefuse_names = [\"..\"]\n", `invalid name ".."`},
+		{"delete_contents = true\nrefuse_names = [\"\"]\n", `invalid name ""`},
+	}
+	for _, c := range cases {
+		f, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil || !slices.Equal(f.Global[0].RefuseNames, []string{"keep.xml", ".keep"}) {
+				t.Errorf("%q: %+v, %v", c.extra, f.Global, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
+		}
 	}
 }

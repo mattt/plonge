@@ -95,7 +95,7 @@ The next build writes it again; a strict editable install stops working
 until it is installed again.
 `build` is a common directory name, so the rule matches it only
 beside `pyproject.toml` or `setup.py`, the files that start a setuptools build.
-No other default rule uses the name `build`.
+The Gradle rule below also matches `build`, beside Gradle's project files.
 A `build` directory that matches is not entered,
 so a cache inside it, such as `__pycache__`, is part of that match.
 
@@ -362,8 +362,8 @@ The global-cache column lists additional rules relevant to that tool.
 | `elixir` | Guarded `mise-tools` | `_build` beside `mix.exs`, refused when it holds `*/rel` | `hex-packages`: `delete_contents` of `~/.hex/packages` (clear) | `scan` reports project matches; `clean` selects quiet ones. A `_build` that holds a release is refused. `clean --global` selects mise rules; `--include-clear` adds `hex-packages`. | Mix `deps`, which can hold edited dependency sources; `_build` moved by `MIX_BUILD_ROOT`, `MIX_BUILD_PATH`, or `:build_path`; `_build` with a release; a Hex cache moved by `HEX_HOME` or `MIX_XDG`; Hex's registry cache and docs. |
 | `erlang` | Guarded `mise-tools` | none yet; `_build` beside `rebar.config` is left out because it holds dependency sources | `rebar3-hex`: `delete_contents` of `~/.cache/rebar3/hex` (clear) | `scan` and `clean` have no Rebar3 project rule. `clean --global` selects mise rules; `--include-clear` adds `rebar3-hex`. | Rebar3 `_build`, which holds dependency sources that a user can edit; `_checkouts`; a Rebar3 cache moved by `REBAR_CACHE_DIR`; Rebar3's global plugins and its `local install` copy. |
 | `go` | Guarded `mise-tools` | none yet | `go-modules`: `go clean -modcache` (clear); `go-build`: `go clean -cache` (clear) | `scan` and `clean` have no Go project rule. `clean --global` selects mise rules; `--include-clear` adds both Go rules. | Project binaries, `vendor`, and caches at paths other than those returned by Go from the home directory. |
-| `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); Gradle project `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
-| `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1); `yarn-berry`: `yarn cache clean` (clear, Yarn 2 and later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and the one Yarn rule that matches the version of `yarn` in the home directory. | Project `.yarn/cache` folders; the Yarn 2+ global cache when `yarn` in the home directory is Yarn 1 or `enableGlobalCache` is off; separate pnpm stores not resolved from the home directory; `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
+| `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml`; `build` beside `build.gradle`, `build.gradle.kts`, `settings.gradle`, or `settings.gradle.kts` | `gradle-caches`: `delete_contents` of `caches` in the Gradle user home (clear); the user home is `$GRADLE_USER_HOME`, or `~/.gradle`. `maven-repository`: `delete_contents` of `~/.m2/repository` (clear), refused when it holds a `maven-metadata-local.xml` (`refuse_names`) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `gradle-caches` and `maven-repository`. Both need `java`, not `gradle` or `mvn`, because many projects use only `gradlew` or `mvnw`. Gradle also deletes unused cache entries on its own. | A Maven repository that holds artifacts from `mvn install` or `install:install-file`, which the rule refuses; a Maven repository moved by `localRepository`, `maven.repo.local`, or Maven 4's `maven.user.conf`; Maven's `.mvn/target/project-local-repo`; a Gradle user home moved by `-g` or `gradle.user.home`, or a relative `GRADLE_USER_HOME`, which the rule skips; `wrapper/dists`, `jdks`, `daemon`, and `native` in the Gradle user home; `gradle.properties`, `init.d`, and the files in `~/.m2`, which hold configuration and credentials; `build` moved by `layout.buildDirectory`, or in a subproject with no build file of its own; `build.gradle.dcl` and `settings.gradle.dcl` projects; `.kotlin`. |
+| `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1); `yarn-berry`: `yarn cache clean` (clear, Yarn 2 and later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and the one Yarn rule that matches the version of `yarn` in the home directory. | Project `.yarn/cache` folders; the Yarn 2+ global cache when `yarn` in the home directory is Yarn 1 or `enableGlobalCache` is off; separate pnpm stores not resolved from the home directory; `build` output, unless a Python or Gradle project file is beside it. |
 | `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py`; `build` and `dist` beside `pyproject.toml` or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | tox and nox environments moved by `--workdir`, `work_dir`, or `--envdir`; build output moved by setuptools' `build_base`; `*.egg-info`; `dist` moved by `--outdir` or `--out-dir`; uv-managed Python installations outside mise; caches at other configured paths. |
 | `ruby` | Guarded `mise-tools` | `vendor/bundle` beside `Gemfile` or `gems.rb`; `tmp/cache` beside `config.ru` | `rubygems-cache`: `delete_contents` of `cache` in the directory that `gem env gemdir` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `rubygems-cache`. | Bundler's `vendor/cache`, which `bundle cache` fills on purpose; gems installed at a `path` other than `vendor/bundle`; a `vendor/bundle` that holds a gem from a Git source; the rest of a Rails app's `tmp`; caches moved by `cache_store` or `BOOTSNAP_CACHE_DIR`; gem caches of other Ruby versions and of `--user-install` gems; old gem versions, which `gem cleanup` uninstalls; Bundler's user cache (`~/.bundle/cache`); RubyGems' spec cache. |
 | `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | `cargo-registry`: `delete_contents` of `registry` in the Cargo home (clear); the Cargo home is `$CARGO_HOME`, or `~/.cargo` | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `cargo-registry`. Cargo 1.88 and later also delete global cache files that they have not used for 1 or 3 months. | Cargo's Git cache (`git` in the Cargo home), whose checkouts are working trees that a user can edit; `cargo clean gc`, which is unstable; a relative `CARGO_HOME`, which the rules skip; a `CARGO_HOME` that only the environment of `mise exec` sets; `bin`, `config.toml`, `credentials.toml`, `.crates.toml`, and `.crates2.json`, which hold installed programs and user state; sccache, which has no cleanup command; toolchains managed outside mise. |
@@ -423,7 +423,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | Mix, Rebar3 | `_build` beside `mix.exs` | none | Delete matching project directories; Plonge does not run `mix clean` or `rebar3 clean` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `_build` that holds a release (`*/rel`) or dependency sources (`*/lib/*/src`) is refused. Rebar3 `_build` beside `rebar.config` and Mix `deps` are not matched. |
 | Hex, Rebar3 | none | `hex-packages`, `rebar3-hex` | `delete_contents` of `~/.hex/packages` and `~/.cache/rebar3/hex`; neither tool has a cleanup command | clear; requires `clean --global --include-clear --apply` to run. Caches moved by `HEX_HOME`, `MIX_XDG`, or `REBAR_CACHE_DIR` are not covered. |
 | tox, nox | `.tox`, `.nox` | none | Delete matching project directories; neither tool has a cleanup command | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Environments moved by `--workdir`, `work_dir`, or `--envdir` are not matched. |
-| Maven, Gradle | `target` beside `pom.xml`; `.gradle` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Global repositories and caches remain. |
+| Maven, Gradle | `target` beside `pom.xml`; `.gradle`; `build` beside `build.gradle`, `build.gradle.kts`, `settings.gradle`, or `settings.gradle.kts` | `maven-repository`, `gradle-caches` | Delete matching project directories; `delete_contents` of `~/.m2/repository` and of `caches` in `$GRADLE_USER_HOME` or `~/.gradle`; neither tool has a command that cleans these caches | Project caches: `scan` reports; `clean` selects quiet projects; `--apply` deletes. Global rules: clear; require `clean --global --include-clear --apply` to run. `maven-repository` is refused when the repository holds a `maven-metadata-local.xml`. |
 | setuptools | `build` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; Plonge does not run `setup.py clean --all` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `build_base` setting that moves the directory is not followed. |
 | build, `uv build` | `dist` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; neither tool has a command that removes `dist` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Output moved by `--outdir` or `--out-dir` is not matched. |
 | Bundler | `vendor/bundle` beside `Gemfile` or `gems.rb` | none | Delete matching project directories; Plonge does not run `bundle clean` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. `vendor/cache` and gems at another `path` are not matched. |
@@ -451,8 +451,12 @@ Such a rule must be a clear rule, so it runs only with
 Plonge skips it when the path is not absolute; is `/`, the home directory,
 or contains the home directory; is or resolves through a symlink;
 is in a Git repository; or does not exist.
-The default `zig-global-cache`, `rubygems-cache`, `hex-packages`, and `rebar3-hex` rules,
+The default `zig-global-cache`, `rubygems-cache`, `hex-packages`, `rebar3-hex`,
+`gradle-caches`, and `maven-repository` rules,
 the Deno rules, and the Cargo rules use `delete_contents`.
+A `delete_contents` rule can also list `refuse_names`:
+Plonge skips the rule when its path holds an entry with one of those names
+at any depth, or a directory that it cannot read.
 See the [README](../README.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
@@ -517,6 +521,126 @@ or reset statistics; none clears or prunes the cache
 ([source][sccache-cmdline]).
 sccache limits the cache to 10 gigabytes by default.
 Plonge has no sccache rule.
+
+### Gradle
+
+The Gradle rules were checked against the documentation and source
+of Gradle **9.9.1**, the current stable release.
+Gradle recognizes `build` and `settings` files with the extensions
+`.gradle`, `.gradle.kts`, and `.gradle.dcl`
+([names][gradle-logic-files], [extensions][gradle-script-langs]).
+A project's output goes in `build` in the project directory by default
+([source][gradle-build-dir]), and `layout.buildDirectory` can move it
+([source][gradle-layout]).
+`clean` deletes that directory ([base plugin][gradle-base-plugin]),
+so a later build writes it again.
+Plonge matches `build` only beside `build.gradle`, `build.gradle.kts`,
+`settings.gradle`, or `settings.gradle.kts`.
+A subproject that has no build file of its own, because the root build
+configures it, is not matched.
+`.gradle.dcl` files are for Gradle's declarative preview
+and are not matched yet.
+`buildSrc` is a separate build with its own build file
+([docs][gradle-buildsrc]), so its `build` matches in the same way.
+The project `.gradle` directory holds Gradle's incremental build state and
+the configuration cache ([docs][gradle-project-cache]);
+Plonge already matched it by name.
+
+Gradle has no command that cleans the caches in its user home
+([command line][gradle-cli]).
+It deletes cache entries that it has not used for 7 to 30 days on its own,
+when a daemon stops, unless an init script disables cleanup
+([docs][gradle-cleanup], [retention][gradle-retention]).
+`gradle-caches` deletes the contents of `caches` in the user home:
+the dependency cache, transforms, the local build cache,
+and the caches of each Gradle version ([docs][gradle-caches-doc]).
+Later builds download and make them again, so the rule is `clear`.
+`caches` also holds `user-id.txt`, a persistent ID
+([source][gradle-user-id]); Gradle writes a new one when it is missing.
+The rest of the user home stays:
+`gradle.properties` holds settings and can hold credentials
+([docs][gradle-user-home-secure]), `init.d` holds init scripts,
+and `wrapper/dists`, `jdks`, `daemon`, and `native`
+hold Gradle distributions, provisioned JDKs, daemon logs, and native libraries
+([layout][gradle-user-home]).
+
+Gradle has no command that prints its user home;
+`gradle --version` does not show it ([source][gradle-version-info]).
+Gradle uses the `gradle.user.home` system property,
+then `GRADLE_USER_HOME`, then `.gradle` in the home directory,
+and `-g` overrides all three
+([source][gradle-user-home-lookup], [CLI][gradle-user-home-cli]).
+The rule follows `GRADLE_USER_HOME` with `path_env` and `path_subdir = "caches"`,
+and skips the rule when it is not an absolute path.
+A user home moved by `-g` or `gradle.user.home`,
+in `GRADLE_OPTS` or a project's `gradle.properties`, is not covered.
+Gradle locks its caches for concurrent use
+([docs][gradle-cache-locking]), but Plonge does not take those locks,
+so a build or daemon that runs at the same time can fail;
+`gradle --stop` stops the daemons first.
+
+The rule needs `java` and not `gradle`,
+because many projects run Gradle only through `gradlew`,
+and every Gradle build runs on Java.
+Plonge does not run `java`.
+
+### Maven
+
+The Maven rule was checked against the source of Maven **3.10.0**,
+the current stable release, and of Maven Resolver **2.0.24**, which it uses.
+Maven 4 is in preview; it was checked against **4.0.0-rc-7**.
+Maven has no command that cleans the local repository.
+[`dependency:purge-local-repository`][maven-purge] removes the dependencies
+of one project, and downloads them again by default.
+So `maven-repository` deletes the contents of the local repository.
+Later builds download what they need again, so the rule is `clear`.
+The files beside it in `~/.m2` stay:
+`settings.xml`, `settings-security.xml`, `toolchains.xml`, and `extensions.xml`
+hold settings, credentials, and the master password
+([source][maven-user-files], [security][maven-security]).
+
+The local repository is `~/.m2/repository` by default
+([source][maven-default-repo]).
+`<localRepository>` in the user or global `settings.xml`
+([merge][maven-settings-merge]),
+`maven.repo.local` in `MAVEN_OPTS`, `MAVEN_ARGS`, or a project's
+`.mvn/maven.config` ([source][maven-repo-local]),
+and, in Maven 4, `maven.user.conf` and the `maven-user.properties` files
+([constants][maven4-constants], [order][maven4-repo-order]) move it.
+Maven prints the path only in a build's debug output,
+and `help:evaluate` needs a plugin that Maven can have to download
+([help plugin][maven-help-evaluate]),
+so the rule uses the default path.
+A moved repository is not covered.
+
+`mvn install` and `install:install-file` copy artifacts into the repository
+([install plugin][maven-install-file], [installer][resolver-installer]).
+An artifact from `install-file` may exist in no remote repository,
+so deleting it can lose it.
+Maven Resolver writes metadata for an installed artifact
+to `maven-metadata-local.xml`
+([path][resolver-local-metadata], [name][resolver-metadata-name],
+[generator][maven-versions-metadata]),
+and downloads write `maven-metadata-<repository>.xml` instead
+([source][resolver-remote-metadata]).
+So the rule has `refuse_names = ["maven-metadata-local.xml"]`,
+and Plonge refuses the whole repository when it holds one, at any depth,
+and lists the first one that it finds:
+
+```console
+Skipped maven-repository: contains com/example/lib/maven-metadata-local.xml, which refuse_names "maven-metadata-local.xml" protects
+```
+
+To use the rule, delete the installed artifacts that you can build again,
+or replace the rule without `refuse_names`.
+A remote repository whose ID is `local` gives the same file name,
+so its downloads also make Plonge refuse.
+Maven Resolver keeps its locks in `.locks` in the repository
+([source][resolver-locks]), so a build that runs at the same time can fail.
+
+The rule needs `java` and not `mvn`,
+because many projects run Maven only through `mvnw`.
+Plonge does not run `java`.
 
 ### Bun
 
@@ -699,3 +823,37 @@ See Yarn's [cache clean command][yarn-clean] and
 [spm-local-config]: https://github.com/swiftlang/swift-package-manager/blob/swift-6.4.2-RELEASE/Sources/Workspace/Workspace+Configuration.swift#L227-L250
 [apple-caches]: https://developer.apple.com/documentation/foundation/filemanager/searchpathdirectory/cachesdirectory
 [foundation-xdg]: https://github.com/swiftlang/swift-foundation/blob/swift-6.4.2-RELEASE/Sources/FoundationEssentials/FileManager/SearchPaths/FileManager+XDGSearchPaths.swift#L45-L52
+[gradle-logic-files]: https://github.com/gradle/gradle/blob/v9.9.1/platforms/core-runtime/build-discovery/src/main/java/org/gradle/internal/initialization/BuildLogicFiles.java#L24-L53
+[gradle-script-langs]: https://github.com/gradle/gradle/blob/v9.9.1/platforms/core-runtime/build-discovery/src/main/java/org/gradle/internal/scripts/ScriptingLanguages.java#L30-L37
+[gradle-build-dir]: https://github.com/gradle/gradle/blob/v9.9.1/subprojects/core-api/src/main/java/org/gradle/api/Project.java#L240
+[gradle-layout]: https://github.com/gradle/gradle/blob/v9.9.1/platforms/core-configuration/file-operations/src/main/java/org/gradle/api/internal/file/DefaultProjectLayout.java#L71
+[gradle-base-plugin]: https://docs.gradle.org/9.9.1/userguide/base_plugin.html#sec:base_tasks
+[gradle-buildsrc]: https://docs.gradle.org/9.9.1/userguide/sharing_build_logic_between_subprojects.html
+[gradle-project-cache]: https://docs.gradle.org/9.9.1/userguide/directory_layout.html#dir:caches:project_local
+[gradle-cli]: https://docs.gradle.org/9.9.1/userguide/command_line_interface.html
+[gradle-cleanup]: https://docs.gradle.org/9.9.1/userguide/directory_layout.html#dir:gradle_user_home:cache_cleanup
+[gradle-retention]: https://github.com/gradle/gradle/blob/v9.9.1/subprojects/core/src/main/java/org/gradle/api/internal/cache/DefaultCacheConfigurations.java#L72-L79
+[gradle-caches-doc]: https://docs.gradle.org/9.9.1/userguide/directory_layout.html#dir:caches:shared
+[gradle-user-id]: https://github.com/gradle/gradle/blob/v9.9.1/subprojects/core/src/main/java/org/gradle/internal/scopeids/DefaultPersistentScopeIdLoader.java#L32-L35
+[gradle-user-home-secure]: https://docs.gradle.org/9.9.1/userguide/securing_build_tool.html#sec:user_home
+[gradle-user-home]: https://docs.gradle.org/9.9.1/userguide/directory_layout.html#dir:gradle_user_home
+[gradle-version-info]: https://github.com/gradle/gradle/blob/v9.9.1/platforms/core-runtime/launcher/src/main/java/org/gradle/launcher/cli/internal/VersionInfoRenderer.java#L47-L71
+[gradle-user-home-lookup]: https://github.com/gradle/gradle/blob/v9.9.1/platforms/core-runtime/build-discovery/src/main/java/org/gradle/initialization/BuildLayoutParameters.java#L61-L70
+[gradle-user-home-cli]: https://github.com/gradle/gradle/blob/v9.9.1/platforms/core-runtime/launcher/src/main/java/org/gradle/launcher/cli/converter/BuildLayoutConverter.java#L57-L59
+[gradle-cache-locking]: https://docs.gradle.org/9.9.1/userguide/dependency_caching.html#sec:cache-locking
+[maven-purge]: https://maven.apache.org/plugins/maven-dependency-plugin/purge-local-repository-mojo.html
+[maven-user-files]: https://github.com/apache/maven/blob/maven-3.10.0/maven-embedder/src/main/java/org/apache/maven/cli/MavenCli.java#L144-L157
+[maven-security]: https://github.com/apache/maven/blob/maven-3.10.0/maven-core/src/main/java/org/apache/maven/internal/secdispatcher/SecDispatcherProvider.java#L52
+[maven-default-repo]: https://github.com/apache/maven/blob/maven-3.10.0/maven-core/src/main/java/org/apache/maven/repository/RepositorySystem.java#L50-L56
+[maven-settings-merge]: https://github.com/apache/maven/blob/maven-3.10.0/maven-settings-builder/src/main/java/org/apache/maven/settings/merge/MavenSettingsMerger.java#L81-L83
+[maven-repo-local]: https://github.com/apache/maven/blob/maven-3.10.0/maven-embedder/src/main/java/org/apache/maven/cli/MavenCli.java#L1527-L1537
+[maven4-constants]: https://github.com/apache/maven/blob/maven-4.0.0-rc-7/api/maven-api-core/src/main/java/org/apache/maven/api/Constants.java#L85-L199
+[maven4-repo-order]: https://github.com/apache/maven/blob/maven-4.0.0-rc-7/impl/maven-cli/src/main/java/org/apache/maven/cling/invoker/LookupInvoker.java#L768-L794
+[maven-help-evaluate]: https://maven.apache.org/plugins/maven-help-plugin/evaluate-mojo.html
+[maven-install-file]: https://github.com/apache/maven-install-plugin/blob/maven-install-plugin-3.2.0/src/main/java/org/apache/maven/plugins/install/InstallFileMojo.java#L261-L331
+[resolver-installer]: https://github.com/apache/maven-resolver/blob/maven-resolver-2.0.24/maven-resolver-impl/src/main/java/org/eclipse/aether/internal/impl/DefaultInstaller.java#L193-L216
+[resolver-local-metadata]: https://github.com/apache/maven-resolver/blob/maven-resolver-2.0.24/maven-resolver-impl/src/main/java/org/eclipse/aether/internal/impl/SimpleLocalRepositoryManager.java#L80-L91
+[resolver-metadata-name]: https://github.com/apache/maven-resolver/blob/maven-resolver-2.0.24/maven-resolver-impl/src/main/java/org/eclipse/aether/internal/impl/DefaultLocalPathComposer.java#L71-L129
+[maven-versions-metadata]: https://github.com/apache/maven/blob/maven-3.10.0/maven-resolver-provider/src/main/java/org/apache/maven/repository/internal/VersionsMetadataGenerator.java#L89-L98
+[resolver-remote-metadata]: https://github.com/apache/maven-resolver/blob/maven-resolver-2.0.24/maven-resolver-impl/src/main/java/org/eclipse/aether/internal/impl/DefaultMetadataResolver.java#L262
+[resolver-locks]: https://github.com/apache/maven-resolver/blob/maven-resolver-2.0.24/maven-resolver-impl/src/main/java/org/eclipse/aether/internal/impl/synccontext/named/BasedirNameMapper.java#L43-L52
