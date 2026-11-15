@@ -141,10 +141,28 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 		return "", err
 	}
 	path := lastLine(out)
+	if g.PathLabel != "" {
+		var ok bool
+		if path, ok = labeledPath(out, g.PathLabel); !ok {
+			return "", fmt.Errorf("printed no line with %q", g.PathLabel+": ")
+		}
+	}
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("printed %q, which is not an absolute path", path)
 	}
 	return filepath.Clean(path), nil
+}
+
+// labeledPath returns the text after "label: " on the last line of out
+// that contains it, so that a prefix such as "info : " is allowed.
+func labeledPath(out, label string) (string, bool) {
+	lines := strings.Split(out, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if _, path, ok := strings.Cut(lines[i], label+": "); ok {
+			return strings.TrimSpace(path), true
+		}
+	}
+	return "", false
 }
 
 // List resolves each rule for this operating system and measures its cache.

@@ -260,6 +260,11 @@ os = "darwin"
 `tool` is the command that must be available.
 `path` is a command that prints the cache's path,
 or a fixed path that starts with `/` or `~/`.
+Plonge uses the last line that the command prints.
+If the tool prints a label before the path, set `path_label`:
+with `path_label = "global-packages"`, Plonge uses the text after
+`global-packages: ` on the last line that contains it,
+so a line such as `info : global-packages: /path/` gives `/path/`.
 Both `path` and `clean` commands must start with `tool`.
 Command strings are split at whitespace.
 Shell quoting, pipes, and variable expansion are not supported.

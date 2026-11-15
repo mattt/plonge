@@ -236,6 +236,33 @@ func TestFailuresAndFixedPath(t *testing.T) {
 	}
 }
 
+func TestPathLabel(t *testing.T) {
+	bin := fakeTools(t)
+	cache := cacheDir(t, 10)
+	addTool(t, bin, "labeled", fmt.Sprintf(`echo "Welcome"; echo "info : store: %s/"; echo "done"`, cache))
+	addTool(t, bin, "plain", fmt.Sprintf(`echo "store: %s"`, cache))
+	addTool(t, bin, "nolabel", fmt.Sprintf(`echo %q`, cache))
+	addTool(t, bin, "relative", `echo "store: cache"`)
+	r := runner(t)
+	entries := r.List(context.Background(), []rules.Global{
+		{ID: "labeled", Tool: "labeled", Path: "labeled list", PathLabel: "store", Clean: "labeled c", Kind: rules.KindClear},
+		{ID: "plain", Tool: "plain", Path: "plain list", PathLabel: "store", Clean: "plain c", Kind: rules.KindClear},
+		{ID: "nolabel", Tool: "nolabel", Path: "nolabel list", PathLabel: "store", Clean: "nolabel c", Kind: rules.KindClear},
+		{ID: "relative", Tool: "relative", Path: "relative list", PathLabel: "store", Clean: "relative c", Kind: rules.KindClear},
+	})
+	for _, e := range entries[:2] {
+		if e.Skipped != "" || e.Path != cache || e.Bytes < 10 {
+			t.Errorf("%s = %+v", e.ID, e)
+		}
+	}
+	if e := entries[2]; !strings.Contains(e.Skipped, `no line with "store: "`) || e.Command != "" {
+		t.Errorf("nolabel = %+v", e)
+	}
+	if e := entries[3]; !strings.Contains(e.Skipped, "not an absolute path") {
+		t.Errorf("relative = %+v", e)
+	}
+}
+
 // TestDefaultRulesRunOnlyFakes checks the default rules with only fake tools on PATH.
 func TestDefaultRulesRunOnlyFakes(t *testing.T) {
 	bin := fakeTools(t)

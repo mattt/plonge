@@ -46,12 +46,15 @@ const XcodeRuleID = "xcode-derived-data"
 
 // Global describes a cache that a tool's own command cleans.
 type Global struct {
-	ID    string `toml:"id"`
-	Tool  string `toml:"tool"`  // the command that must be available
-	Path  string `toml:"path"`  // a command that prints the path, or a fixed path
-	Clean string `toml:"clean"` // the command that cleans the cache
-	Kind  string `toml:"kind"`
-	OS    string `toml:"os"` // when set, the rule applies only on this GOOS
+	ID   string `toml:"id"`
+	Tool string `toml:"tool"` // the command that must be available
+	Path string `toml:"path"` // a command that prints the path, or a fixed path
+	// PathLabel, when set, selects the last line of the path command's output
+	// that contains the label followed by ": ", and takes the path after it.
+	PathLabel string `toml:"path_label"`
+	Clean     string `toml:"clean"` // the command that cleans the cache
+	Kind      string `toml:"kind"`
+	OS        string `toml:"os"` // when set, the rule applies only on this GOOS
 
 	// Check is a command that must succeed before the rule runs.
 	// It must not change anything.
@@ -148,6 +151,9 @@ func (g Global) validate() error {
 	}
 	if !g.fixedPath() && !g.startsWithTool(g.Path) {
 		return fmt.Errorf("global rule %q: path must be an absolute path, a ~/ path, or a %s command", g.ID, g.Tool)
+	}
+	if g.PathLabel != "" && (g.fixedPath() || strings.ContainsAny(g.PathLabel, "\r\n")) {
+		return fmt.Errorf("global rule %q: path_label must be one line and needs a path command", g.ID)
 	}
 	if !g.startsWithTool(g.Clean) {
 		return fmt.Errorf("global rule %q: clean must be a %s command", g.ID, g.Tool)

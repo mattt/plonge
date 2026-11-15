@@ -217,14 +217,15 @@ os = "darwin"
 
 	base := "tool = \"t\"\npath = \"t p\"\nclean = \"t c\"\nkind = \"prune\"\n"
 	bad := map[string]string{
-		"no id":        "[[global]]\n" + base,
-		"bad kind":     "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"t c\"\nkind = \"nuke\"\n",
-		"other clean":  "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"rm -rf /\"\nkind = \"prune\"\n",
-		"other path":   "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"echo /x\"\nclean = \"t c\"\nkind = \"prune\"\n",
-		"empty tool":   "[[global]]\nid = \"a\"\ntool = \"\"\npath = \"/x\"\nclean = \"t c\"\nkind = \"prune\"\n",
-		"reserved id":  "[[global]]\nid = \"xcode-derived-data\"\n" + base,
-		"unknown key":  "[[global]]\nid = \"a\"\nnope = 1\n" + base,
-		"duplicate id": "[[global]]\nid = \"a\"\n" + base + "[[global]]\nid = \"a\"\n" + base,
+		"no id":             "[[global]]\n" + base,
+		"bad kind":          "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"t c\"\nkind = \"nuke\"\n",
+		"other clean":       "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"rm -rf /\"\nkind = \"prune\"\n",
+		"other path":        "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"echo /x\"\nclean = \"t c\"\nkind = \"prune\"\n",
+		"empty tool":        "[[global]]\nid = \"a\"\ntool = \"\"\npath = \"/x\"\nclean = \"t c\"\nkind = \"prune\"\n",
+		"reserved id":       "[[global]]\nid = \"xcode-derived-data\"\n" + base,
+		"unknown key":       "[[global]]\nid = \"a\"\nnope = 1\n" + base,
+		"label, fixed path": "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"/x\"\npath_label = \"p\"\nclean = \"t c\"\nkind = \"prune\"\n",
+		"duplicate id":      "[[global]]\nid = \"a\"\n" + base + "[[global]]\nid = \"a\"\n" + base,
 	}
 	for name, body := range bad {
 		if _, err := Load(writeRules(t, body)); err == nil {
@@ -245,6 +246,7 @@ func TestGlobalCheckValidation(t *testing.T) {
 		{"check = \"t dry\"\nrefuse = \"(\"\n", "refuse:"},
 		{"check = \"t dry\"\ncheck_env = [\"NOVALUE\"]\n", "must be NAME=value"},
 		{"check = \"t dry\"\ncheck_env = [\"=x\"]\n", "must be NAME=value"},
+		{"path_label = \"x\"\n", "path_label must be one line and needs a path command"},
 		{"check = \"t dry\"\nrefuse = 'bad (?P<path>.+)$'\nrefuse_reason = \"why\"\ncheck_env = [\"A=1\"]\n", ""},
 	}
 	for _, c := range cases {
