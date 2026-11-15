@@ -195,8 +195,11 @@ the tool's policy removes only part of it.
 With --apply, clean estimates the space freed from the sizes of the caches,
 and reports the change in free space on your home directory's volume,
 which other processes and snapshots can also change.
-On macOS, a size leaves out the blocks that a file shares with clones
-outside the cache or with snapshots.
+On macOS, a size counts each file's private size from APFS, which leaves out
+blocks shared with clones or kept by snapshots, and adds back, once, the
+blocks of full clones that are all in the cache, even if a snapshot keeps
+them. Compressed files, and volumes without private sizes, use allocated
+blocks. So a size can be smaller or larger than the space that cleanup frees.
 A rule with delete_contents deletes what is in its path, after checks
 that the path is not the home directory, a symlink, or in a Git repository,
 that it holds no Git repository at any depth,
