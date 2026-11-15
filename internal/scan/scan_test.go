@@ -146,6 +146,36 @@ func TestDetect(t *testing.T) {
 	}
 }
 
+func TestDetectBesidePattern(t *testing.T) {
+	isolateGit(t)
+	r := rules.Default()
+	r.Names = append(r.Names, "out")
+	r.Beside["out"] = []string{"*.proj"}
+	root := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{
+		".gitignore":      "out/\n",
+		"app/App.proj":    "",
+		"app/out/x":       "",
+		"lib/proj":        "", // does not match *.proj
+		"lib/out/x":       "",
+		"dir/sub.proj/x":  "", // a directory also matches, as a literal name does
+		"dir/out/x":       "",
+		"none/out/x":      "",
+		"none/x.proj.bak": "",
+	})
+	got := Detect(context.Background(), root, r)
+	if got.Skipped != "" || len(got.Errors) > 0 {
+		t.Fatalf("skipped %q, errors %q", got.Skipped, got.Errors)
+	}
+	want := map[string]string{
+		"app/out": "out beside *.proj",
+		"dir/out": "out beside *.proj",
+	}
+	if f := found(got); !mapsEqual(f, want) {
+		t.Errorf("found %v, want %v", f, want)
+	}
+}
+
 func mapsEqual(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false

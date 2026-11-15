@@ -395,6 +395,7 @@ quiet_hours = 24
 skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
 # Match these names only when a listed project file is in the same directory.
+# A project file can be a pattern, such as "*.csproj".
 [beside]
 dist = ["package.json"]
 target = ["Cargo.toml", "pom.xml"]
@@ -417,6 +418,11 @@ skip = ["third_party"]
 build = ["build.gradle", "build.gradle.kts"]
 dist = ["package.json", "pyproject.toml"]
 ```
+
+A `beside` project file can be a pattern, such as `*.csproj`,
+in the syntax of Go's [`filepath.Match`](https://pkg.go.dev/path/filepath#Match).
+A name that contains `*`, `?`, `[`, or `\` is a pattern;
+a pattern matches any entry in the same directory, as a literal name does.
 
 The scan never enters a directory in `skip`.
 This keeps out caches that are nested in a tool's own cache,

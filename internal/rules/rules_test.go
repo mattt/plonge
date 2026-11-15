@@ -132,6 +132,30 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+func TestBesidePatterns(t *testing.T) {
+	for _, m := range []string{"*.csproj", "a?.txt", "[ab].toml", `\*`} {
+		if !IsPattern(m) {
+			t.Errorf("IsPattern(%q) = false", m)
+		}
+	}
+	for _, m := range []string{"package.json", "Cargo.toml"} {
+		if IsPattern(m) {
+			t.Errorf("IsPattern(%q) = true", m)
+		}
+	}
+	r, err := Load(writeRules(t, "names = [\"out\"]\n[beside]\nout = [\"*.proj\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.Beside["out"], []string{"*.proj"}) {
+		t.Errorf("beside out = %q", r.Beside["out"])
+	}
+	_, err = Load(writeRules(t, "[beside]\nout = [\"[a\"]\n"))
+	if err == nil || !strings.Contains(err.Error(), "invalid project file pattern") {
+		t.Errorf("bad pattern: err = %v", err)
+	}
+}
+
 func TestSkip(t *testing.T) {
 	want := []string{".cache", ".git", ".hg", ".jj", ".svn"}
 	if got := Default().Skip; !slices.Equal(got, want) {

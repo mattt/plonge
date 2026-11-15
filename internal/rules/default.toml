@@ -7,6 +7,7 @@ quiet_hours = 24
 skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
 # Match these names only when a listed project file is in the same directory.
+# A project file can be a pattern, such as "*.csproj".
 [beside]
 dist = ["package.json"]
 target = ["Cargo.toml", "pom.xml"]

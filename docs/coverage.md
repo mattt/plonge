@@ -49,6 +49,7 @@ Project cache names are exact directory names.
 Every match must be inside a scanned root, ignored by Git,
 and contain no tracked files.
 A listed project file must be in the cache directory's parent directory.
+A project file written as a pattern, such as `*.csproj`, matches any name of that form.
 No project file is required unless the table names one.
 The scan does not enter `.cache`, `.git`, `.hg`, `.jj`, or `.svn`,
 or a directory that already matches a cache rule.

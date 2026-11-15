@@ -118,8 +118,7 @@ func walk(root string, r rules.Rules) ([]Candidate, []string) {
 		name := d.Name()
 		parent := filepath.Dir(path)
 		rule := r.Match(name, func(marker string) bool {
-			_, err := os.Lstat(filepath.Join(parent, marker))
-			return err == nil
+			return hasEntry(parent, marker)
 		})
 		if rule != "" {
 			found = append(found, Candidate{Path: path, Rule: rule})
@@ -134,6 +133,25 @@ func walk(root string, r rules.Rules) ([]Candidate, []string) {
 		return nil
 	})
 	return found, repos
+}
+
+// hasEntry reports whether dir holds an entry named marker,
+// or, when marker is a pattern, an entry whose name matches it.
+func hasEntry(dir, marker string) bool {
+	if !rules.IsPattern(marker) {
+		_, err := os.Lstat(filepath.Join(dir, marker))
+		return err == nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if ok, _ := filepath.Match(marker, e.Name()); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // repoFor returns the innermost nested repository that holds path, or root.
