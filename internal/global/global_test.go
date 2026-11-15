@@ -309,3 +309,69 @@ esac`, packages, http))
 		t.Errorf("uv = %+v", e)
 	}
 }
+
+// TestSwiftPMRules checks that each system gets its own SwiftPM rule,
+// and that purge-cache runs from the home directory with a scratch path
+// that resolves to the cache directory, so that it does not make ~/.build.
+func TestSwiftPMRules(t *testing.T) {
+	for _, tc := range []struct {
+		goos, id, other, cache string
+	}{
+		{"darwin", "swiftpm-macos", "swiftpm-linux", "Library/Caches/org.swift.swiftpm"},
+		{"linux", "swiftpm-linux", "swiftpm-macos", ".cache/org.swift.swiftpm"},
+	} {
+		t.Run(tc.goos, func(t *testing.T) {
+			bin := fakeTools(t)
+			r := runner(t)
+			r.GOOS = tc.goos
+			cache := filepath.Join(r.Home, tc.cache)
+			if err := os.MkdirAll(cache, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cache, "blob"), make([]byte, 50_000), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			log := filepath.Join(t.TempDir(), "log")
+			addTool(t, bin, "swift", fmt.Sprintf(`echo "$PWD $*" >> %q
+[ "$1 $2 $3" = "package purge-cache --scratch-path" ] && /bin/rm "$4/blob"`, log))
+			ctx := context.Background()
+			got := map[string]Entry{}
+			var picked []Entry
+			for _, e := range r.List(ctx, rules.Default().Global) {
+				got[e.ID] = e
+				if e.ID == tc.id {
+					picked = append(picked, e)
+				}
+			}
+			want := "swift package purge-cache --scratch-path " + tc.cache
+			e := got[tc.id]
+			if e.Skipped != "" || e.Path != cache || e.Command != want || e.Kind != rules.KindClear || e.Bytes < 50_000 {
+				t.Errorf("%s = %+v", tc.id, e)
+			}
+			if _, ok := got[tc.other]; ok {
+				t.Errorf("%s listed on %s", tc.other, tc.goos)
+			}
+			res := r.Clean(ctx, picked, Options{Apply: true})
+			if res.Outcomes[0].Status != Skipped {
+				t.Errorf("without --include-clear: %+v", res)
+			}
+			if _, err := os.Stat(log); err == nil {
+				t.Error("swift ran without --include-clear")
+			}
+			res = r.Clean(ctx, picked, Options{Apply: true, IncludeClear: true})
+			if res.Outcomes[0].Status != Ran || res.FreedBytes < 50_000 {
+				t.Errorf("result = %+v", res)
+			}
+			data, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if line := strings.TrimSpace(string(data)); line != r.Home+" package purge-cache --scratch-path "+tc.cache {
+				t.Errorf("swift ran as %q", line)
+			}
+			if _, err := os.Stat(filepath.Join(r.Home, ".build")); err == nil {
+				t.Error("~/.build exists")
+			}
+		})
+	}
+}
