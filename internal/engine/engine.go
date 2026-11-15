@@ -7,6 +7,7 @@ import (
 
 	"github.com/mattt/plonge/internal/agents"
 	"github.com/mattt/plonge/internal/clean"
+	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/global"
 	"github.com/mattt/plonge/internal/mise"
 	"github.com/mattt/plonge/internal/report"
@@ -63,7 +64,7 @@ func Inspect(ctx context.Context, sel Selection) (Inventory, error) {
 	paths = mise.DropNested(paths, func(root string) bool { return inTree[root] })
 	inv.Roots = scan.Run(ctx, paths, inv.Rules)
 	inv.Sources = agents.Apply(ctx, inv.Roots, env.Home, inv.Now)
-	inv.Sizes = scan.Measure(inv.Roots)
+	inv.Sizes = scan.Measure(ctx, inv.Roots)
 	inv.Report = report.Build(inv.Roots, inv.Sizes, inv.Rules.QuietHours, broken, inv.Now)
 	inv.Report.ActivitySources = inv.Sources
 	if sel.Global {
@@ -86,14 +87,23 @@ func Clean(ctx context.Context, opts CleanOptions) (clean.Result, Inventory, err
 	if err != nil {
 		return clean.Result{}, inv, err
 	}
-	res := clean.Run(ctx, inv.Roots, inv.Sizes, clean.Options{
-		Apply:         opts.Apply,
-		IncludeActive: opts.IncludeActive,
-		MinSize:       opts.MinSize,
-		QuietHours:    inv.Rules.QuietHours,
-		Now:           inv.Now,
-		StillBusy:     func(root string) string { return agents.Busy(ctx, root, inv.Env.Home) },
-	})
+	var res clean.Result
+	run := func() {
+		res = clean.Run(ctx, inv.Roots, inv.Sizes, clean.Options{
+			Apply:         opts.Apply,
+			IncludeActive: opts.IncludeActive,
+			MinSize:       opts.MinSize,
+			QuietHours:    inv.Rules.QuietHours,
+			Now:           inv.Now,
+			StillBusy:     func(root string) string { return agents.Busy(ctx, root, inv.Env.Home) },
+		})
+	}
+	if opts.Apply {
+		change := disk.Track(inv.Env.Home, run)
+		res.HomeVolume = &change
+	} else {
+		run()
+	}
 	res.ActivitySources = inv.Sources
 	return res, inv, nil
 }
@@ -106,5 +116,13 @@ func CleanGlobal(ctx context.Context, opts global.Options) (global.Result, mise.
 		return global.Result{}, env, err
 	}
 	r := global.New(env.Home)
-	return r.Clean(ctx, r.List(ctx, rs.Global), opts), env, nil
+	entries := r.List(ctx, rs.Global)
+	if !opts.Apply {
+		return r.Clean(ctx, entries, opts), env, nil
+	}
+	// The listing runs only lookups and checks, so measure after it.
+	var res global.Result
+	change := disk.Track(env.Home, func() { res = r.Clean(ctx, entries, opts) })
+	res.HomeVolume = &change
+	return res, env, nil
 }

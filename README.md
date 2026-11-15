@@ -77,7 +77,6 @@ A cache is a directory that matches a rule, such as `node_modules` or `.venv`.
 Some rules also require a project file:
 `target`, for example, must be beside `Cargo.toml` or `pom.xml`.
 A match must pass the Git and safety checks below before it enters the totals.
-The scan does not follow directory symlinks or enter a matched cache.
 
 ## Delete project caches
 
@@ -108,8 +107,11 @@ It also refuses a directory that holds an entry that its rule protects;
 the Mix `_build` rule, for example, protects releases and dependency sources.
 Plonge skips a path that does not pass, or reports an error.
 Cleanup deletes directories and does not run project code.
-It can make read-only files writable to remove them.
 It continues after a deletion error and exits with a nonzero status.
+
+After `--apply`, the report gives an estimate of the space freed, from cache sizes,
+and the measured change in free space on your home directory's volume.
+Other processes can also change that second number.
 
 An ignored cache can contain a dependency cloned from Git,
 with commits or edits that the enclosing repository cannot see.
@@ -121,11 +123,14 @@ The report lists each refused cache and its reason, outside the totals:
 Refused ~/code/app/node_modules: contains a Git repository at some-dep
 ```
 
-Swift Package Manager keeps Git checkouts in `.build`,
-so Plonge refuses that directory when the package has remote dependencies.
-`swift package clean` removes the build output there and keeps the checkouts.
-The rule reference describes
-[this check](docs/rules.md#caches-that-hold-a-git-repository) and
+The one exception is Swift Package Manager.
+In a `.build` or `DerivedData` directory beside `Package.swift`,
+Plonge allows dependency clones that are unchanged
+and that SwiftPM can make again from `Package.resolved`.
+It refuses the directory when a clone has edits, extra commits, or any other repository.
+The rule reference describes the
+[Git check](docs/rules.md#caches-that-hold-a-git-repository), the
+[SwiftPM conditions](docs/rules.md#swift-package-manager-checkouts), and
 [project discovery and activity](docs/rules.md#project-discovery-and-activity).
 
 ## Global caches
@@ -149,6 +154,8 @@ as `mise cache prune` and `uv cache prune` do.
 A `clear` rule can remove cached data that is still in use,
 so later commands may have to download dependencies or rebuild files.
 Clear rules need `--include-clear`.
+Most prune rules report a size marked `(whole cache)`,
+of which the tool removes only part.
 
 After you review the dry run, apply it with the same flags:
 
@@ -214,10 +221,11 @@ and the [default rules](internal/rules/default.toml) before you replace an entry
 ## Disk space
 
 Reported cache sizes estimate the space that cleanup could free.
-On Unix, Plonge uses allocated blocks and counts hard links once per cache;
-on other platforms, it uses file lengths.
-Files linked elsewhere, filesystem snapshots, and concurrent changes
+On macOS, Plonge counts only the blocks that a cache does not share
+with files outside it, so a size can be smaller than what `du` reports.
+Files linked elsewhere, snapshots, and concurrent changes
 can change the space freed, and global size totals can overlap.
+The rule reference explains [how sizes are measured](docs/rules.md#sizes-and-freed-space).
 
 `plonge disk` prints the free space on your home directory's volume:
 
@@ -262,7 +270,7 @@ To install it for Claude Code, copy `skills/plonge` to `~/.claude/skills/plonge`
 
 ## Hooks
 
-This Claude Code `SessionStart` hook warns when free space is low.
+This Claude Code `SessionStart` hook shows the agent a warning when free space is low.
 Add it to `~/.claude/settings.json`:
 
 ```json
@@ -281,9 +289,6 @@ Add it to `~/.claude/settings.json`:
   }
 }
 ```
-Claude Code adds the hook's output to the session,
-so the agent sees the warning and can offer to clean up.
-
 ## Development
 
 The repository pins its tools in `mise.toml`.

@@ -122,6 +122,7 @@ but still scans separately listed roots inside it.
 It removes duplicate roots and roots already covered by another Git work tree root.
 Nested repositories use their own Git checks but share the root's activity status.
 The scan does not follow directory symlinks or enter a matched cache.
+Project cleanup can make read-only files and directories writable to remove them.
 
 Activity includes the modification time of the root's Git HEAD log,
 or of `HEAD` if the log is unavailable,
@@ -154,13 +155,129 @@ Refused ~/code/app/node_modules: contains a Git repository at some-dep
 ```
 
 With `--json`, each entry in `refused` has `path`, `project`, `rule`, and `reason`.
-Swift Package Manager keeps Git checkouts and bare clones in `.build`,
-so Plonge refuses that directory when it holds remote dependencies.
+The only exception is the clones that Swift Package Manager manages,
+as [described below](#swift-package-manager-checkouts).
 This protection also applies to worktrees with a `.git` file.
 npm, pnpm, and Yarn 1 remove `.git` when installing packages from Git,
 so those packages are not refused for that reason.
-For Swift packages, `swift package clean` removes build output
-but keeps the checkouts; `swift package reset` removes them too.
+
+## Swift Package Manager checkouts
+
+Swift Package Manager keeps a clone of each remote dependency
+in `.build/checkouts/<identity>`
+and a bare clone in `.build/repositories/<name>`.
+`swift package resolve` makes both again at the commits in `Package.resolved`.
+For a `.build` directory beside `Package.swift`,
+Plonge does not refuse these repositories when SwiftPM can make them again:
+
+- A bare clone directly in `repositories` must be bare,
+  have no linked worktrees, and have one remote, `origin`,
+  set up as a mirror of a `location` that a pin in `Package.resolved` names.
+  Two URLs with a scheme or an scp-style host, such as `git@host:path`,
+  must be equal byte for byte, except for one trailing slash;
+  two absolute paths must resolve, through symlinks, to the same directory.
+  Plonge refuses a relative path in either one.
+  No commit may be held only by its reflogs.
+- A checkout directly in `checkouts` must have a `.git` directory,
+  not a `.git` file or symlink, and one remote, `origin`,
+  that is an accepted bare clone in the same cache.
+  Its `HEAD` must be the commit that `Package.resolved` pins for its identity,
+  and `git status` must show no changed, untracked, or ignored files.
+  It must have no stash, no linked worktrees,
+  no files marked assume-unchanged or skip-worktree,
+  and no reflog entry for a push to `origin`.
+  Every commit in it must be in `HEAD`, in `refs/remotes/origin`,
+  or in a tag that the bare clone holds at the same object.
+  A local branch, a tag that only the checkout has,
+  or a reflog does not count.
+
+Plonge refuses the `.build` directory for any other Git repository in it,
+including a repository inside a checkout, such as a submodule,
+and the reason names the path:
+
+```console
+Refused ~/code/app/.build: contains a Git repository at checkouts/swift-nio that has changed, untracked, or ignored files
+```
+
+Plonge reads `Package.resolved` versions 2 and 3, which key pins by package identity.
+It refuses a checkout when it cannot read the file,
+including a file in the version 1 format.
+It runs Git with the same environment as its other Git checks,
+names each repository explicitly, and sets every `git status` option
+that configuration could otherwise change.
+It checks when it measures the cache and again right before deletion.
+
+These checks run offline, so they cannot tell a commit that someone pushed
+into a bare clone from one that SwiftPM fetched.
+Plonge reads only the reflogs of the checkout's `refs/remotes/origin` refs,
+where a branch push leaves an entry.
+A tag push leaves no entry there, so a local tag pushed from the checkout
+to its bare clone is not detected, and neither is a push into the bare clone
+from a repository outside the cache.
+A SwiftPM mirror set in `.swiftpm/configuration/mirrors.json`
+clones a URL that differs from the pin's `location`, so its clone is refused.
+
+A `DerivedData` directory beside `Package.swift`,
+such as one that `xcodebuild -derivedDataPath DerivedData` makes,
+has the same layout in `SourcePackages`, and Plonge checks it the same way.
+A `DerivedData` directory beside an Xcode project or workspace
+is still refused when it holds package clones,
+because Xcode keeps those pins inside the project or workspace,
+and one folder can hold several of them.
+
+`swift package reset` removes `.build`;
+`swift package clean` removes only the build output and keeps the checkouts.
+
+## Sizes and freed space
+
+After `--apply`, the report gives two numbers:
+
+```console
+Estimated freed: 29.5 GiB (from cache sizes)
+Free space on ~ grew by 14.0 GiB, from 80.1 GiB to 94.1 GiB; other processes and snapshots can change it
+```
+
+The estimate adds up the sizes of the caches that Plonge deleted or cleaned,
+measured as this section describes.
+The second line is the change in free space on your home directory's volume,
+which Plonge reads before the first deletion and after the last one.
+It is what became available on that volume, but other processes
+write and delete files at the same time,
+and caches on another volume do not change it.
+With `--json`, `home_volume` has `free_before`, `free_after`, and `gained_bytes`,
+or an `error` when Plonge cannot read free space.
+Dry runs do not have these values.
+
+A size is the space that deleting the cache would free,
+as well as Plonge can measure it.
+On Unix, sizes use allocated blocks and count a hard-linked file once per cache.
+On other platforms, sizes use file lengths.
+
+On macOS, a file can be a clone that shares its blocks with other files,
+as when uv clones files from its cache into a virtual environment,
+or when a snapshot, such as a Time Machine local snapshot, keeps them.
+Deleting such a file frees only the blocks that no other file
+or snapshot uses.
+So on macOS, Plonge counts a file's private size,
+which APFS reports through `getattrlist` (`ATTR_CMNEXT_PRIVATESIZE`),
+in place of its allocated blocks.
+When a file and all of its full clones are in the same cache,
+Plonge also counts the blocks that they share, once,
+because deleting the cache frees them.
+That count includes blocks that a snapshot also keeps,
+and blocks that the family shares with a clone that was changed after it was made,
+which APFS no longer counts as a full clone.
+Deleting the cache does not free those blocks,
+so its size can be larger than the space that it frees.
+This count is never larger than the allocated blocks.
+A compressed file, and a file on a volume that does not report a private size,
+use allocated blocks.
+For these reasons, a size on macOS can be smaller than what `du` reports.
+
+Files linked elsewhere, snapshots on other systems, and changes during cleanup
+can affect how much space becomes available.
+Global size totals can also overlap.
+Use `plonge disk` to check free space on your home directory's volume.
 
 ## Global caches
 
@@ -183,7 +300,9 @@ plonge clean --global --apply --include-clear
 
 `plonge clean --global` works only on global caches and leaves your projects alone.
 By default it lists the commands as a dry run.
-`--apply` runs eligible actions and estimates the space freed.
+`--apply` runs eligible actions, estimates the space freed,
+and reports the change in free space on your home directory's volume,
+as [Sizes and freed space](#sizes-and-freed-space) describes.
 Global cleanup does not use the project activity or Git checks,
 except that a `delete_contents` rule refuses a path
 that is in or holds a Git repository.
@@ -197,6 +316,16 @@ A `clear` rule can remove cached data still in use
 and requires `--include-clear`.
 Later commands may need to download dependencies or rebuild files.
 Neither kind guarantees that the whole reported size will be freed.
+
+For most prune rules, the size is the size of the whole cache,
+and the tool's policy selects which part of it to remove,
+so the space that a prune frees can be much smaller.
+`scan --global` and `clean --global` mark such a size `(whole cache)`,
+and with `--json`, the rule has `"whole_cache": true`.
+A prune rule that lists what it removes, as `mise-tools` does,
+and `xcode-derived-data` report the size of what they would remove instead,
+without the mark.
+A clear rule's size is the size of its cache, without the mark.
 
 | ID | Kind | Action |
 | --- | --- | --- |

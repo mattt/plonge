@@ -69,6 +69,7 @@ Scan reports caches in projects recorded by mise and in each --root directory.
 A root is a directory to scan; it must be in a Git work tree.
 A root outside one is skipped, but the roots inside it are still scanned.
 Scan refuses a cache that is or holds a Git repository,
+other than the unchanged dependency clones that SwiftPM can restore,
 or that holds an entry that its rule's refuse_inside paths protect, and lists it.
 Scan deletes nothing. With --global, it also reports global caches.
 
@@ -178,7 +179,9 @@ const cleanUsage = `Usage: plonge clean [--apply] [--include-active] [--min-size
 
 Clean selects project caches as scan does. Without --apply, it deletes nothing.
 With --apply, it deletes selected directories that Git ignores, that contain
-no tracked files, and that are not and do not hold a Git repository. A quiet project has known activity at least quiet_hours old
+no tracked files, and that are not and do not hold a Git repository,
+other than the unchanged dependency clones that SwiftPM can restore.
+A quiet project has known activity at least quiet_hours old
 (default: 24 hours). Active projects have newer or unknown activity.
 Use --include-active to select them too. Projects that Paseo reports as busy
 (with a running or initializing agent) are excluded. If paseo is on PATH but
@@ -189,6 +192,17 @@ With --global, clean works only on caches outside projects:
 it lists each rule's cleanup action, and with --apply it runs eligible actions.
 Global cleanup does not check project activity. A clear rule requires
 --include-clear because it can remove cached data still in use.
+A size marked (whole cache) is the size of a prune rule's cache;
+the tool's policy removes only part of it.
+
+With --apply, clean estimates the space freed from the sizes of the caches,
+and reports the change in free space on your home directory's volume,
+which other processes and snapshots can also change.
+On macOS, a size counts each file's private size from APFS, which leaves out
+blocks shared with clones or kept by snapshots, and adds back, once, the
+blocks of full clones that are all in the cache, even if a snapshot keeps
+them. Compressed files, and volumes without private sizes, use allocated
+blocks. So a size can be smaller or larger than the space that cleanup frees.
 A rule with delete_contents deletes what is in its path, after checks
 that the path is not the home directory, a symlink, or in a Git repository,
 that it holds no Git repository at any depth,

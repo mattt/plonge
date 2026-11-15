@@ -184,7 +184,7 @@ func TestMiseSizeIsThePrunableVersions(t *testing.T) {
 
 	entries := r.List(ctx, []rules.Global{miseToolsRule(t)})
 	e := entries[0]
-	if strings.Join(e.Targets, "|") != "bun@1.3.10|rust@1.81.0" || e.Note != "" {
+	if strings.Join(e.Targets, "|") != "bun@1.3.10|rust@1.81.0" || e.Note != "" || e.WholeCache {
 		t.Fatalf("entry = %+v", e)
 	}
 	if e.Bytes < 40_000 || e.Bytes >= 900_000 {
@@ -209,7 +209,7 @@ func TestMiseFallsBackToFolderSize(t *testing.T) {
 			}
 			fakeMiseTargets(t, r, ":", listing)
 			e := r.List(context.Background(), []rules.Global{miseToolsRule(t)})[0]
-			if e.Skipped != "" || e.Bytes < 50_000 || len(e.Targets) != 0 || !strings.Contains(e.Note, "whole directory") {
+			if e.Skipped != "" || e.Bytes < 50_000 || len(e.Targets) != 0 || !strings.Contains(e.Note, "whole directory") || !e.WholeCache {
 				t.Errorf("entry = %+v", e)
 			}
 		})

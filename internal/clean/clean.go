@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/scan"
 )
 
@@ -78,6 +79,9 @@ type Result struct {
 	Refused []scan.Refusal `json:"refused"`
 
 	ActivitySources []scan.Source `json:"activity_sources"`
+	// HomeVolume is the free space on the home directory's volume
+	// before and after the deletions; it is nil without Apply.
+	HomeVolume *disk.Change `json:"home_volume,omitempty"`
 }
 
 type planned struct {
