@@ -60,7 +60,9 @@ Plonge gets project directories from mise's record of loaded config files.
 A root is a directory to scan.
 The report calls each root a project, including any directories below it.
 Use `--root` to add a root, or `--no-mise` to use only the roots you give.
-Each root must be in a Git work tree.
+Plonge scans a root only if it is in a Git work tree.
+It skips and reports a root outside one,
+but still scans the roots inside it, such as mise projects.
 For example, from a project's directory:
 
 ```console
@@ -127,9 +129,14 @@ or `$XDG_STATE_HOME/mise/tracked-configs`,
 with `~/.local/state/mise/tracked-configs` as the default.
 Plonge maps each config path to a project root.
 It skips global and system configs and unreadable or broken links,
-and removes duplicate roots and roots inside another root.
+and removes duplicate roots.
+It also removes a root inside another root that is in a Git work tree,
+because the scan of that root includes it.
 A root outside a Git work tree is skipped,
-even if it contains Git repositories.
+and the scan does not look for Git repositories inside it.
+A root inside a skipped root is still scanned,
+so a `--root` folder that holds several repositories
+does not hide the mise projects in those repositories.
 
 The scan does not follow directory symlinks or enter a matched cache.
 The [rules](#rules) also exclude some directory names from the scan.

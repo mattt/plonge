@@ -553,3 +553,70 @@ func TestUsage(t *testing.T) {
 		}
 	}
 }
+
+// folderOfRepos makes a folder that is not a Git work tree
+// and holds two Git repositories, each with a mise record and a node_modules.
+// It returns the folder and the two repositories.
+func folderOfRepos(t *testing.T, home string) (folder string, repos []string) {
+	t.Helper()
+	folder = filepath.Join(home, "code")
+	tracked := filepath.Join(home, "state", "mise", "tracked-configs")
+	if err := os.MkdirAll(tracked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"one", "two"} {
+		repo := filepath.Join(folder, name)
+		gitInit(t, repo)
+		mkfile(t, filepath.Join(repo, "mise.toml"), "")
+		mkfile(t, filepath.Join(repo, ".gitignore"), "node_modules/\n")
+		mkfile(t, filepath.Join(repo, "node_modules", "x.js"), "x")
+		if err := os.Symlink(filepath.Join(repo, "mise.toml"), filepath.Join(tracked, name)); err != nil {
+			t.Fatal(err)
+		}
+		repos = append(repos, repo)
+	}
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	return folder, repos
+}
+
+func TestRootOutsideGitKeepsProjectsInside(t *testing.T) {
+	home := setup(t)
+	folder, repos := folderOfRepos(t, home)
+	for _, args := range [][]string{
+		{"scan", "--json", "--root", folder},
+		{"clean", "--json", "--include-active", "--root", folder},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := run(args, &stdout, &stderr); code != 0 {
+				t.Fatalf("exit %d: %s", code, stderr.String())
+			}
+			var got struct {
+				Caches       []struct{ Path string } `json:"caches"`
+				Items        []struct{ Path string } `json:"items"`
+				SkippedRoots []struct {
+					Path   string `json:"path"`
+					Reason string `json:"reason"`
+				} `json:"skipped_roots"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatalf("%v\n%s", err, stdout.String())
+			}
+			paths := got.Caches
+			if args[0] == "clean" {
+				paths = got.Items
+			}
+			var found []string
+			for _, c := range paths {
+				found = append(found, c.Path)
+			}
+			want := []string{filepath.Join(repos[0], "node_modules"), filepath.Join(repos[1], "node_modules")}
+			if strings.Join(found, "\n") != strings.Join(want, "\n") {
+				t.Errorf("caches = %q, want %q\n%s", found, want, stdout.String())
+			}
+			if args[0] == "scan" && (len(got.SkippedRoots) != 1 || got.SkippedRoots[0].Path != folder) {
+				t.Errorf("skipped roots = %+v, want only %s", got.SkippedRoots, folder)
+			}
+		})
+	}
+}
