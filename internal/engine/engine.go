@@ -63,7 +63,7 @@ func Inspect(ctx context.Context, sel Selection) (Inventory, error) {
 	paths = mise.DropNested(paths, func(root string) bool { return inTree[root] })
 	inv.Roots = scan.Run(ctx, paths, inv.Rules)
 	inv.Sources = agents.Apply(ctx, inv.Roots, env.Home, inv.Now)
-	inv.Sizes = scan.Measure(inv.Roots)
+	inv.Sizes = scan.Measure(ctx, inv.Roots)
 	inv.Report = report.Build(inv.Roots, inv.Sizes, inv.Rules.QuietHours, broken, inv.Now)
 	inv.Report.ActivitySources = inv.Sources
 	if sel.Global {

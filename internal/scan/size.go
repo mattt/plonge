@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ type inode struct{ dev, ino uint64 }
 // as du counts them: allocated blocks, each hard-linked file once,
 // and symlinks not followed.
 func DiskUsage(dir string) int64 {
-	n, _ := walkCache(dir, true, false)
+	n, _, _ := walkCache(dir, true, false, nil)
 	return n
 }
 
@@ -34,7 +35,7 @@ func GuardedSizes(dirs []string, guard []bool) ([]int64, []string) {
 	reasons := make([]string, len(dirs))
 	parallel(len(dirs), func(i int) {
 		g := guard != nil && guard[i]
-		sizes[i], reasons[i] = walkCache(dirs[i], true, g)
+		sizes[i], reasons[i], _ = walkCache(dirs[i], true, g, nil)
 		if reasons[i] != "" {
 			sizes[i] = 0
 		}
@@ -45,9 +46,11 @@ func GuardedSizes(dirs []string, guard []bool) ([]int64, []string) {
 // Measure sizes the candidates of each root and refuses the ones
 // that hold a Git repository, in the same walk,
 // or that hold an entry at a refuse_inside path.
+// In a SwiftPM cache, it lets through the repositories that SwiftPM manages
+// and can make again, as guardCache describes.
 // It moves a refused candidate from Candidates to Refused,
 // and returns one size slice per root, in the order of the remaining candidates.
-func Measure(roots []Root) [][]int64 {
+func Measure(ctx context.Context, roots []Root) [][]int64 {
 	type job struct{ root, cand int }
 	var jobs []job
 	for i, r := range roots {
@@ -60,7 +63,7 @@ func Measure(roots []Root) [][]int64 {
 	parallel(len(jobs), func(k int) {
 		c := roots[jobs[k].root].Candidates[jobs[k].cand]
 		if reasons[k] = insideRefusal(c); reasons[k] == "" {
-			bytes[k], reasons[k] = walkCache(c.Path, true, true)
+			bytes[k], reasons[k] = guardCache(ctx, c, true)
 		}
 	})
 	sizes := make([][]int64, len(roots))
@@ -87,7 +90,7 @@ func Measure(roots []Root) [][]int64 {
 // It refuses a .git entry of any type or a Git directory at any depth,
 // and a directory that it cannot read, as walkCache describes.
 func GitRefusal(dir string) string {
-	_, reason := walkCache(dir, false, true)
+	_, reason, _ := walkCache(dir, false, true, nil)
 	return reason
 }
 
@@ -139,9 +142,13 @@ func matchInside(dir string, elems []string) (string, error) {
 // must not be deleted: a .git entry of any type at any depth,
 // a Git directory (HEAD beside objects and refs) at any depth,
 // or a directory that it cannot read, which could hide either.
-func walkCache(dir string, measure, guard bool) (int64, string) {
+// With a layout, it does not refuse the repositories that SwiftPM manages:
+// a .git directory directly in a checkout, and a Git directory directly
+// in repositories. It returns them so that the caller can check them with Git.
+func walkCache(dir string, measure, guard bool, layout *packageLayout) (int64, string, []managedRepo) {
 	var total int64
 	var reason string
+	var repos []managedRepo
 	seen := map[inode]bool{}
 	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -155,7 +162,7 @@ func walkCache(dir string, measure, guard bool) (int64, string) {
 			return nil
 		}
 		if guard {
-			if r := gitReason(dir, path, d); r != "" {
+			if r := gitReason(dir, path, d, layout, &repos); r != "" {
 				reason = r
 				return fs.SkipAll
 			}
@@ -177,21 +184,37 @@ func walkCache(dir string, measure, guard bool) (int64, string) {
 		total += bytes
 		return nil
 	})
-	return total, reason
+	return total, reason, repos
 }
 
 // gitReason returns why the entry at path makes dir a Git repository
 // or one that holds a Git repository, or "" when it does not.
-func gitReason(dir, path string, d fs.DirEntry) string {
+// It adds to repos the repositories that it lets through for layout.
+func gitReason(dir, path string, d fs.DirEntry, layout *packageLayout, repos *[]managedRepo) string {
 	switch d.Name() {
 	case ".git":
-		return repoReason(dir, filepath.Dir(path), "a Git repository")
+		repo := filepath.Dir(path)
+		// A .git file or symlink can point at a repository outside the cache.
+		if d.IsDir() && layout.isCheckout(repo) {
+			*repos = append(*repos, managedRepo{path: repo})
+			return ""
+		}
+		return repoReason(dir, repo, "a Git repository")
 	case "HEAD":
 		if d.IsDir() {
 			return ""
 		}
 		parent := filepath.Dir(path)
 		if isDir(filepath.Join(parent, "objects")) && isDir(filepath.Join(parent, "refs")) {
+			// The walk reaches a checkout's .git directory only after
+			// it has let the checkout through.
+			if filepath.Base(parent) == ".git" && layout.isCheckout(filepath.Dir(parent)) {
+				return ""
+			}
+			if layout.isMirror(parent) {
+				*repos = append(*repos, managedRepo{path: parent, bare: true})
+				return ""
+			}
 			return repoReason(dir, parent, "a Git directory")
 		}
 	}

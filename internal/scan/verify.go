@@ -45,7 +45,8 @@ func Verify(ctx context.Context, root string, c Candidate) (reason string, err e
 	}
 	// The enclosing repository does not see a repository inside the candidate,
 	// so look for one before deleting its commits and uncommitted work.
-	if reason := GitRefusal(c.Path); reason != "" {
+	// A SwiftPM checkout can change after the scan, so check it again.
+	if _, reason := guardCache(ctx, c, false); reason != "" {
 		return reason, nil
 	}
 	if reason := insideRefusal(c); reason != "" {
