@@ -56,7 +56,11 @@ func Inspect(ctx context.Context, sel Selection) (Inventory, error) {
 		paths = append(paths, p.Roots...)
 		broken = p.BrokenLinks
 	}
-	paths = mise.DropNested(append(paths, sel.Roots...))
+	paths = append(paths, sel.Roots...)
+	// Only a root in a Git work tree covers the roots inside it.
+	// Detect skips a root outside one, so the roots inside it stay.
+	inTree := scan.WorkTrees(ctx, paths)
+	paths = mise.DropNested(paths, func(root string) bool { return inTree[root] })
 	inv.Roots = scan.Run(ctx, paths, inv.Rules)
 	inv.Sources = agents.Apply(ctx, inv.Roots, env.Home, inv.Now)
 	inv.Sizes = measure(inv.Roots)
@@ -106,7 +110,7 @@ func Clean(ctx context.Context, opts CleanOptions) (clean.Result, Inventory, err
 		MinSize:       opts.MinSize,
 		QuietHours:    inv.Rules.QuietHours,
 		Now:           inv.Now,
-		StillBusy:     func(root string) bool { return agents.Busy(ctx, root) },
+		StillBusy:     func(root string) string { return agents.Busy(ctx, root, inv.Env.Home) },
 	})
 	res.ActivitySources = inv.Sources
 	return res, inv, nil

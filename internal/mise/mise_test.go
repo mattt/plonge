@@ -35,20 +35,26 @@ func TestProjectRoot(t *testing.T) {
 }
 
 func TestDropNested(t *testing.T) {
+	all := func(string) bool { return true }
 	tests := []struct {
-		name  string
-		roots []string
-		want  []string
+		name   string
+		roots  []string
+		covers func(string) bool
+		want   []string
 	}{
-		{"empty", nil, nil},
-		{"duplicates", []string{"/a", "/a/"}, []string{"/a"}},
-		{"nested", []string{"/a/b", "/a", "/a/b/c"}, []string{"/a"}},
-		{"shared prefix is not nesting", []string{"/a", "/ab", "/a b"}, []string{"/a", "/a b", "/ab"}},
-		{"nested after sibling", []string{"/a", "/a b", "/a/c"}, []string{"/a", "/a b"}},
+		{"empty", nil, all, nil},
+		{"duplicates", []string{"/a", "/a/"}, all, []string{"/a"}},
+		{"nested", []string{"/a/b", "/a", "/a/b/c"}, all, []string{"/a"}},
+		{"shared prefix is not nesting", []string{"/a", "/ab", "/a b"}, all, []string{"/a", "/a b", "/ab"}},
+		{"nested after sibling", []string{"/a", "/a b", "/a/c"}, all, []string{"/a", "/a b"}},
+		{"nil covers keeps nested", []string{"/a/b", "/a", "/a/"}, nil, []string{"/a", "/a/b"}},
+		// /a does not cover its roots, so /a/b stays and covers /a/b/c.
+		{"root that does not cover", []string{"/a", "/a/b", "/a/b/c", "/a/d"},
+			func(r string) bool { return r != "/a" }, []string{"/a", "/a/b", "/a/d"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := DropNested(tt.roots); !slices.Equal(got, tt.want) {
+			if got := DropNested(tt.roots, tt.covers); !slices.Equal(got, tt.want) {
 				t.Errorf("DropNested(%q) = %q, want %q", tt.roots, got, tt.want)
 			}
 		})
@@ -125,6 +131,7 @@ func TestReadProjects(t *testing.T) {
 	want := []string{
 		filepath.Join(tmp, "c"),
 		filepath.Join(home, "code", "a"),
+		filepath.Join(home, "code", "a", "sub"),
 		filepath.Join(home, "code", "b"),
 	}
 	slices.Sort(want)

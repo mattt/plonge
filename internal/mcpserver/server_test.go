@@ -190,6 +190,38 @@ func TestCleanTool(t *testing.T) {
 	}
 }
 
+// TestCleanToolKeepsCachesWhenPaseoFails checks that the clean tool
+// deletes nothing when paseo is on PATH but fails.
+func TestCleanToolKeepsCachesWhenPaseoFails(t *testing.T) {
+	_, project := env(t)
+	body := "#!/bin/sh\necho 'no daemon' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), "paseo"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := connect(t)
+	var res struct {
+		Items       []struct{ Status string }
+		NotSelected struct {
+			Busy struct{ Caches int } `json:"busy"`
+		} `json:"not_selected"`
+		Sources []struct{ Name, Status, Reason string } `json:"activity_sources"`
+	}
+	for _, args := range []map[string]any{{}, {"apply": true, "include_active": true}} {
+		if msg := call(t, s, "clean", args, &res); msg != "" {
+			t.Fatal(msg)
+		}
+		if len(res.Items) != 0 || res.NotSelected.Busy.Caches != 1 {
+			t.Errorf("%v: result = %+v", args, res)
+		}
+		if len(res.Sources) != 2 || res.Sources[1].Status != "failed" || !strings.Contains(res.Sources[1].Reason, "no daemon") {
+			t.Errorf("%v: sources = %+v", args, res.Sources)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(project, "node_modules")); err != nil {
+		t.Errorf("a cache was deleted while Paseo failed: %v", err)
+	}
+}
+
 func TestCleanToolIncludeActive(t *testing.T) {
 	_, project := env(t)
 	now := time.Now()
@@ -284,5 +316,41 @@ func TestDiskTool(t *testing.T) {
 	}
 	if out.FreeBytes <= 0 || out.Free == "" {
 		t.Errorf("out = %+v", out)
+	}
+}
+
+// TestScanToolKeepsProjectsInsideRootOutsideGit gives the folder above the
+// project a mise record. That folder is not a Git work tree,
+// so it must not hide the project inside it.
+func TestScanToolKeepsProjectsInsideRootOutsideGit(t *testing.T) {
+	home, project := env(t)
+	folder := filepath.Dir(project)
+	mkfile(t, filepath.Join(folder, "mise.toml"), "")
+	tracked := filepath.Join(home, "state", "mise", "tracked-configs")
+	if err := os.Symlink(filepath.Join(folder, "mise.toml"), filepath.Join(tracked, "folder")); err != nil {
+		t.Fatal(err)
+	}
+	s := connect(t)
+	var rep struct {
+		Caches       []struct{ Path string } `json:"caches"`
+		SkippedRoots []struct{ Path string } `json:"skipped_roots"`
+	}
+	if msg := call(t, s, "scan", map[string]any{}, &rep); msg != "" {
+		t.Fatal(msg)
+	}
+	if len(rep.Caches) != 1 || rep.Caches[0].Path != filepath.Join(project, "node_modules") {
+		t.Errorf("caches = %+v", rep.Caches)
+	}
+	if len(rep.SkippedRoots) != 1 || rep.SkippedRoots[0].Path != folder {
+		t.Errorf("skipped roots = %+v", rep.SkippedRoots)
+	}
+	var res struct {
+		Items []struct{ Path string } `json:"items"`
+	}
+	if msg := call(t, s, "clean", map[string]any{}, &res); msg != "" {
+		t.Fatal(msg)
+	}
+	if len(res.Items) != 1 || res.Items[0].Path != filepath.Join(project, "node_modules") {
+		t.Errorf("clean items = %+v", res.Items)
 	}
 }

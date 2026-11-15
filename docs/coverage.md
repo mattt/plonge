@@ -39,6 +39,7 @@ For every row:
 - `clean` shows a dry run for quiet projects.
   Add `--apply` to delete selected project caches after the path and Git checks.
   Busy projects are excluded; `--include-active` adds active projects.
+  If `paseo` is on PATH but fails, every project is busy.
 - `clean --global` shows global cleanup actions instead of project caches.
   Add `--apply` to run eligible prune actions.
   It does not use project activity or Git checks.
