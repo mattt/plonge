@@ -317,3 +317,31 @@ func TestDiskUsage(t *testing.T) {
 		t.Errorf("Sizes = %v, want [%d %d]", got, a, b)
 	}
 }
+
+func TestInRepository(t *testing.T) {
+	isolateGit(t)
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	newRepo(t, repo, map[string]string{".gitignore": "cache/\n"})
+	outside := filepath.Join(tmp, "outside")
+	for _, dir := range []string{filepath.Join(repo, "cache", "x"), outside} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	for dir, want := range map[string]bool{
+		repo:                              true,
+		filepath.Join(repo, "cache", "x"): true,
+		filepath.Join(repo, ".git"):       true,
+		outside:                           false,
+	} {
+		got, err := InRepository(ctx, dir)
+		if err != nil || got != want {
+			t.Errorf("InRepository(%s) = %v, %v; want %v", dir, got, err, want)
+		}
+	}
+	if _, err := InRepository(ctx, filepath.Join(tmp, "missing")); err == nil {
+		t.Error("no error for a missing directory")
+	}
+}

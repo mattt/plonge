@@ -3,6 +3,7 @@ package scan
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -74,4 +75,20 @@ func splitNUL(out []byte) []string {
 		}
 	}
 	return parts
+}
+
+// InRepository reports whether dir is in a Git work tree or a Git directory.
+// A failure other than Git finding no repository is an error,
+// so that a caller can refuse to act when Git cannot answer.
+func InRepository(ctx context.Context, dir string) (bool, error) {
+	out, _, err := gitWithEnv(ctx, dir, nil, []string{"LC_ALL=C"},
+		"rev-parse", "--is-inside-work-tree", "--is-inside-git-dir")
+	if err != nil {
+		var ge *gitError
+		if errors.As(err, &ge) && strings.Contains(ge.stderr, "not a git repository") {
+			return false, nil
+		}
+		return false, err
+	}
+	return strings.Contains(string(out), "true"), nil
 }
