@@ -43,6 +43,11 @@ const (
 // XcodeRuleID names the built-in rule for stale Xcode DerivedData folders.
 const XcodeRuleID = "xcode-derived-data"
 
+// MiseToolsRuleID names the rule for mise's installed tool versions.
+// When its tool is mise, plonge asks mise for the installs directory
+// and uses the rule's path only when mise cannot report it.
+const MiseToolsRuleID = "mise-tools"
+
 // Global describes a cache that a tool's own command cleans.
 type Global struct {
 	ID    string `toml:"id"`

@@ -34,7 +34,8 @@ type Entry struct {
 	// Targets are the items that the rule's command would remove.
 	// When the rule lists them, Bytes is their size and not the size of Path.
 	Targets []string `json:"targets,omitempty"`
-	// Note says why Bytes is the size of Path although the rule has targets.
+	// Note says why Path is a fallback, or why Bytes is the size of Path
+	// although the rule has targets.
 	Note string `json:"note,omitempty"`
 
 	argv  []string
@@ -166,7 +167,7 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 			tools[g.Tool] = t
 		}
 		e.argv, e.Command = command(t, g.Clean)
-		path, err := r.cachePath(ctx, g, t)
+		path, err := r.rulePath(ctx, &e, g, t)
 		if err != nil {
 			e.Skipped = "path command failed: " + err.Error()
 			e.Command, e.argv = "", nil
