@@ -68,6 +68,7 @@ const scanUsage = `Usage: plonge scan [--root <dir>]... [--no-mise] [--global] [
 Scan reports caches in projects recorded by mise and in each --root directory.
 A root is a directory to scan; it must be in a Git work tree.
 A root outside one is skipped, but the roots inside it are still scanned.
+Scan refuses a cache that is or holds a Git repository, and lists it.
 Scan deletes nothing. With --global, it also reports global caches.
 
 Options:
@@ -175,8 +176,8 @@ const cleanUsage = `Usage: plonge clean [--apply] [--include-active] [--min-size
        plonge clean --global [--apply] [--include-clear] [--json]
 
 Clean selects project caches as scan does. Without --apply, it deletes nothing.
-With --apply, it deletes selected directories that Git ignores and that contain
-no tracked files. A quiet project has known activity at least quiet_hours old
+With --apply, it deletes selected directories that Git ignores, that contain
+no tracked files, and that are not and do not hold a Git repository. A quiet project has known activity at least quiet_hours old
 (default: 24 hours). Active projects have newer or unknown activity.
 Use --include-active to select them too. Projects that Paseo reports as busy
 (with a running or initializing agent) are excluded. If paseo is on PATH but
