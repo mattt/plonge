@@ -20,11 +20,26 @@ func DiskUsage(dir string) int64 {
 
 // Sizes measures each directory with at most Workers walks at a time.
 func Sizes(dirs []string) []int64 {
-	out := make([]int64, len(dirs))
+	sizes, _ := GuardedSizes(dirs, nil)
+	return sizes
+}
+
+// GuardedSizes measures each directory as Sizes does.
+// For each directory whose guard is true, the same walk also looks for
+// a Git repository, as GitRefusal describes, and returns the reason
+// at the same index; the size of a refused directory is 0.
+// A nil guard checks no directory.
+func GuardedSizes(dirs []string, guard []bool) ([]int64, []string) {
+	sizes := make([]int64, len(dirs))
+	reasons := make([]string, len(dirs))
 	parallel(len(dirs), func(i int) {
-		out[i] = DiskUsage(dirs[i])
+		g := guard != nil && guard[i]
+		sizes[i], reasons[i] = walkCache(dirs[i], true, g)
+		if reasons[i] != "" {
+			sizes[i] = 0
+		}
 	})
-	return out
+	return sizes, reasons
 }
 
 // Measure sizes the candidates of each root and refuses the ones
@@ -67,9 +82,11 @@ func Measure(roots []Root) [][]int64 {
 	return sizes
 }
 
-// gitRefusal walks dir and returns why it must not be deleted
+// GitRefusal walks dir and returns why it must not be deleted
 // because it is or holds a Git repository, or "" when it does not.
-func gitRefusal(dir string) string {
+// It refuses a .git entry of any type or a Git directory at any depth,
+// and a directory that it cannot read, as walkCache describes.
+func GitRefusal(dir string) string {
 	_, reason := walkCache(dir, false, true)
 	return reason
 }
