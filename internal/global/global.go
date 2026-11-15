@@ -142,6 +142,9 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 	if err != nil {
 		return "", err
 	}
+	if g.PathZONField != "" {
+		return zonPath(out, g.PathZONField, r.Home)
+	}
 	path := lastLine(out)
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("printed %q, which is not an absolute path", path)

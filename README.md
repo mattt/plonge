@@ -307,6 +307,19 @@ Shell quoting, pipes, and variable expansion are not supported.
 `os` limits a rule to one operating system,
 by its Go name, such as `darwin` or `linux`.
 
+When the `path` command prints a ZON struct, as `zig env` does,
+`path_zon_field` names the top-level field that holds the path:
+
+```toml
+path = "zig env"
+path_zon_field = "global_cache_dir"
+```
+
+A relative path in that field is relative to the home directory,
+where Plonge runs the command.
+Plonge skips the rule when the output is not a ZON struct,
+has no such field, or has a value that is not a nonempty string.
+
 A rule can name a `check`, a command that must not change anything:
 
 ```toml

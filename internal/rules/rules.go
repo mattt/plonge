@@ -53,6 +53,11 @@ type Global struct {
 	Kind  string `toml:"kind"`
 	OS    string `toml:"os"` // when set, the rule applies only on this GOOS
 
+	// PathZONField makes plonge read the path from this field of a ZON struct
+	// that the path command prints, as "zig env" does. A relative path in it
+	// is relative to the home directory, where plonge runs the command.
+	PathZONField string `toml:"path_zon_field"`
+
 	// DeleteContents makes plonge delete what is in Path, in place of Clean.
 	// It is for caches that have no cleanup command, and needs kind clear.
 	DeleteContents bool `toml:"delete_contents"`
@@ -146,6 +151,14 @@ func (g Global) validate() error {
 	if !g.fixedPath() && !g.startsWithTool(g.Path) {
 		return fmt.Errorf("global rule %q: path must be an absolute path, a ~/ path, or a %s command", g.ID, g.Tool)
 	}
+	if g.PathZONField != "" {
+		if g.fixedPath() {
+			return fmt.Errorf("global rule %q: path_zon_field needs a path command", g.ID)
+		}
+		if !validZONField(g.PathZONField) {
+			return fmt.Errorf("global rule %q: path_zon_field %q is not a field name", g.ID, g.PathZONField)
+		}
+	}
 	if g.DeleteContents {
 		if err := g.validateDelete(); err != nil {
 			return err
@@ -197,6 +210,20 @@ func (g Global) validateCheck() error {
 		}
 	}
 	return nil
+}
+
+// validZONField reports whether name is a plain Zig identifier,
+// the form that the ZON fields plonge reads are written in.
+func validZONField(name string) bool {
+	for i, c := range name {
+		switch {
+		case c == '_', 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z':
+		case '0' <= c && c <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return name != ""
 }
 
 func (g Global) fixedPath() bool {

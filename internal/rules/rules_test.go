@@ -240,6 +240,30 @@ func TestGlobalDeleteContentsValidation(t *testing.T) {
 	}
 }
 
+func TestGlobalPathZONFieldValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\nclean = \"t gc\"\nkind = \"prune\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"path = \"t env\"\npath_zon_field = \"global_cache_dir\"\n", ""},
+		{"path = \"~/c\"\npath_zon_field = \"global_cache_dir\"\n", "needs a path command"},
+		{"path = \"t env\"\npath_zon_field = \"env.HOME\"\n", "is not a field name"},
+		{"path = \"t env\"\npath_zon_field = \"1st\"\n", "is not a field name"},
+	}
+	for _, c := range cases {
+		f, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil || f.Global[0].PathZONField != "global_cache_dir" {
+				t.Errorf("%q: %+v, %v", c.extra, f.Global, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
+		}
+	}
+}
+
 func TestGlobalCheckValidation(t *testing.T) {
 	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\nclean = \"t gc\"\nkind = \"prune\"\n"
 	cases := []struct {
