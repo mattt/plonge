@@ -171,15 +171,24 @@ and a bare clone in `.build/repositories/<name>`.
 For a `.build` directory beside `Package.swift`,
 Plonge does not refuse these repositories when SwiftPM can make them again:
 
-- A bare clone directly in `repositories` must be bare
-  and have no linked worktrees.
+- A bare clone directly in `repositories` must be bare,
+  have no linked worktrees, and have one remote, `origin`,
+  set up as a mirror of a `location` that a pin in `Package.resolved` names.
+  Plonge compares the two without case, scheme, user, port,
+  trailing slash, or `.git` suffix.
+  No commit may be held only by its reflogs.
 - A checkout directly in `checkouts` must have a `.git` directory,
-  not a `.git` file or symlink.
+  not a `.git` file or symlink, and one remote, `origin`,
+  that is an accepted bare clone in the same cache.
   Its `HEAD` must be the commit that `Package.resolved` pins for its identity,
   and `git status` must show no changed, untracked, or ignored files.
   It must have no stash, no linked worktrees,
   no files marked assume-unchanged or skip-worktree,
-  and no commits that only its local branches or reflogs hold.
+  and no reflog entry for a push to `origin`.
+  Every commit in it must be in `HEAD`, in `refs/remotes/origin`,
+  or in a tag that the bare clone holds at the same object.
+  A local branch, a tag that only the checkout has,
+  or a reflog does not count.
 
 Plonge refuses the `.build` directory for any other Git repository in it,
 including a repository inside a checkout, such as a submodule,
@@ -196,6 +205,12 @@ It runs Git with the same environment as its other Git checks,
 names each repository explicitly, and sets every `git status` option
 that configuration could otherwise change.
 It checks when it measures the cache and again right before deletion.
+
+These checks run offline, so they cannot tell a commit that someone pushed
+into a bare clone from outside the cache from one that SwiftPM fetched.
+A push from the checkout is detected from the checkout's reflog.
+A SwiftPM mirror set in `.swiftpm/configuration/mirrors.json`
+clones a URL that differs from the pin's `location`, so its clone is refused.
 
 A `DerivedData` directory beside `Package.swift`,
 such as one that `xcodebuild -derivedDataPath DerivedData` makes,
