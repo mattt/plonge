@@ -76,11 +76,12 @@ See [mise's prune command][mise-prune] for how versions are selected,
 including tracked configs, tool stubs, and running processes.
 
 If the version list cannot be read, Plonge reports the size of
-`~/.local/share/mise/installs` and adds a note.
-That fixed path is also used to estimate freed space.
-Override `mise-tools` in `rules.toml` if your installs directory differs;
-copy its `check`, `check_env`, `refuse`, `refuse_reason`, and `targets` too.
-The command itself follows mise's environment and settings.
+mise's installs directory and adds a note.
+That directory is also used to estimate freed space.
+It is `$MISE_INSTALLS_DIR`, or `installs` in the data directory
+that `mise doctor --json` reports.
+If mise cannot report it, Plonge uses `~/.local/share/mise/installs`
+and adds a note.
 Neither `scan` nor project `clean` selects installed versions by default.
 
 In the core table, "mise rules" means these two rules, with this guard.
