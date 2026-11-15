@@ -199,3 +199,41 @@ func TestDeleteContentsChecksAgainBeforeDeleting(t *testing.T) {
 		t.Error("deleted through a symlink")
 	}
 }
+
+// skipIfCaseSensitive skips the test unless dir is on a case-insensitive volume.
+func skipIfCaseSensitive(t *testing.T, dir string) {
+	t.Helper()
+	addFile(t, filepath.Join(dir, "probe"))
+	if _, err := os.Stat(filepath.Join(dir, "PROBE")); err != nil {
+		t.Skip("the test filesystem is case-sensitive")
+	}
+}
+
+func TestDeleteContentsRefusesCaseAliasesOfHome(t *testing.T) {
+	r, tmp, _, _ := deleteSetup(t)
+	skipIfCaseSensitive(t, tmp)
+	r.Home = filepath.Join(tmp, "outer", "home")
+	addFile(t, filepath.Join(r.Home, "keep"))
+	ctx := context.Background()
+	cases := map[string]string{
+		filepath.Join(tmp, "outer", "HOME"): "path is the home directory",
+		filepath.Join(tmp, "OUTER", "Home"): "path is the home directory",
+		filepath.Join(tmp, "OUTER"):         "path contains the home directory",
+	}
+	for path, want := range cases {
+		if got := r.refuseDelete(ctx, path); got != want {
+			t.Errorf("refuseDelete(%s) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestDeleteContentsRefusesWithoutHome(t *testing.T) {
+	r, tmp, cache, _ := deleteSetup(t)
+	ctx := context.Background()
+	for _, home := range []string{"", "relative/home", filepath.Join(tmp, "missing")} {
+		r.Home = home
+		if got := r.refuseDelete(ctx, cache); !strings.HasPrefix(got, "cannot check the home directory: ") {
+			t.Errorf("home %q: reason = %q", home, got)
+		}
+	}
+}

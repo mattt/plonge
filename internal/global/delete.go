@@ -31,10 +31,12 @@ func (r Runner) refuseDelete(ctx context.Context, path string) string {
 	if path == string(filepath.Separator) {
 		return "path is the root directory"
 	}
-	homes := []string{filepath.Clean(r.Home)}
-	if real, err := filepath.EvalSymlinks(r.Home); err == nil && real != homes[0] {
-		homes = append(homes, real)
+	homes, reason := r.homes()
+	if reason != "" {
+		return reason
 	}
+	// These string checks give a reason even for a path that does not exist.
+	// The identity check below is the one that decides.
 	for _, home := range homes {
 		if path == home {
 			return "path is the home directory"
@@ -55,6 +57,9 @@ func (r Runner) refuseDelete(ctx context.Context, path string) string {
 	}
 	if !info.IsDir() {
 		return "path is not a directory"
+	}
+	if reason := sameAsHomeOrAncestor(info, homes); reason != "" {
+		return reason
 	}
 	real, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -86,4 +91,47 @@ func (r Runner) applyDelete(ctx context.Context, o *Outcome) {
 		return
 	}
 	o.Status = Ran
+}
+
+// homes returns the home directory as given and with symlinks resolved,
+// or a reason when plonge cannot use it to protect the home directory.
+func (r Runner) homes() ([]string, string) {
+	if !filepath.IsAbs(r.Home) {
+		return nil, "cannot check the home directory: it is not an absolute path"
+	}
+	homes := []string{filepath.Clean(r.Home)}
+	real, err := filepath.EvalSymlinks(r.Home)
+	if err != nil {
+		return nil, "cannot check the home directory: " + err.Error()
+	}
+	if real != homes[0] {
+		homes = append(homes, real)
+	}
+	return homes, ""
+}
+
+// sameAsHomeOrAncestor compares the file info of a path with the home
+// directory and each of its ancestors by file identity, not by name,
+// so that an alias such as a case change on a case-insensitive volume
+// cannot pass. It returns a reason when the path is one of them,
+// or when an ancestor cannot be read.
+func sameAsHomeOrAncestor(info fs.FileInfo, homes []string) string {
+	for _, home := range homes {
+		for dir := home; ; dir = filepath.Dir(dir) {
+			di, err := os.Stat(dir)
+			if err != nil {
+				return "cannot check the home directory: " + err.Error()
+			}
+			if os.SameFile(info, di) {
+				if dir == home {
+					return "path is the home directory"
+				}
+				return "path contains the home directory"
+			}
+			if dir == filepath.Dir(dir) {
+				break
+			}
+		}
+	}
+	return ""
 }
