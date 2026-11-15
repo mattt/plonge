@@ -454,6 +454,78 @@ done
 	}
 }
 
+// TestCargoRulesFollowCargoHome resolves the Cargo rules from CARGO_HOME,
+// or from ~/.cargo when it is not set, and deletes only the caches' contents.
+func TestCargoRulesFollowCargoHome(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  func(r Runner, tmp string) (cargoHome, value string)
+	}{
+		{"default", func(r Runner, _ string) (string, string) { return filepath.Join(r.Home, ".cargo"), "" }},
+		{"CARGO_HOME", func(_ Runner, tmp string) (string, string) {
+			dir := filepath.Join(tmp, "cargo-home")
+			return dir, dir
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, tmp, _, _ := deleteSetup(t)
+			bin := filepath.SplitList(os.Getenv("PATH"))[0]
+			log := filepath.Join(tmp, "cargo.log")
+			addTool(t, bin, "cargo", fmt.Sprintf(`echo "$*" >> %q`, log))
+			cargoHome, value := tc.env(r, tmp)
+			t.Setenv("CARGO_HOME", value)
+			// A default Cargo home elsewhere must not be touched.
+			other := filepath.Join(r.Home, ".cargo", "registry", "cache", "x.crate")
+			if value != "" {
+				addFile(t, other)
+			}
+			kept := []string{
+				filepath.Join(cargoHome, "bin", "cargo-tool"),
+				filepath.Join(cargoHome, "config.toml"),
+				filepath.Join(cargoHome, ".crates.toml"),
+			}
+			for _, p := range kept {
+				addFile(t, p)
+			}
+			addFile(t, filepath.Join(cargoHome, "registry", "cache", "index.crates.io-1", "serde-1.0.0.crate"))
+			addFile(t, filepath.Join(cargoHome, "registry", "src", "index.crates.io-1", "serde-1.0.0", "lib.rs"))
+			addFile(t, filepath.Join(cargoHome, "git", "db", "dep-1", "HEAD"))
+			addFile(t, filepath.Join(cargoHome, "git", "checkouts", "dep-1", "abc", "Cargo.toml"))
+			ctx := context.Background()
+			entries := r.List(ctx, []rules.Global{defaultRule(t, "cargo-registry"), defaultRule(t, "cargo-git")})
+			for i, sub := range []string{"registry", "git"} {
+				e := entries[i]
+				path := filepath.Join(cargoHome, sub)
+				if e.Skipped != "" || e.Path != path || e.Command != r.deleteAction(path) {
+					t.Fatalf("%s = %+v", sub, e)
+				}
+			}
+			res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+			for _, o := range res.Outcomes {
+				if o.Status != Ran {
+					t.Errorf("outcome = %+v", o)
+				}
+			}
+			for _, sub := range []string{"registry", "git"} {
+				if ents, err := os.ReadDir(filepath.Join(cargoHome, sub)); err != nil || len(ents) != 0 {
+					t.Errorf("%s entries = %v, err = %v", sub, ents, err)
+				}
+			}
+			for _, p := range append(kept, other) {
+				if value == "" && p == other {
+					continue
+				}
+				if _, err := os.Stat(p); err != nil {
+					t.Errorf("%s: %v", p, err)
+				}
+			}
+			if _, err := os.Stat(log); err == nil {
+				t.Error("cargo ran")
+			}
+		})
+	}
+}
+
 // TestPathEnvMustBeAbsolute skips a rule whose variable holds a relative path,
 // because the tool would resolve it from a working directory that plonge cannot know.
 func TestPathEnvMustBeAbsolute(t *testing.T) {

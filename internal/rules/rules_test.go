@@ -417,3 +417,23 @@ func TestGlobalPathEnvValidation(t *testing.T) {
 		}
 	}
 }
+
+// TestCargoRulesKeepCargoHomeState checks that the Cargo rules delete only
+// the registry and Git caches, never the Cargo home itself.
+func TestCargoRulesKeepCargoHomeState(t *testing.T) {
+	want := map[string]string{"cargo-registry": "registry", "cargo-git": "git"}
+	for _, g := range Default().Global {
+		sub, ok := want[g.ID]
+		if !ok {
+			continue
+		}
+		delete(want, g.ID)
+		if g.PathEnv != "CARGO_HOME" || g.PathEnvSubdir != sub || g.Path != "~/.cargo/"+sub ||
+			!g.DeleteContents || g.Kind != KindClear || g.Tool != "cargo" {
+			t.Errorf("%s = %+v", g.ID, g)
+		}
+	}
+	if len(want) > 0 {
+		t.Errorf("missing rules: %v", want)
+	}
+}

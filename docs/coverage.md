@@ -227,7 +227,7 @@ The global-cache column lists additional rules relevant to that tool.
 | `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1); `yarn-berry`: `yarn cache clean` (clear, Yarn 2 and later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and the one Yarn rule that matches the version of `yarn` in the home directory. | Project `.yarn/cache` folders; the Yarn 2+ global cache when `yarn` in the home directory is Yarn 1 or `enableGlobalCache` is off; separate pnpm stores not resolved from the home directory; `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
 | `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py`; `build` and `dist` beside `pyproject.toml` or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | tox and nox environments moved by `--workdir`, `work_dir`, or `--envdir`; build output moved by setuptools' `build_base`; `*.egg-info`; `dist` moved by `--outdir` or `--out-dir`; uv-managed Python installations outside mise; caches at other configured paths. |
 | `ruby` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Ruby cache rule. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/bundle` and `vendor/cache`; RubyGems' gem cache; application `tmp/cache`. |
-| `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Rust rule. | Cargo's registry and Git caches (`~/.cargo/registry`, `~/.cargo/git`); sccache; toolchains managed outside mise. |
+| `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | `cargo-registry`: `delete_contents` of `registry` in the Cargo home (clear); `cargo-git`: `delete_contents` of `git` in the Cargo home (clear); the Cargo home is `$CARGO_HOME`, or `~/.cargo` | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds both Cargo rules. Cargo 1.88 and later also delete global cache files that they have not used for 1 or 3 months. | `cargo clean gc`, which is unstable; a relative `CARGO_HOME`, which the rules skip; a `CARGO_HOME` that only the environment of `mise exec` sets; `bin`, `config.toml`, `credentials.toml`, `.crates.toml`, and `.crates2.json`, which hold installed programs and user state; sccache, which has no cleanup command; toolchains managed outside mise. |
 | `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `swiftpm-macos` (macOS): `swift package purge-cache --cache-path Library/Caches/org.swift.swiftpm --scratch-path Library/Caches/org.swift.swiftpm` (clear); `swiftpm-linux` (Linux): `swift package purge-cache --cache-path .cache/org.swift.swiftpm --scratch-path .cache/org.swift.swiftpm` (clear); `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. A `.build` directory for a package with remote dependencies is refused, because it holds Git checkouts and bare clones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds the SwiftPM rule for the system. | `.build` directories with remote dependencies; SwiftPM's `artifacts` and `prebuilts` caches; a shared cache moved by `--cache-path` or `XDG_CACHE_HOME`; `.swiftpm`, which holds package configuration and Xcode schemes; Xcode build data for existing workspaces, archives, device support, and simulators. |
 | `zig` | Guarded `mise-tools` | `.zig-cache` and `zig-cache` (before Zig 0.13) beside `build.zig` | `zig-global-cache`: `delete_contents` (built-in deletion) of the `global_cache_dir` that `zig env` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `zig-global-cache`. | `zig-out` install output, which can hold programs and libraries that a user runs; local caches moved with `--cache-dir` or `ZIG_LOCAL_CACHE_DIR`; the global cache when `zig env` prints JSON, as before Zig 0.15 (override the rule with a fixed path). |
 
@@ -255,7 +255,7 @@ See mise's [install and uninstall code][mise-backend].
 | `http` | Retained downloads and, with shared extraction enabled, extracted archives in mise's data directory under `http-tarballs` | Shared mise rules reach version caches and selected installs | Shared `http-tarballs` extractions have no rule; they are outside `mise-cache`'s scope ([source][mise-http]) |
 | `s3` | Retained S3 downloads and extracted installs | Shared mise rules | Retained downloads outside the prune selection; caches created later by installed tools ([source][mise-s3]) |
 | `asdf`, `vfox` | Plugin metadata, retained downloads, and any caches a plugin's install code creates | `mise-cache` reaches mise's cache directory; `mise-tools` delegates uninstall to the backend | Plugin directories and caches outside mise's cache directory have no general rule; plugin behavior varies |
-| `cargo` | Cargo registry and Git downloads after source builds; optional compiler caches; prebuilt binaries when available | `mise-tools` removes selected installs; project `target` applies only in scanned roots beside `Cargo.toml` | Cargo registry, Git cache, and sccache have no global rule ([backend][cargo]) |
+| `cargo` | Cargo registry and Git downloads after source builds; optional compiler caches; prebuilt binaries when available | `mise-tools` removes selected installs; `cargo-registry` and `cargo-git` clear the Cargo home's registry and Git caches; project `target` applies only in scanned roots beside `Cargo.toml` | sccache has no global rule ([backend][cargo]) |
 | `go` | Go module downloads and build cache | `go-modules` and `go-build` clear the paths returned by `go env GOMODCACHE` and `go env GOCACHE` from the home directory | Caches at other configured paths |
 | `npm` | Embedded installer cache and store under mise's cache directory, or external npm/pnpm/Bun caches when configured | `mise-cache` reaches the embedded cache; `npm` clears npm's cache; `pnpm` prunes its resolved store; `bun` prunes Bun's cache | Stores not resolved by the rules ([source][mise-npm]) |
 | `pypi` | Per-tool environments and uv cache, or pip cache when installing through pipx | `mise-tools` removes selected environments; `uv` prunes and `pip` clears their resolved caches | Other pipx state and environments outside mise; caches at other configured paths ([backend][pypi]) |
@@ -294,6 +294,8 @@ Global rules require their command to be available, except for the Xcode rule.
 | Deno | `node_modules` | `deno-remote`, `deno-npm`, `deno-gen` | `delete_contents` of the paths that `deno info --json` prints | clear; requires `clean --global --include-clear --apply` to run. |
 | Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Only when `yarn --version` reports 1.x. |
 | Yarn 2 and later | `node_modules` | `yarn-berry` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Only when `yarn --version` reports 2.x or later. |
+| Cargo | `target` beside `Cargo.toml` | `cargo-registry`, `cargo-git` | `delete_contents` of `registry` and `git` in `$CARGO_HOME`, or `~/.cargo` | clear; requires `clean --global --include-clear --apply` to run. `bin`, configuration, and credentials remain. |
+| sccache | none | none | none; sccache 0.19.0 has no command that clears or prunes its cache | Not covered. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
 | Swift Package Manager | `.build` | `swiftpm-macos`, `swiftpm-linux` | `swift package purge-cache`, with `--cache-path` and `--scratch-path` set to the measured cache directory | clear; requires `clean --global --include-clear --apply` to run. Each rule applies only on its system. `artifacts` and `prebuilts` remain. |
 | Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. |
@@ -306,7 +308,8 @@ Such a rule must be a clear rule, so it runs only with
 Plonge skips it when the path is not absolute; is `/`, the home directory,
 or contains the home directory; is or resolves through a symlink;
 is in a Git repository; or does not exist.
-The default `zig-global-cache` rule and the Deno rules use `delete_contents`.
+The default `zig-global-cache` rule, the Deno rules, and the Cargo rules
+use `delete_contents`.
 See the [README](../README.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
@@ -315,6 +318,59 @@ It keeps directories with missing or unreadable workspace metadata
 and workspaces on unmounted volumes under `/Volumes`.
 The project `DerivedData` rule is different: it uses the project checks,
 without checking Xcode workspace metadata.
+
+### Cargo
+
+The Cargo rules were checked against the source of Cargo in Rust **1.100.0**,
+the current stable release
+([Cargo commit 3acc79c][cargo-1.100]).
+Cargo 1.88 and later clean the global cache automatically,
+at most once a day by default (`cache.auto-clean-frequency`),
+during commands such as `cargo build` and not when Cargo runs offline.
+They delete downloaded files that they have not used for 3 months,
+and extracted sources that they have not used for 1 month
+([source][cargo-gc]).
+The command that cleans the cache on request, `cargo clean gc`,
+is still unstable:
+it fails on the stable channel unless `-Z gc` enables it
+([source][cargo-clean-gc]).
+Plonge does not use unstable flags,
+so `cargo-registry` and `cargo-git` delete the contents
+of the `registry` and `git` folders in the Cargo home.
+These hold the crate index, downloaded `.crate` files and their sources,
+and Git dependencies as bare repositories and checkouts
+([Cargo home][cargo-home-doc]).
+The next build downloads what it needs again,
+so both rules are `clear`.
+The other files in the Cargo home stay:
+`bin` holds programs that `cargo install` and rustup installed,
+`config.toml` and `credentials.toml` hold settings and login tokens,
+and `.crates.toml` and `.crates2.json` record installed crates.
+
+Cargo has no stable command that prints the Cargo home.
+Cargo uses `CARGO_HOME` when it is set and not empty,
+and otherwise `.cargo` in the home directory
+([source][cargo-home-env]).
+The rules follow the same order with `path_env = "CARGO_HOME"`.
+Cargo resolves a relative `CARGO_HOME` from its working directory,
+which Plonge cannot know for every command, so Plonge skips both rules
+when `CARGO_HOME` is not an absolute path.
+Plonge reads `CARGO_HOME` from its own environment.
+If `CARGO_HOME` is set only in the environment that `mise exec` gives `cargo`,
+Plonge uses `~/.cargo`.
+Deletion keeps the `registry` and `git` folders,
+and their contents get the same checks as other `delete_contents` rules.
+A Cargo build that runs at the same time can fail,
+because Cargo can read a file that Plonge then deletes.
+
+sccache keeps its local cache in `SCCACHE_DIR`,
+or by default in `~/Library/Caches/Mozilla.sccache` on macOS
+and `~/.cache/sccache` on Linux ([sccache 0.19.0][sccache-local]).
+Its options in sccache 0.19.0 start and stop the server and show
+or reset statistics; none clears or prunes the cache
+([source][sccache-cmdline]).
+sccache limits the cache to 10 gigabytes by default.
+Plonge has no sccache rule.
 
 ### Bun
 
@@ -409,6 +465,13 @@ See Yarn's [cache clean command][yarn-clean] and
 [bun-pm]: https://github.com/oven-sh/bun/blob/bun-v1.4.4/docs/pm/cli/pm.mdx#cache
 [bun-prune]: https://github.com/oven-sh/bun/blob/bun-v1.4.4/src/runtime/cli/pm_cache_prune_command.rs
 [cargo]: https://mise.jdx.dev/dev-tools/backends/cargo.html
+[cargo-1.100]: https://github.com/rust-lang/rust/tree/1.100.0/src/tools
+[cargo-gc]: https://github.com/rust-lang/cargo/blob/3acc79c0c841844675bc53a605922dbfc441e750/src/workspace/gc.rs#L31-L38
+[cargo-clean-gc]: https://github.com/rust-lang/cargo/blob/3acc79c0c841844675bc53a605922dbfc441e750/src/bin/cargo/commands/clean.rs#L176-L183
+[cargo-home-doc]: https://github.com/rust-lang/cargo/blob/3acc79c0c841844675bc53a605922dbfc441e750/doc/book/src/guide/cargo-home.md
+[cargo-home-env]: https://github.com/rust-lang/cargo/blob/3acc79c0c841844675bc53a605922dbfc441e750/crates/home/src/env.rs#L67-L81
+[sccache-local]: https://github.com/mozilla/sccache/blob/v0.19.0/docs/Local.md
+[sccache-cmdline]: https://github.com/mozilla/sccache/blob/v0.19.0/src/cmdline.rs#L129-L160
 [pypi]: https://mise.jdx.dev/dev-tools/backends/pypi.html
 [deno-clean]: https://github.com/denoland/deno/blob/v2.9.8/cli/tools/clean.rs
 [deno-info]: https://github.com/denoland/deno/blob/v2.9.8/cli/tools/info.rs

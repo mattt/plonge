@@ -240,7 +240,7 @@ plus a built-in rule for Xcode build data on macOS.
 A rule for a cache without a cleanup command,
 or whose command also removes user state,
 can delete the contents of its path instead,
-as `zig-global-cache` does for Zig and the Deno rules do.
+as `zig-global-cache` does for Zig and the Deno and Cargo rules do.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -274,6 +274,7 @@ Neither kind guarantees that the whole reported size will be freed.
 | `pnpm` | prune | `pnpm store prune` |
 | `go-modules` | clear | `go clean -modcache` |
 | `go-build` | clear | `go clean -cache` |
+| `cargo-registry`, `cargo-git` | clear | Built-in deletion of the contents of `registry` and `git` in the Cargo home |
 | `npm` | clear | `npm cache clean --force` |
 | `bun` | clear | `bun pm cache prune` (Bun 1.4.4 or later) |
 | `deno-remote`, `deno-npm`, `deno-gen` | clear | Built-in deletion of the contents of Deno's module, npm, and TypeScript caches |
@@ -407,6 +408,13 @@ Plonge reads the variable from its own environment,
 not from the environment that `mise exec` gives the tool.
 It skips the rule when the value is not an absolute path.
 `path_env_subdir` cannot start with `/` or leave the directory with `..`.
+
+Cargo's command that cleans its global cache, `cargo clean gc`, is unstable,
+so the `cargo-registry` and `cargo-git` rules delete the contents
+of `registry` and `git` in the Cargo home: `$CARGO_HOME`, or `~/.cargo`.
+They keep `bin`, `config.toml`, `credentials.toml`,
+and the records of `cargo install`.
+Cargo 1.88 and later also delete unused files in these folders on their own.
 
 A rule can name a `check`, a command that must not change anything:
 
