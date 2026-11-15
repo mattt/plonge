@@ -398,36 +398,36 @@ or has a value that is not a nonempty string.
 A rule can set only one of `path_label`, `path_field`, and `path_zon_field`,
 and only with a `path` command.
 
-When the `path` command prints the directory above the cache,
-`path_subdir` names the cache's relative path below it:
+A fixed `path` can give way to an environment variable
+that holds the tool's directory.
+`path_env` names the variable:
+
+```toml
+path = "~/.cargo"
+path_env = "CARGO_HOME"
+path_subdir = "registry"
+```
+
+When the variable is set and not empty, Plonge uses its value;
+otherwise it uses `path`.
+Plonge reads the variable from its own environment,
+not from the environment that `mise exec` gives the tool.
+It skips the rule when the value is not an absolute path.
+
+When the cache is inside the directory that a rule resolves,
+`path_subdir` names the cache's relative path below it.
+Plonge joins it to whichever path the rule resolves:
+a fixed `path`, the value of `path_env`, or the path that a `path` command prints.
+In the example above, the cache is `$CARGO_HOME/registry` or `~/.cargo/registry`.
+For RubyGems, which prints the directory above its cache:
 
 ```toml
 path = "gem env gemdir"
 path_subdir = "cache"
 ```
 
-Plonge joins the two after it reads the printed path.
-`path_subdir` needs a `path` command,
-and it must be a relative path of directory names, without `.` or `..`.
-
-A fixed `path` can give way to an environment variable
-that holds the tool's directory.
-`path_env` names the variable,
-and `path_env_subdir` is a relative path inside the directory it names:
-
-```toml
-path = "~/.cargo/registry"
-path_env = "CARGO_HOME"
-path_env_subdir = "registry"
-```
-
-When the variable is set and not empty, Plonge uses its value
-joined with `path_env_subdir`, here `$CARGO_HOME/registry`;
-otherwise it uses `path`.
-Plonge reads the variable from its own environment,
-not from the environment that `mise exec` gives the tool.
-It skips the rule when the value is not an absolute path.
-`path_env_subdir` cannot start with `/` or leave the directory with `..`.
+`path_subdir` must be a relative path of directory names:
+it cannot start with `/`, end with `/`, or contain `.` or `..`.
 
 Cargo's command that cleans its global cache, `cargo clean gc`, is unstable,
 so the `cargo-registry` rule deletes the contents

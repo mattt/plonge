@@ -645,8 +645,8 @@ func TestPathEnvMustBeAbsolute(t *testing.T) {
 	addTool(t, bin, "mytool", "exit 9")
 	t.Setenv("MYTOOL_HOME", "relative/home")
 	r := runner(t)
-	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool/cache", PathEnv: "MYTOOL_HOME",
-		PathEnvSubdir: "cache", Kind: rules.KindClear, DeleteContents: true}
+	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool", PathEnv: "MYTOOL_HOME",
+		PathSubdir: "cache", Kind: rules.KindClear, DeleteContents: true}
 	entries := r.List(context.Background(), []rules.Global{rule})
 	e := entries[0]
 	if e.Skipped != `MYTOOL_HOME is "relative/home", which is not an absolute path` || e.Command != "" {
@@ -659,13 +659,13 @@ func TestPathEnvMustBeAbsolute(t *testing.T) {
 }
 
 // TestPathEnvReplacesFixedPath uses the variable when it is set and not empty,
-// and the fixed path otherwise.
+// and the fixed path otherwise, and joins path_subdir to either one.
 func TestPathEnvReplacesFixedPath(t *testing.T) {
 	bin := fakeTools(t)
 	addTool(t, bin, "mytool", "exit 9")
 	r := runner(t)
-	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool/cache", PathEnv: "MYTOOL_HOME",
-		PathEnvSubdir: "cache", Clean: "mytool gc", Kind: rules.KindClear}
+	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool", PathEnv: "MYTOOL_HOME",
+		PathSubdir: "cache", Clean: "mytool gc", Kind: rules.KindClear}
 	dir := t.TempDir()
 	for value, want := range map[string]string{
 		"":  filepath.Join(r.Home, ".mytool", "cache"),

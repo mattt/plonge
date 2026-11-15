@@ -64,11 +64,9 @@ type Global struct {
 	Tool string `toml:"tool"` // the command that must be available
 	Path string `toml:"path"` // a command that prints the path, or a fixed path
 	// PathEnv names an environment variable that holds a tool's directory,
-	// such as CARGO_HOME. When it is set and not empty, plonge uses its value,
-	// joined with PathEnvSubdir, in place of the fixed Path.
+	// such as CARGO_HOME. When it is set and not empty, plonge uses its value
+	// in place of the fixed Path.
 	PathEnv string `toml:"path_env"`
-	// PathEnvSubdir is a relative path inside the directory that PathEnv gives.
-	PathEnvSubdir string `toml:"path_env_subdir"`
 	// PathLabel, when set, selects the last line of the path command's output
 	// that contains the label followed by ": ", and takes the path after it.
 	PathLabel string `toml:"path_label"`
@@ -78,8 +76,9 @@ type Global struct {
 	// A rule can set only one of PathLabel, PathZONField, and PathField.
 	PathZONField string `toml:"path_zon_field"`
 	// PathSubdir is a relative path, such as "cache", that plonge joins
-	// to the path that the path command prints, for a tool that prints
-	// the directory above its cache, as "gem env gemdir" does.
+	// to the path it resolves from Path or PathEnv, for a tool whose cache
+	// is inside the directory that it prints or that a variable names,
+	// as with "gem env gemdir" and CARGO_HOME.
 	PathSubdir string `toml:"path_subdir"`
 	Clean      string `toml:"clean"` // the command that cleans the cache
 	Kind       string `toml:"kind"`
@@ -217,11 +216,8 @@ func (g Global) validate() error {
 	if err := g.validatePathKeys(); err != nil {
 		return err
 	}
-	if err := g.validatePathEnv(); err != nil {
+	if err := g.validateEnvAndSubdir(); err != nil {
 		return err
-	}
-	if g.PathSubdir != "" && (g.fixedPath() || !validCacheName(g.PathSubdir)) {
-		return fmt.Errorf("global rule %q: path_subdir must be a relative path of directory names and needs a path command", g.ID)
 	}
 	if g.DeleteContents {
 		if err := g.validateDelete(); err != nil {
@@ -269,21 +265,19 @@ func (g Global) validatePathKeys() error {
 	return nil
 }
 
-// validatePathEnv checks path_env and path_env_subdir.
+// validateEnvAndSubdir checks path_env and path_subdir.
 // The variable replaces a fixed path, which stays as the default,
-// and the subdirectory must stay inside the directory that the variable gives.
-func (g Global) validatePathEnv() error {
+// and the subdirectory must stay inside the path that the rule resolves.
+func (g Global) validateEnvAndSubdir() error {
 	switch {
-	case g.PathEnv == "" && g.PathEnvSubdir != "":
-		return fmt.Errorf("global rule %q: path_env_subdir needs path_env", g.ID)
+	case g.PathSubdir != "" && !validCacheName(g.PathSubdir):
+		return fmt.Errorf("global rule %q: path_subdir %q must be a relative path of directory names inside the path", g.ID, g.PathSubdir)
 	case g.PathEnv == "":
 		return nil
 	case !validEnvName(g.PathEnv):
 		return fmt.Errorf("global rule %q: path_env %q is not an environment variable name", g.ID, g.PathEnv)
 	case !g.fixedPath():
 		return fmt.Errorf("global rule %q: path_env needs a fixed path as its default", g.ID)
-	case g.PathEnvSubdir != "" && (!filepath.IsLocal(g.PathEnvSubdir) || filepath.Clean(g.PathEnvSubdir) == "."):
-		return fmt.Errorf("global rule %q: path_env_subdir %q must be a relative path inside the directory", g.ID, g.PathEnvSubdir)
 	}
 	return nil
 }

@@ -382,7 +382,7 @@ func TestGlobalPathSubdirValidation(t *testing.T) {
 	}{
 		{"path = \"t env\"\npath_subdir = \"cache\"\n", true},
 		{"path = \"t env\"\npath_subdir = \"a/cache\"\n", true},
-		{"path = \"~/c\"\npath_subdir = \"cache\"\n", false},
+		{"path = \"~/c\"\npath_subdir = \"cache\"\n", true},
 		{"path = \"t env\"\npath_subdir = \"/cache\"\n", false},
 		{"path = \"t env\"\npath_subdir = \"../cache\"\n", false},
 		{"path = \"t env\"\npath_subdir = \"cache/\"\n", false},
@@ -506,16 +506,16 @@ func TestGlobalPathEnvValidation(t *testing.T) {
 	cases := []struct {
 		extra, want string
 	}{
-		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c\"\n", ""},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_subdir = \"c\"\n", ""},
 		{"path = \"/t/c\"\npath_env = \"T_HOME\"\n", ""},
-		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c/d\"\n", ""},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_subdir = \"c/d\"\n", ""},
 		{"path = \"t where\"\npath_env = \"T_HOME\"\n", "path_env needs a fixed path"},
-		{"path = \"~/.t/c\"\npath_env_subdir = \"c\"\n", "path_env_subdir needs path_env"},
+		{"path = \"~/.t\"\npath_subdir = \"c\"\n", ""},
 		{"path = \"~/.t/c\"\npath_env = \"T-HOME\"\n", "is not an environment variable name"},
 		{"path = \"~/.t/c\"\npath_env = \"1HOME\"\n", "is not an environment variable name"},
-		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"../c\"\n", "must be a relative path inside"},
-		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"/c\"\n", "must be a relative path inside"},
-		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c/..\"\n", "must be a relative path inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_subdir = \"../c\"\n", "must be a relative path of directory names inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_subdir = \"/c\"\n", "must be a relative path of directory names inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_subdir = \"c/..\"\n", "must be a relative path of directory names inside"},
 	}
 	for _, c := range cases {
 		_, err := parse(base+c.extra, "test")
@@ -545,7 +545,7 @@ func TestCargoRulesKeepCargoHomeState(t *testing.T) {
 			continue
 		}
 		delete(want, g.ID)
-		if g.PathEnv != "CARGO_HOME" || g.PathEnvSubdir != sub || g.Path != "~/.cargo/"+sub ||
+		if g.PathEnv != "CARGO_HOME" || g.PathSubdir != sub || g.Path != "~/.cargo" ||
 			!g.DeleteContents || g.Kind != KindClear || g.Tool != "cargo" {
 			t.Errorf("%s = %+v", g.ID, g)
 		}

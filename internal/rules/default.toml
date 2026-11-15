@@ -110,7 +110,8 @@ kind = "clear"
 # for 1 to 3 months, as cache.auto-clean-frequency sets. The cargo clean gc
 # command that cleans on request is unstable, so plonge deletes the contents
 # of registry in the Cargo home: $CARGO_HOME, or ~/.cargo when it is
-# not set. Cargo has no stable command that prints the Cargo home.
+# not set; path_subdir joins registry to either one.
+# Cargo has no stable command that prints the Cargo home.
 # registry holds the crate index, downloaded .crate files, and their sources,
 # which a later build downloads again.
 # git is left out: its checkouts are working trees, and an edit there is lost.
@@ -119,9 +120,9 @@ kind = "clear"
 [[global]]
 id = "cargo-registry"
 tool = "cargo"
-path = "~/.cargo/registry"
+path = "~/.cargo"
 path_env = "CARGO_HOME"
-path_env_subdir = "registry"
+path_subdir = "registry"
 delete_contents = true
 kind = "clear"
 
