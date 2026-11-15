@@ -254,7 +254,8 @@ func TestCleanKeepsBusyRootAndReportsSources(t *testing.T) {
 	t.Setenv("GIT_CEILING_DIRECTORIES", home)
 	project := filepath.Join(home, "app")
 	quietRepo(t, project)
-	fakeTool(t, "paseo", fmt.Sprintf(`echo '[{"cwd":%q,"status":"running"}]'`, project))
+	// Paseo writes paths inside the home directory with a leading ~/.
+	fakeTool(t, "paseo", `echo '[{"cwd":"~/app","status":"running"}]'`)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"clean", "--no-mise", "--root", project, "--apply", "--include-active"}

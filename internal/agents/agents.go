@@ -32,7 +32,7 @@ var paseoTimeout = 15 * time.Second
 // because an agent might work in any of them.
 func Apply(ctx context.Context, roots []scan.Root, home string, now time.Time) []scan.Source {
 	sources := []scan.Source{applyClaude(roots, home)}
-	cwds, source := busyDirs(ctx)
+	cwds, source := busyDirs(ctx, home)
 	sources = append(sources, source)
 	for i := range roots {
 		if roots[i].Skipped != "" {
@@ -55,8 +55,9 @@ func Apply(ctx context.Context, roots []scan.Root, home string, now time.Time) [
 // Root is busy when Paseo reports an agent there,
 // or when paseo is on PATH but Plonge cannot read its status.
 // Root is not busy when paseo is not on PATH.
-func Busy(ctx context.Context, root string) string {
-	cwds, source := busyDirs(ctx)
+// Paseo writes paths inside home with a leading ~.
+func Busy(ctx context.Context, root, home string) string {
+	cwds, source := busyDirs(ctx, home)
 	switch {
 	case source.Status == scan.SourceFailed:
 		return "Paseo status unknown: " + source.Reason
@@ -75,7 +76,7 @@ func failed(name, reason string) scan.Source {
 }
 
 // busyDirs returns the working directories of Paseo agents that are running or starting.
-func busyDirs(ctx context.Context) ([]string, scan.Source) {
+func busyDirs(ctx context.Context, home string) ([]string, scan.Source) {
 	if _, err := exec.LookPath("paseo"); err != nil {
 		return nil, skipped(SourcePaseo, "paseo is not on PATH")
 	}
@@ -107,7 +108,7 @@ func busyDirs(ctx context.Context) ([]string, scan.Source) {
 	var cwds []string
 	for _, a := range list {
 		if a.Cwd != "" && (a.Status == "running" || a.Status == "initializing") {
-			cwds = append(cwds, real(a.Cwd))
+			cwds = append(cwds, real(expandHome(a.Cwd, home)))
 		}
 	}
 	return cwds, scan.Source{Name: SourcePaseo, Status: scan.SourceUsed}
@@ -122,6 +123,22 @@ func busyIn(root string, cwds []string) bool {
 		}
 	}
 	return false
+}
+
+// expandHome replaces a leading ~ or ~/ in path with home.
+// It leaves other paths, including ~user forms, unchanged.
+// With an empty home, it leaves path unchanged, so the path stays relative.
+func expandHome(path, home string) string {
+	if home == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		return filepath.Join(home, rest)
+	}
+	return path
 }
 
 func real(path string) string {
