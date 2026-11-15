@@ -1,7 +1,7 @@
-names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
-         ".pytest_cache", ".ruff_cache", ".svelte-kit", ".turbo", ".venv",
-         ".zig-cache", "DerivedData", "__pycache__", "bin", "dist", "node_modules",
-         "obj", "target", "venv", "zig-cache"]
+names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
+         ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
+         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "bin",
+         "build", "dist", "node_modules", "obj", "target", "venv", "zig-cache"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -15,7 +15,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 [beside]
 ".zig-cache" = ["build.zig"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
-dist = ["package.json"]
+build = ["pyproject.toml", "setup.py"]
+dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]

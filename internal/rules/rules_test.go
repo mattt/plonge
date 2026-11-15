@@ -10,11 +10,14 @@ import (
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 21 || r.QuietHours != 24 {
+	if len(r.Names) != 24 || r.QuietHours != 24 {
 		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
 		t.Errorf("beside target = %q", r.Beside["target"])
+	}
+	if !slices.Equal(r.Beside["build"], []string{"pyproject.toml", "setup.py"}) {
+		t.Errorf("beside build = %q", r.Beside["build"])
 	}
 }
 
@@ -89,7 +92,7 @@ func TestLoad(t *testing.T) {
 		})
 	}
 	// Loading must not change the defaults.
-	if !slices.Equal(Default().Beside["dist"], []string{"package.json"}) {
+	if !slices.Equal(Default().Beside["dist"], []string{"package.json", "pyproject.toml", "setup.py"}) {
 		t.Error("Load changed the default rules")
 	}
 }
@@ -120,6 +123,9 @@ func TestMatch(t *testing.T) {
 		{"node_modules", nil, "node_modules"},
 		{"dist", nil, ""},
 		{"dist", []string{"package.json"}, "dist beside package.json"},
+		{"dist", []string{"pyproject.toml"}, "dist beside pyproject.toml"},
+		{"dist", []string{"setup.py"}, "dist beside setup.py"},
+		{"dist", []string{"requirements.txt"}, ""},
 		{"target", []string{"pom.xml"}, "target beside pom.xml"},
 		{"target", []string{"package.json"}, ""},
 		{"src", []string{"package.json"}, ""},
@@ -130,6 +136,12 @@ func TestMatch(t *testing.T) {
 		{"zig-out", []string{"build.zig"}, ""},
 		{"bin", nil, ""},
 		{"obj", []string{"package.json"}, ""},
+		{".tox", nil, ".tox"},
+		{".nox", nil, ".nox"},
+		{"build", nil, ""},
+		{"build", []string{"package.json", "build.gradle"}, ""},
+		{"build", []string{"pyproject.toml"}, "build beside pyproject.toml"},
+		{"build", []string{"setup.py"}, "build beside setup.py"},
 	}
 	for _, tt := range tests {
 		got := r.Match(tt.name, func(m string) bool { return slices.Contains(tt.siblings, m) })
