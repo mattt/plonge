@@ -28,6 +28,13 @@ Backend cache locations were checked against
 [mise's source at v2026.10.14][mise-source].
 No cleanup command was applied to build this inventory.
 
+The Zig rules were checked against the source of Zig **0.17.1**,
+the current stable release.
+Zig puts its local cache, `.zig-cache`, in the directory of `build.zig`
+([source][zig-std]),
+and `zig build` installs to `zig-out` there by default ([source][zig-maker]).
+Zig 0.13 renamed the local cache from `zig-cache` ([release notes][zig-0.13]).
+
 ## How to read the tables
 
 The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
@@ -106,12 +113,12 @@ The global-cache column lists additional rules relevant to that tool.
 | `ruby` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Ruby cache rule. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/bundle` and `vendor/cache`; RubyGems' gem cache; application `tmp/cache`. |
 | `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Rust rule. | Cargo's registry and Git caches (`~/.cargo/registry`, `~/.cargo/git`); sccache; toolchains managed outside mise. |
 | `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds no Swift rule. | Swift Package Manager's global cache; `.swiftpm`; Xcode build data for existing workspaces, archives, device support, and simulators. |
-| `zig` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Zig cache rule. `clean --global` selects mise rules; `--include-clear` adds no Zig rule. | `.zig-cache`, older `zig-cache`, `zig-out`, and Zig's global cache. |
+| `zig` | Guarded `mise-tools` | `.zig-cache` and `zig-cache` (before Zig 0.13) beside `build.zig` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Zig rule. | `zig-out` install output, which can hold programs and libraries that a user runs; local caches moved with `--cache-dir` or `ZIG_LOCAL_CACHE_DIR`; Zig's global cache. |
 
 "None yet" means there is no dedicated rule for that cache.
 An unrelated directory name can still match a generic project rule.
 Outside the shared mise rules, the core tools with no cache rule are
-`dotnet` (also named `dotnet-core`), `elixir`, `erlang`, `ruby`, and `zig`.
+`dotnet` (also named `dotnet-core`), `elixir`, `erlang`, and `ruby`.
 Bun and Deno have project-name matches but no dedicated global-cache rule.
 
 ## Backends
@@ -200,3 +207,6 @@ without checking Xcode workspace metadata.
 [mise-spm]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/spm.rs
 [cargo]: https://mise.jdx.dev/dev-tools/backends/cargo.html
 [pypi]: https://mise.jdx.dev/dev-tools/backends/pypi.html
+[zig-std]: https://codeberg.org/ziglang/zig/src/tag/0.17.1/lib/std/zig.zig
+[zig-maker]: https://codeberg.org/ziglang/zig/src/tag/0.17.1/lib/compiler/Maker.zig
+[zig-0.13]: https://ziglang.org/download/0.13.0/release-notes.html#codezig-cachecode-renamed-to-codezig-cachecode
