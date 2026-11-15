@@ -5,6 +5,10 @@ names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          "vendor/bundle", "venv", "zig-cache"]
 quiet_hours = 24
 
+# .build and DerivedData beside Package.swift hold the dependency clones
+# that Swift Package Manager manages. Plonge lets through a clone that SwiftPM
+# can make again and refuses any other Git repository in them.
+
 # Do not scan inside these directories.
 skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
