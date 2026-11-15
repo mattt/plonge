@@ -202,7 +202,8 @@ Global caches are stored outside projects.
 Plonge uses cleanup commands from their tools,
 plus a built-in rule for Xcode build data on macOS.
 A rule for a cache without a cleanup command
-can delete the contents of its path instead.
+can delete the contents of its path instead,
+as `zig-global-cache` does for Zig.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -241,6 +242,7 @@ Neither kind guarantees that the whole reported size will be freed.
 | `pip` | clear | `pip cache purge` |
 | `homebrew` | clear | `brew cleanup --prune=all` |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
+| `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
 
 Plonge runs a tool through `mise exec --`
 when `mise which` finds it from your home directory,
@@ -372,6 +374,12 @@ kind = "clear"
 ```
 
 Plonge then deletes what is in `path` and keeps the directory itself.
+The default `zig-global-cache` rule gets its path from `zig env`.
+Zig has no command that cleans this cache.
+It holds build output and the packages that `zig fetch` and `zig build` download,
+so later builds can be slower and must download packages again.
+Before Zig 0.15, `zig env` printed JSON, so Plonge skips this rule;
+replace it with a fixed `path` to use it with those versions.
 It makes read-only entries writable first and does not follow symlinks.
 The rule must have kind `clear`,
 so it runs only with `clean --global --include-clear --apply`.

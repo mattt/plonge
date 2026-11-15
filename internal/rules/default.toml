@@ -108,3 +108,16 @@ tool = "brew"
 path = "brew --cache"
 clean = "brew cleanup --prune=all"
 kind = "clear"
+
+# Zig has no command that cleans its global cache, so plonge deletes its
+# contents. The cache holds build output and the packages that zig fetch and
+# zig build download; a later build downloads a package again.
+# zig env prints ZON, with a path inside the home directory relative to it,
+# and it creates the cache directory if it does not exist.
+[[global]]
+id = "zig-global-cache"
+tool = "zig"
+path = "zig env"
+path_zon_field = "global_cache_dir"
+delete_contents = true
+kind = "clear"

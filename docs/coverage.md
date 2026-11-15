@@ -34,6 +34,16 @@ Zig puts its local cache, `.zig-cache`, in the directory of `build.zig`
 ([source][zig-std]),
 and `zig build` installs to `zig-out` there by default ([source][zig-maker]).
 Zig 0.13 renamed the local cache from `zig-cache` ([release notes][zig-0.13]).
+Zig has no command that cleans a cache ([usage][zig-main]),
+so `zig-global-cache` uses the built-in deletion described below.
+The global cache is `ZIG_GLOBAL_CACHE_DIR`, `$XDG_CACHE_HOME/zig`,
+or `~/.cache/zig`, on macOS as well as Linux ([source][zig-std]).
+`zig env` prints it as the `global_cache_dir` field of a ZON struct,
+relative to the working directory when it is inside it ([source][zig-env]).
+Plonge runs `zig env` from the home directory and reads that field.
+`zig env` creates the directory if it does not exist.
+The cache also holds the packages that `zig fetch` and `zig build` download,
+so a clear downloads them again.
 
 ## How to read the tables
 
@@ -113,7 +123,7 @@ The global-cache column lists additional rules relevant to that tool.
 | `ruby` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Ruby cache rule. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/bundle` and `vendor/cache`; RubyGems' gem cache; application `tmp/cache`. |
 | `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Rust rule. | Cargo's registry and Git caches (`~/.cargo/registry`, `~/.cargo/git`); sccache; toolchains managed outside mise. |
 | `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds no Swift rule. | Swift Package Manager's global cache; `.swiftpm`; Xcode build data for existing workspaces, archives, device support, and simulators. |
-| `zig` | Guarded `mise-tools` | `.zig-cache` and `zig-cache` (before Zig 0.13) beside `build.zig` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Zig rule. | `zig-out` install output, which can hold programs and libraries that a user runs; local caches moved with `--cache-dir` or `ZIG_LOCAL_CACHE_DIR`; Zig's global cache. |
+| `zig` | Guarded `mise-tools` | `.zig-cache` and `zig-cache` (before Zig 0.13) beside `build.zig` | `zig-global-cache`: built-in deletion of the contents of the `global_cache_dir` that `zig env` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `zig-global-cache`. | `zig-out` install output, which can hold programs and libraries that a user runs; local caches moved with `--cache-dir` or `ZIG_LOCAL_CACHE_DIR`; the global cache when `zig env` prints JSON, as before Zig 0.15 (override the rule with a fixed path). |
 
 "None yet" means there is no dedicated rule for that cache.
 An unrelated directory name can still match a generic project rule.
@@ -184,7 +194,7 @@ Such a rule must be a clear rule, so it runs only with
 Plonge skips it when the path is not absolute; is `/`, the home directory,
 or contains the home directory; is or resolves through a symlink;
 is in a Git repository; or does not exist.
-No default rule uses `delete_contents` yet.
+The default `zig-global-cache` rule uses `delete_contents`.
 See the [README](../README.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
@@ -210,3 +220,5 @@ without checking Xcode workspace metadata.
 [zig-std]: https://codeberg.org/ziglang/zig/src/tag/0.17.1/lib/std/zig.zig
 [zig-maker]: https://codeberg.org/ziglang/zig/src/tag/0.17.1/lib/compiler/Maker.zig
 [zig-0.13]: https://ziglang.org/download/0.13.0/release-notes.html#codezig-cachecode-renamed-to-codezig-cachecode
+[zig-env]: https://codeberg.org/ziglang/zig/src/tag/0.17.1/src/print_env.zig
+[zig-main]: https://codeberg.org/ziglang/zig/src/tag/0.17.1/src/main.zig
