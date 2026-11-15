@@ -21,9 +21,12 @@ var defaultTOML string
 // Rules are the cache names, their marker files, and the quiet period.
 type Rules struct {
 	// Names are directory names that are caches.
+	// A name with "/", such as "vendor/bundle", is a path:
+	// it matches a directory whose path ends with those names.
 	Names []string
 	// Beside maps a name to project files; the name counts only
-	// when one of them is in the same parent directory.
+	// when one of them is in the directory that holds the name.
+	// For a path such as "vendor/bundle", that is the directory that holds vendor.
 	// A project file can be a pattern, such as "*.csproj"; see IsPattern.
 	Beside map[string][]string
 	// QuietHours is how long a project must be inactive to be quiet.
@@ -103,6 +106,14 @@ func validName(n string) bool {
 	return n != "" && n != "." && n != ".." && !strings.ContainsRune(n, '/')
 }
 
+// validCacheName reports whether n is a directory name
+// or a relative path of directory names, such as "vendor/bundle".
+func validCacheName(n string) bool {
+	return !slices.ContainsFunc(strings.Split(n, "/"), func(part string) bool {
+		return !validName(part)
+	})
+}
+
 func parse(data, name string) (file, error) {
 	var f file
 	md, err := toml.Decode(data, &f)
@@ -117,11 +128,13 @@ func parse(data, name string) (file, error) {
 		return f, fmt.Errorf("%s: unknown keys: %s", name, strings.Join(keys, ", "))
 	}
 	for _, n := range f.Names {
-		if !validName(n) {
-			return f, fmt.Errorf("%s: invalid name %q", name, n)
-		}
-		if slices.Contains(versionControlDirs, n) {
+		if slices.ContainsFunc(strings.Split(n, "/"), func(part string) bool {
+			return slices.Contains(versionControlDirs, part)
+		}) {
 			return f, fmt.Errorf("%s: %q holds version control data and cannot be a cache", name, n)
+		}
+		if !validCacheName(n) {
+			return f, fmt.Errorf("%s: invalid name %q", name, n)
 		}
 	}
 	for n, markers := range f.Beside {
@@ -343,22 +356,40 @@ func IsPattern(marker string) bool {
 	return strings.ContainsAny(marker, `*?[\`)
 }
 
-// Match returns the rule that a directory named name matches,
-// given a function that says whether its parent directory holds an entry
-// with a listed project file name, or one that matches a pattern.
+// Match returns the rule that a directory matches.
+// rel is the directory's path below the scan root, with "/" between names.
+// A name matches when it is the last name in rel;
+// a path name, such as "vendor/bundle", matches the last names in rel.
+// has says whether a directory, given by its path below the root
+// ("" for the root), holds an entry with a listed project file name,
+// or one that matches a pattern. For a beside rule, that directory is
+// the one that holds the name: the parent of rel, or for "vendor/bundle",
+// the parent of vendor.
 // The result is empty when nothing matches.
-func (r Rules) Match(name string, siblings func(string) bool) string {
-	if !slices.Contains(r.Names, name) {
-		return ""
-	}
-	markers, ok := r.Beside[name]
-	if !ok {
-		return name
-	}
-	for _, m := range markers {
-		if siblings(m) {
-			return name + " beside " + m
+func (r Rules) Match(rel string, has func(dir, marker string) bool) string {
+	for _, n := range r.Names {
+		dir, ok := holder(rel, n)
+		if !ok {
+			continue
+		}
+		markers, ok := r.Beside[n]
+		if !ok {
+			return n
+		}
+		for _, m := range markers {
+			if has(dir, m) {
+				return n + " beside " + m
+			}
 		}
 	}
 	return ""
+}
+
+// holder returns the part of rel before name, when rel ends with name.
+func holder(rel, name string) (string, bool) {
+	if rel == name {
+		return "", true
+	}
+	dir, ok := strings.CutSuffix(rel, "/"+name)
+	return dir, ok && dir != ""
 }

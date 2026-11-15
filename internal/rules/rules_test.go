@@ -57,7 +57,12 @@ func TestLoad(t *testing.T) {
 		},
 		{name: "quiet hours", body: "quiet_hours = 72", wantQuiet: 72},
 		{name: "unknown key", body: "nmaes = [\"x\"]", wantErr: true},
-		{name: "name with slash", body: `names = ["a/b"]`, wantErr: true},
+		{name: "path name", body: `names = ["out/gen"]`, wantNames: []string{"out/gen"}, wantQuiet: 24},
+		{name: "absolute path name", body: `names = ["/a"]`, wantErr: true},
+		{name: "path name with trailing slash", body: `names = ["a/"]`, wantErr: true},
+		{name: "path name with empty part", body: `names = ["a//b"]`, wantErr: true},
+		{name: "path name with dot dot", body: `names = ["a/../b"]`, wantErr: true},
+		{name: "path name with dot", body: `names = ["./a"]`, wantErr: true},
 		{name: "negative quiet hours", body: "quiet_hours = -1", wantErr: true},
 		{name: "bad toml", body: "names = [", wantErr: true},
 	}
@@ -144,9 +149,40 @@ func TestMatch(t *testing.T) {
 		{"build", []string{"setup.py"}, "build beside setup.py"},
 	}
 	for _, tt := range tests {
-		got := r.Match(tt.name, func(m string) bool { return slices.Contains(tt.siblings, m) })
+		// The parent of a one-name path is the root.
+		got := r.Match(tt.name, func(dir, m string) bool { return dir == "" && slices.Contains(tt.siblings, m) })
 		if got != tt.want {
 			t.Errorf("Match(%q, %q) = %q, want %q", tt.name, tt.siblings, got, tt.want)
+		}
+	}
+}
+
+func TestMatchPathName(t *testing.T) {
+	r, err := Load(writeRules(t, "names = [\"out/gen\", \"tmp/x\"]\n[beside]\n\"out/gen\" = [\"x.proj\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		rel  string
+		dir  string // the directory that holds the project file
+		want string
+	}{
+		{"out/gen", "", "out/gen beside x.proj"},
+		{"app/out/gen", "app", "out/gen beside x.proj"},
+		{"a/b/out/gen", "a/b", "out/gen beside x.proj"},
+		{"app/out/gen", "app/out", ""}, // the project file is beside gen, not beside out
+		{"gen", "", ""},
+		{"app/gen", "app", ""},
+		{"app/myout/gen", "app", ""},
+		{"out", "", ""},
+		{"tmp/x", "", "tmp/x"},
+		{"a/tmp/x", "", "tmp/x"},
+		{"tmp/x/y", "", ""},
+	}
+	for _, tt := range tests {
+		got := r.Match(tt.rel, func(dir, m string) bool { return dir == tt.dir && m == "x.proj" })
+		if got != tt.want {
+			t.Errorf("Match(%q) with x.proj in %q = %q, want %q", tt.rel, tt.dir, got, tt.want)
 		}
 	}
 }
@@ -188,7 +224,7 @@ func TestSkip(t *testing.T) {
 	if !slices.Equal(r.Skip, want) {
 		t.Errorf("merged skip = %q, want %q", r.Skip, want)
 	}
-	for _, body := range []string{`skip = ["a/b"]`, `skip = [""]`, `names = [".git"]`, `names = [".jj"]`} {
+	for _, body := range []string{`skip = ["a/b"]`, `skip = [""]`, `names = [".git"]`, `names = [".jj"]`, `names = ["a/.git"]`, `names = [".svn/x"]`} {
 		if _, err := Load(writeRules(t, body)); err == nil {
 			t.Errorf("Load(%s) gave no error", body)
 		}

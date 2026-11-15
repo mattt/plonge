@@ -542,11 +542,19 @@ in the syntax of Go's [`filepath.Match`](https://pkg.go.dev/path/filepath#Match)
 A name that contains `*`, `?`, `[`, or `\` is a pattern;
 a pattern matches any entry in the same directory, as a literal name does.
 
+A name in `names` can be a path of directory names, such as `vendor/bundle`.
+It matches a directory named `bundle` whose parent directory is named `vendor`;
+the `vendor` directory itself is not a cache.
+The whole path must be below the scanned root.
+For a path, a `beside` project file must be in the directory that holds
+the first name, here the directory that holds `vendor`.
+
 The scan never enters a directory in `skip`.
 This keeps out caches that are nested in a tool's own cache,
 such as `__pycache__` inside a `.cache/uv` environment.
 A name in both `names` and `skip` is reported as a cache and is not entered.
-`.git`, `.hg`, `.jj`, and `.svn` cannot be added to `names`.
+`.git`, `.hg`, `.jj`, and `.svn` cannot be added to `names`,
+alone or as part of a path.
 
 ## Development
 

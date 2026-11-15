@@ -245,6 +245,38 @@ func TestDetectBesidePattern(t *testing.T) {
 	}
 }
 
+func TestDetectPathName(t *testing.T) {
+	isolateGit(t)
+	r := rules.Default()
+	r.Names = append(r.Names, "out/gen")
+	r.Beside["out/gen"] = []string{"x.proj"}
+	root := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{
+		".gitignore":      "gen/\n",
+		"x.proj":          "",
+		"out/gen/a":       "",
+		"app/x.proj":      "",
+		"app/out/gen/a":   "",
+		"app/out/keep":    "", // out itself is not a cache
+		"lib/out/x.proj":  "", // beside gen, not beside out
+		"lib/out/gen/a":   "",
+		"none/out/gen/a":  "",
+		"app/gen/a":       "", // not inside out
+		"app/myout/gen/a": "",
+	})
+	got := Detect(context.Background(), root, r)
+	if got.Skipped != "" || len(got.Errors) > 0 {
+		t.Fatalf("skipped %q, errors %q", got.Skipped, got.Errors)
+	}
+	want := map[string]string{
+		"out/gen":     "out/gen beside x.proj",
+		"app/out/gen": "out/gen beside x.proj",
+	}
+	if f := found(got); !mapsEqual(f, want) {
+		t.Errorf("found %v, want %v", f, want)
+	}
+}
+
 func mapsEqual(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false

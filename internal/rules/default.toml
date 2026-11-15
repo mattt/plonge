@@ -9,6 +9,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
 # Match these names only when a listed project file is in the same directory.
 # A project file can be a pattern, such as "*.csproj".
+# For a path name, such as "vendor/bundle", the project file is beside
+# the first name in the path.
 # Zig 0.13 renamed the local cache from zig-cache to .zig-cache.
 # zig-out is left out: it is install output, not a cache, and can hold
 # programs and libraries that a user runs or links from.

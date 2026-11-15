@@ -126,10 +126,12 @@ For every row:
 - `--include-clear` requires `clean --global` and adds clear actions.
   It still deletes nothing without `--apply`.
 
-Project cache names are exact directory names.
+Project cache names are exact directory names,
+or exact paths of directory names such as `vendor/bundle`.
 Every match must be inside a scanned root, ignored by Git,
 and contain no tracked files.
-A listed project file must be in the cache directory's parent directory.
+A listed project file must be in the cache directory's parent directory,
+or for a path, in the directory that holds the path's first name.
 A project file written as a pattern, such as `*.csproj`, matches any name of that form.
 No project file is required unless the table names one.
 The scan does not enter `.cache`, `.git`, `.hg`, `.jj`, or `.svn`,
