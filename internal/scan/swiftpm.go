@@ -213,48 +213,40 @@ func tagRefs(g func(args ...string) ([]byte, int, error)) (map[string]string, er
 	return tags, nil
 }
 
-// pinned reports whether url names the same package as a pin's location.
+// pinned reports whether url names the same package as a pin's location,
+// as sameLocation decides.
 func pinned(url string, pins map[string]pin) bool {
-	want := canonicalLocation(url)
 	for _, p := range pins {
-		if canonicalLocation(p.location) == want {
+		if sameLocation(url, p.location) {
 			return true
 		}
 	}
 	return false
 }
 
-// canonicalLocation returns a form of a package URL or path that is the same
-// for the spellings of one location, close to SwiftPM's canonical location:
-// without case, scheme, user, port, a trailing slash, or a .git suffix,
-// and with the colon of an scp-style URL, such as git@host:path, as a slash.
-// Two locations that differ in any other way do not match,
-// so a different spelling makes plonge refuse a clone, not delete it.
-func canonicalLocation(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	scheme := false
-	if i := strings.Index(s, "://"); i >= 0 {
-		s, scheme = s[i+3:], true
-	}
-	if !strings.HasPrefix(s, "/") {
-		slash := strings.IndexByte(s, '/')
-		if at := strings.IndexByte(s, '@'); at >= 0 && (slash < 0 || at < slash) {
-			s = s[at+1:]
-			slash = strings.IndexByte(s, '/')
+// sameLocation reports whether a clone's origin URL is a pin's location.
+// Two absolute paths must resolve, through symlinks, to the same directory.
+// Anything else must be equal, except for one trailing slash on either.
+// Any other difference, such as case or a .git suffix, can name
+// a different repository, so plonge refuses the clone rather than delete it.
+func sameLocation(url, location string) bool {
+	if filepath.IsAbs(url) && filepath.IsAbs(location) {
+		a, err := filepath.EvalSymlinks(url)
+		if err != nil {
+			return false
 		}
-		if colon := strings.IndexByte(s, ':'); colon >= 0 && (slash < 0 || colon < slash) {
-			host, rest := s[:colon], s[colon+1:]
-			port, path, _ := strings.Cut(rest, "/")
-			if port != "" && strings.Trim(port, "0123456789") == "" && (scheme || path != "") {
-				s = host + "/" + path
-			} else {
-				s = host + "/" + rest
-			}
+		b, err := filepath.EvalSymlinks(location)
+		if err != nil {
+			return false
 		}
+		ai, err := os.Stat(a)
+		if err != nil {
+			return false
+		}
+		bi, err := os.Stat(b)
+		return err == nil && os.SameFile(ai, bi)
 	}
-	s = strings.TrimRight(s, "/")
-	s = strings.TrimSuffix(s, ".git")
-	return strings.TrimRight(s, "/")
+	return url != "" && strings.TrimSuffix(url, "/") == strings.TrimSuffix(location, "/")
 }
 
 // checkCheckout returns why the checkout at dir has work that

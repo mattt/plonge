@@ -286,6 +286,14 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 			reason: "contains a Git directory at repositories/dep-95d00fdd whose origin no pin in Package.resolved names",
 		},
 		{
+			name: "pin at a separate repository with a .git suffix",
+			setup: func(t *testing.T, p swiftPackage) {
+				run(t, p.root, "clone", "-q", "--bare", p.upstream, p.upstream+".git")
+				p.writeResolved(t, p.upstream+".git", p.pinned)
+			},
+			reason: "contains a Git directory at repositories/dep-95d00fdd whose origin no pin in Package.resolved names",
+		},
+		{
 			name: "bare clone that is not a mirror",
 			setup: func(t *testing.T, p swiftPackage) {
 				run(t, p.mirror, "config", "--unset", "remote.origin.mirror")
@@ -407,6 +415,14 @@ func TestVerifySwiftPMCheckoutChange(t *testing.T) {
 			reason: "contains a Git repository at checkouts/dep that has commits that only its local branches, tags, or reflogs hold",
 		},
 		{
+			name: "pin moved to a separate repository with a .git suffix",
+			change: func(t *testing.T, p swiftPackage) {
+				run(t, p.root, "clone", "-q", "--bare", p.upstream, p.upstream+".git")
+				p.writeResolved(t, p.upstream+".git", p.pinned)
+			},
+			reason: "contains a Git directory at repositories/dep-95d00fdd whose origin no pin in Package.resolved names",
+		},
+		{
 			name: "Package.swift removed",
 			change: func(t *testing.T, p swiftPackage) {
 				if err := os.Remove(filepath.Join(p.root, "Package.swift")); err != nil {
@@ -435,29 +451,56 @@ func TestVerifySwiftPMCheckoutChange(t *testing.T) {
 	}
 }
 
-func TestCanonicalLocation(t *testing.T) {
-	same := [][]string{
-		{"https://github.com/apple/swift-nio.git", "https://github.com/Apple/swift-nio", "git@github.com:apple/swift-nio.git",
-			"ssh://git@github.com:22/apple/swift-nio/", "github.com/apple/swift-nio"},
-		{"/tmp/deps/dep", "file:///tmp/deps/dep", "/tmp/deps/dep/", "/tmp/deps/dep.git"},
+func TestSameLocation(t *testing.T) {
+	tmp := t.TempDir()
+	dep := filepath.Join(tmp, "dep")
+	for _, d := range []string{dep, dep + ".git", filepath.Join(tmp, "Dep")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	for _, group := range same {
-		want := canonicalLocation(group[0])
-		for _, loc := range group[1:] {
-			if got := canonicalLocation(loc); got != want {
-				t.Errorf("canonicalLocation(%q) = %q, want %q", loc, got, want)
-			}
+	link := filepath.Join(tmp, "link")
+	if err := os.Symlink(dep, link); err != nil {
+		t.Fatal(err)
+	}
+	same := [][2]string{
+		{"https://github.com/apple/swift-nio.git", "https://github.com/apple/swift-nio.git"},
+		{"https://github.com/apple/swift-nio.git/", "https://github.com/apple/swift-nio.git"},
+		{"git@github.com:apple/swift-nio.git", "git@github.com:apple/swift-nio.git"},
+		{dep, dep + "/"},
+		{link, dep},
+	}
+	for _, pair := range same {
+		if !sameLocation(pair[0], pair[1]) {
+			t.Errorf("%q and %q do not match", pair[0], pair[1])
 		}
 	}
 	different := [][2]string{
-		{"https://github.com/apple/swift-nio", "https://github.com/apple/swift-nio-ssl"},
-		{"https://github.com/apple/swift-nio", "https://github.com/fork/swift-nio"},
-		{"https://github.com/apple/swift-nio", "https://gitlab.com/apple/swift-nio"},
-		{"/tmp/deps/dep", "/tmp/other/dep"},
+		{"https://github.com/apple/swift-nio.git", "https://github.com/apple/swift-nio"},
+		{"https://github.com/apple/swift-nio", "https://github.com/Apple/swift-nio"},
+		{"https://github.com/apple/swift-nio", "https://github.com:443/apple/swift-nio"},
+		{"https://github.com/apple/swift-nio", "git@github.com:apple/swift-nio"},
+		{"https://github.com/apple/swift-nio", "https://github.com/apple/swift-nio//"},
+		{dep, dep + ".git"},
+		{dep, "file://" + dep},
+		{dep, filepath.Join(tmp, "missing")},
+		{"", ""},
+	}
+	// On a case-insensitive volume, Dep and dep are the same directory.
+	if a, b := statOrNil(dep), statOrNil(filepath.Join(tmp, "Dep")); a != nil && b != nil && !os.SameFile(a, b) {
+		different = append(different, [2]string{dep, filepath.Join(tmp, "Dep")})
 	}
 	for _, pair := range different {
-		if canonicalLocation(pair[0]) == canonicalLocation(pair[1]) {
+		if sameLocation(pair[0], pair[1]) {
 			t.Errorf("%q and %q match", pair[0], pair[1])
 		}
 	}
+}
+
+func statOrNil(path string) os.FileInfo {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	return info
 }
