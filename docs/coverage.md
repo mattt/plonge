@@ -28,6 +28,11 @@ Backend cache locations were checked against
 [mise's source at v2026.10.14][mise-source].
 No cleanup command was applied to build this inventory.
 
+The Bun, Deno, and Yarn 2+ rules were checked against the documentation
+and source of [Bun 1.4.4][bun-pm], [Deno 2.9.8][deno-clean],
+and [Yarn 4.18.1][yarn-clean],
+the current stable releases when the rules were added.
+
 The Zig rules were checked against the source of Zig **0.17.1**,
 the current stable release.
 Zig puts its local cache, `.zig-cache`, in the directory of `build.zig`
@@ -280,25 +285,24 @@ The global-cache column lists additional rules relevant to that tool.
 
 | Core name | Installed versions | Project caches | Global caches: ID, command, kind | Default behavior | Not covered |
 | --- | --- | --- | --- | --- | --- |
-| `bun` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | Bun-specific: none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Bun-specific rule. | Bun's package cache (`~/.bun/install/cache`) and runtime caches outside matching project directories. |
-| `deno` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | Deno-specific: none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Deno-specific rule. | Deno's dependency and compiled-code cache (`DENO_DIR`). |
+| `bun` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | `bun`: `bun pm cache prune` (clear; Bun 1.4.4 or later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `bun`, which removes package folders in Bun's cache more than 30 days old. | Packages newer than 30 days; the global store (`links/`), Git dependency clones, and package manifests, which `prune` keeps; Bun before 1.4.4, which the rule skips; a cache directory that only a `bunfig.toml`, `.npmrc`, or `.env` file names, which `prune` ignores. |
+| `deno` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | `deno-remote`, `deno-npm`, `deno-gen`: `delete_contents` of the `modulesCache`, `npmCache`, and `typescriptCache` paths from `deno info --json` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds the three Deno rules. | `deno clean`, which also deletes user state; `location_data` (localStorage and Cache API data) and REPL history, which hold user state; the `registries` and `dl` folders and the analysis, check, and code caches in `DENO_DIR`. |
 | `dotnet` | Guarded `mise-tools` | `bin` and `obj` beside `*.csproj`, `*.fsproj`, or `*.vbproj` | `nuget-packages`: `dotnet nuget locals global-packages --clear` (clear); `nuget-http-cache`: `dotnet nuget locals http-cache --clear` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds both NuGet rules. | Output moved by `BaseOutputPath`, `BaseIntermediateOutputPath`, or `--output`; the [`artifacts` layout][dotnet-artifacts] (`UseArtifactsOutput`); `bin` and `obj` beside other project types; NuGet's `temp` and `plugins-cache` folders; `packages.config` folders set by `repositoryPath`; NuGet folders set only in a project's `nuget.config`. |
 | `dotnet-core` (alias of `dotnet`) | Guarded `mise-tools`; same tool as `dotnet` | Same as `dotnet` | Same as `dotnet` | Same as `dotnet`. | Same as `dotnet`. |
-| `elixir` | Guarded `mise-tools` | `_build` beside `mix.exs`, refused when it holds `*/rel` | `hex-packages`: built-in deletion of the contents of `~/.hex/packages` (clear) | `scan` reports project matches; `clean` selects quiet ones. A `_build` that holds a release is refused. `clean --global` selects mise rules; `--include-clear` adds `hex-packages`. | Mix `deps`, which can hold edited dependency sources; `_build` moved by `MIX_BUILD_ROOT`, `MIX_BUILD_PATH`, or `:build_path`; `_build` with a release; a Hex cache moved by `HEX_HOME` or `MIX_XDG`; Hex's registry cache and docs. |
-| `erlang` | Guarded `mise-tools` | `_build` beside `rebar.config`, refused when it holds `*/rel` | `rebar3-hex`: built-in deletion of the contents of `~/.cache/rebar3/hex` (clear) | `scan` reports project matches; `clean` selects quiet ones. A `_build` that holds a release or a Git dependency is refused. An edit to a Hex dependency in `_build/<profile>/lib` is lost; use `_checkouts` for local edits. `clean --global` selects mise rules; `--include-clear` adds `rebar3-hex`. | `_build` with a release or a Git dependency; `_checkouts`; `_build` moved by `base_dir`; a Rebar3 cache moved by `REBAR_CACHE_DIR`; Rebar3's global plugins and its `local install` copy. |
+| `elixir` | Guarded `mise-tools` | `_build` beside `mix.exs`, refused when it holds `*/rel` | `hex-packages`: `delete_contents` of `~/.hex/packages` (clear) | `scan` reports project matches; `clean` selects quiet ones. A `_build` that holds a release is refused. `clean --global` selects mise rules; `--include-clear` adds `hex-packages`. | Mix `deps`, which can hold edited dependency sources; `_build` moved by `MIX_BUILD_ROOT`, `MIX_BUILD_PATH`, or `:build_path`; `_build` with a release; a Hex cache moved by `HEX_HOME` or `MIX_XDG`; Hex's registry cache and docs. |
+| `erlang` | Guarded `mise-tools` | `_build` beside `rebar.config`, refused when it holds `*/rel` | `rebar3-hex`: `delete_contents` of `~/.cache/rebar3/hex` (clear) | `scan` reports project matches; `clean` selects quiet ones. A `_build` that holds a release or a Git dependency is refused. An edit to a Hex dependency in `_build/<profile>/lib` is lost; use `_checkouts` for local edits. `clean --global` selects mise rules; `--include-clear` adds `rebar3-hex`. | `_build` with a release or a Git dependency; `_checkouts`; `_build` moved by `base_dir`; a Rebar3 cache moved by `REBAR_CACHE_DIR`; Rebar3's global plugins and its `local install` copy. |
 | `go` | Guarded `mise-tools` | none yet | `go-modules`: `go clean -modcache` (clear); `go-build`: `go clean -cache` (clear) | `scan` and `clean` have no Go project rule. `clean --global` selects mise rules; `--include-clear` adds both Go rules. | Project binaries, `vendor`, and caches at paths other than those returned by Go from the home directory. |
 | `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); Gradle project `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
-| `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and `yarn`. | Yarn 2+ caches such as `.yarn/cache`; separate pnpm stores not resolved from the home directory; `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
+| `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1); `yarn-berry`: `yarn cache clean` (clear, Yarn 2 and later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and the one Yarn rule that matches the version of `yarn` in the home directory. | Project `.yarn/cache` folders; the Yarn 2+ global cache when `yarn` in the home directory is Yarn 1 or `enableGlobalCache` is off; separate pnpm stores not resolved from the home directory; `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
 | `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py`; `build` and `dist` beside `pyproject.toml` or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | tox and nox environments moved by `--workdir`, `work_dir`, or `--envdir`; build output moved by setuptools' `build_base`; `*.egg-info`; `dist` moved by `--outdir` or `--out-dir`; uv-managed Python installations outside mise; caches at other configured paths. |
 | `ruby` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Ruby cache rule. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/bundle` and `vendor/cache`; RubyGems' gem cache; application `tmp/cache`. |
 | `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Rust rule. | Cargo's registry and Git caches (`~/.cargo/registry`, `~/.cargo/git`); sccache; toolchains managed outside mise. |
-| `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `swiftpm-macos` (macOS) or `swiftpm-linux` (Linux): `swift package purge-cache` (clear); `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. A `.build` directory for a package with remote dependencies is refused, because it holds Git checkouts and bare clones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds the SwiftPM rule for the system. | `.build` directories with remote dependencies; SwiftPM's `artifacts` and `prebuilts` caches; a shared cache moved by `--cache-path` or `XDG_CACHE_HOME`; `.swiftpm`, which holds package configuration and Xcode schemes; Xcode build data for existing workspaces, archives, device support, and simulators. |
-| `zig` | Guarded `mise-tools` | `.zig-cache` and `zig-cache` (before Zig 0.13) beside `build.zig` | `zig-global-cache`: built-in deletion of the contents of the `global_cache_dir` that `zig env` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `zig-global-cache`. | `zig-out` install output, which can hold programs and libraries that a user runs; local caches moved with `--cache-dir` or `ZIG_LOCAL_CACHE_DIR`; the global cache when `zig env` prints JSON, as before Zig 0.15 (override the rule with a fixed path). |
+| `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `swiftpm-macos` (macOS): `swift package purge-cache --cache-path Library/Caches/org.swift.swiftpm --scratch-path Library/Caches/org.swift.swiftpm` (clear); `swiftpm-linux` (Linux): `swift package purge-cache --cache-path .cache/org.swift.swiftpm --scratch-path .cache/org.swift.swiftpm` (clear); `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. A `.build` directory for a package with remote dependencies is refused, because it holds Git checkouts and bare clones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds the SwiftPM rule for the system. | `.build` directories with remote dependencies; SwiftPM's `artifacts` and `prebuilts` caches; a shared cache moved by `--cache-path` or `XDG_CACHE_HOME`; `.swiftpm`, which holds package configuration and Xcode schemes; Xcode build data for existing workspaces, archives, device support, and simulators. |
+| `zig` | Guarded `mise-tools` | `.zig-cache` and `zig-cache` (before Zig 0.13) beside `build.zig` | `zig-global-cache`: `delete_contents` (built-in deletion) of the `global_cache_dir` that `zig env` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `zig-global-cache`. | `zig-out` install output, which can hold programs and libraries that a user runs; local caches moved with `--cache-dir` or `ZIG_LOCAL_CACHE_DIR`; the global cache when `zig env` prints JSON, as before Zig 0.15 (override the rule with a fixed path). |
 
 "None yet" means there is no dedicated rule for that cache.
 An unrelated directory name can still match a generic project rule.
 Outside the shared mise rules, the only core tool with no cache rule is `ruby`.
-Bun and Deno have project-name matches but no dedicated global-cache rule.
 
 ## Backends
 
@@ -321,7 +325,7 @@ See mise's [install and uninstall code][mise-backend].
 | `asdf`, `vfox` | Plugin metadata, retained downloads, and any caches a plugin's install code creates | `mise-cache` reaches mise's cache directory; `mise-tools` delegates uninstall to the backend | Plugin directories and caches outside mise's cache directory have no general rule; plugin behavior varies |
 | `cargo` | Cargo registry and Git downloads after source builds; optional compiler caches; prebuilt binaries when available | `mise-tools` removes selected installs; project `target` applies only in scanned roots beside `Cargo.toml` | Cargo registry, Git cache, and sccache have no global rule ([backend][cargo]) |
 | `go` | Go module downloads and build cache | `go-modules` and `go-build` clear the paths returned by `go env GOMODCACHE` and `go env GOCACHE` from the home directory | Caches at other configured paths |
-| `npm` | Embedded installer cache and store under mise's cache directory, or external npm/pnpm/Bun caches when configured | `mise-cache` reaches the embedded cache; `npm` clears npm's cache; `pnpm` prunes its resolved store | Bun's package cache and other stores not resolved by the rules ([source][mise-npm]) |
+| `npm` | Embedded installer cache and store under mise's cache directory, or external npm/pnpm/Bun caches when configured | `mise-cache` reaches the embedded cache; `npm` clears npm's cache; `pnpm` prunes its resolved store; `bun` prunes Bun's cache | Stores not resolved by the rules ([source][mise-npm]) |
 | `pypi` | Per-tool environments and uv cache, or pip cache when installing through pipx | `mise-tools` removes selected environments; `uv` prunes and `pip` clears their resolved caches | Other pipx state and environments outside mise; caches at other configured paths ([backend][pypi]) |
 | `gem` | Per-tool gems and gem archives under each install; separate RubyGems and Bundler caches | `mise-tools` removes selected installs as a whole | No rule to prune archives within retained installs or separate gem/Bundler caches ([source][mise-gem]) |
 | `dotnet` | .NET tool installs and NuGet package/HTTP caches | `mise-tools` removes selected installs; `nuget-packages` and `nuget-http-cache` clear the folders that `dotnet nuget locals` lists from the home directory | NuGet folders set for a single project; NuGet's `temp` and `plugins-cache` folders ([source][mise-dotnet]) |
@@ -347,7 +351,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | Astro, Next.js, Parcel, SvelteKit, Turborepo | `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo`; `dist` beside `package.json` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. No dedicated global action. |
 | mypy, pytest, Ruff | `.mypy_cache`, `.pytest_cache`, `.ruff_cache` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. |
 | Mix, Rebar3 | `_build` beside `mix.exs` or `rebar.config` | none | Delete matching project directories; Plonge does not run `mix clean` or `rebar3 clean` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `_build` that holds a release (`*/rel`) is refused. Mix `deps` is not matched. |
-| Hex, Rebar3 | none | `hex-packages`, `rebar3-hex` | Built-in deletion of the contents of `~/.hex/packages` and `~/.cache/rebar3/hex`; neither tool has a cleanup command | clear; requires `clean --global --include-clear --apply` to run. Caches moved by `HEX_HOME`, `MIX_XDG`, or `REBAR_CACHE_DIR` are not covered. |
+| Hex, Rebar3 | none | `hex-packages`, `rebar3-hex` | `delete_contents` of `~/.hex/packages` and `~/.cache/rebar3/hex`; neither tool has a cleanup command | clear; requires `clean --global --include-clear --apply` to run. Caches moved by `HEX_HOME`, `MIX_XDG`, or `REBAR_CACHE_DIR` are not covered. |
 | tox, nox | `.tox`, `.nox` | none | Delete matching project directories; neither tool has a cleanup command | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Environments moved by `--workdir`, `work_dir`, or `--envdir` are not matched. |
 | Maven, Gradle | `target` beside `pom.xml`; `.gradle` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Global repositories and caches remain. |
 | setuptools | `build` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; Plonge does not run `setup.py clean --all` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `build_base` setting that moves the directory is not followed. |
@@ -356,7 +360,10 @@ Global rules require their command to be available, except for the Xcode rule.
 | pip | The same Python environment names | `pip` | `pip cache purge` | clear; requires `clean --global --include-clear --apply` to run |
 | npm | `node_modules` | `npm` | `npm cache clean --force` | clear; requires `clean --global --include-clear --apply` to run |
 | pnpm | `node_modules` | `pnpm` | `pnpm store prune` | prune; eligible with `clean --global`; requires `--apply` to run |
-| Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Yarn 2+ has no matching global rule. |
+| Bun | `node_modules` | `bun` | `bun pm cache prune` | clear; requires `clean --global --include-clear --apply` to run. Bun 1.4.4 or later. |
+| Deno | `node_modules` | `deno-remote`, `deno-npm`, `deno-gen` | `delete_contents` of the paths that `deno info --json` prints | clear; requires `clean --global --include-clear --apply` to run. |
+| Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Only when `yarn --version` reports 1.x. |
+| Yarn 2 and later | `node_modules` | `yarn-berry` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Only when `yarn --version` reports 2.x or later. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
 | Swift Package Manager | `.build` | `swiftpm-macos`, `swiftpm-linux` | `swift package purge-cache`, with `--cache-path` and `--scratch-path` set to the measured cache directory | clear; requires `clean --global --include-clear --apply` to run. Each rule applies only on its system. `artifacts` and `prebuilts` remain. |
 | Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. |
@@ -369,7 +376,8 @@ Such a rule must be a clear rule, so it runs only with
 Plonge skips it when the path is not absolute; is `/`, the home directory,
 or contains the home directory; is or resolves through a symlink;
 is in a Git repository; or does not exist.
-The default `zig-global-cache`, `hex-packages`, and `rebar3-hex` rules use `delete_contents`.
+The default `zig-global-cache`, `hex-packages`, and `rebar3-hex` rules
+and the Deno rules use `delete_contents`.
 See the [README](../README.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
@@ -378,6 +386,85 @@ It keeps directories with missing or unreadable workspace metadata
 and workspaces on unmounted volumes under `/Volumes`.
 The project `DerivedData` rule is different: it uses the project checks,
 without checking Xcode workspace metadata.
+
+### Bun
+
+The `bun` rule asks `bun pm cache` for the cache path
+and runs `bun pm cache prune`.
+That command removes package folders that Bun has neither extracted nor,
+where the file system records access times, linked from in 30 days.
+macOS and `noatime` mounts do not record those access times,
+so a package that projects still install every day can count as old.
+For this reason the rule has kind clear.
+The next install downloads a removed package again.
+`prune` keeps the global store in `links/`,
+which projects with `globalStore = true` link to,
+and Git dependency clones, package manifests, and transpiler output.
+Plonge does not use `bun pm cache rm`,
+because it also deletes the global store and so breaks those projects
+until each one runs `bun install` again.
+
+Bun added `prune` in 1.4.4,
+so the rule's check runs `bun --version`
+and skips the rule for an earlier version,
+or when it prints no version line or more than one.
+Bun 1.3 prints its cache path only inside a project with a `package.json`,
+so for Bun 1.3 the rule is skipped earlier, because its path command fails.
+`prune` takes its directory from `BUN_INSTALL_CACHE_DIR`, `BUN_INSTALL`,
+or `~/.bunfig.toml`, and ignores a directory named in another
+`bunfig.toml`, `.npmrc`, or `.env` file.
+See [Bun's `pm cache` documentation][bun-pm] and [prune code][bun-prune].
+
+### Deno
+
+Deno's own command, `deno clean`, deletes all of `DENO_DIR`.
+That directory also holds user state:
+localStorage and Cache API data under `location_data`,
+and the REPL history in `deno_history.txt` unless `DENO_REPL_HISTORY` moves it.
+Plonge does not run `deno clean`.
+Its three Deno rules each read one path from `deno info --json`,
+so they follow `DENO_DIR`, and delete the contents of that path:
+`deno-remote` for remote modules (`remote`),
+`deno-npm` for npm packages (`npm`),
+and `deno-gen` for compiled TypeScript (`gen`).
+The next run downloads or compiles them again.
+The other folders and files in `DENO_DIR` stay.
+See Deno's [clean][deno-clean], [info][deno-info],
+and [`DENO_DIR` layout][deno-dir] code.
+
+### Yarn
+
+The `yarn` and `yarn-berry` rules run the same `yarn`,
+resolved from the home directory.
+Each rule's check runs `yarn --version`
+and requires exactly one version line in its output.
+Each rule then refuses the versions that the other accepts:
+`yarn` runs only for 1.x, and `yarn-berry` only for 2.x or later.
+So at most one Yarn rule acts on an installation.
+If the output has no version line, or more than one, both rules are skipped.
+
+For Yarn 2 and later, `yarn-berry` asks `yarn config get cacheFolder`
+for the path and runs `yarn cache clean`, which deletes that folder.
+With `enableGlobalCache`, which is on by default in Yarn 4.18.1,
+`cacheFolder` is the `cache` folder in `globalFolder`:
+by default `~/.yarn/berry/cache`,
+or `$XDG_DATA_HOME/yarn/berry/cache` when `XDG_DATA_HOME` is set.
+With `enableGlobalCache` off, `cacheFolder` is a project's `.yarn/cache`,
+which a project with zero-installs keeps in Git.
+A command rule has no Git check, and the home directory can be,
+or be inside, a Yarn project.
+So `yarn-berry` has a second check, `yarn config get enableGlobalCache`,
+and runs only when Yarn prints exactly one line, `true`.
+Plonge runs both checks when it lists the rule
+and again right before cleanup,
+and skips the rule when the setting is off or Yarn cannot report it.
+If `enableCacheClean` is off, `yarn cache clean` fails,
+and Plonge reports the failure.
+`yarn` in the home directory can be Yarn 1
+even when projects choose a later version, for example in `packageManager`.
+Then only the `yarn` rule applies, and the Yarn 2+ global cache stays.
+See Yarn's [cache clean command][yarn-clean] and
+[configuration][yarn-config] code.
 
 [mix-build-path]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/project.ex#L782-L786
 [mix-umbrella]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/project.ex#L140-L148
@@ -415,8 +502,15 @@ without checking Xcode workspace metadata.
 [mise-conda]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/conda.rs
 [mise-spinel]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/spinel.rs
 [mise-spm]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/spm.rs
+[bun-pm]: https://github.com/oven-sh/bun/blob/bun-v1.4.4/docs/pm/cli/pm.mdx#cache
+[bun-prune]: https://github.com/oven-sh/bun/blob/bun-v1.4.4/src/runtime/cli/pm_cache_prune_command.rs
 [cargo]: https://mise.jdx.dev/dev-tools/backends/cargo.html
 [pypi]: https://mise.jdx.dev/dev-tools/backends/pypi.html
+[deno-clean]: https://github.com/denoland/deno/blob/v2.9.8/cli/tools/clean.rs
+[deno-info]: https://github.com/denoland/deno/blob/v2.9.8/cli/tools/info.rs
+[deno-dir]: https://github.com/denoland/deno/blob/v2.9.8/libs/resolver/cache/deno_dir.rs
+[yarn-clean]: https://github.com/yarnpkg/berry/blob/%40yarnpkg/cli/4.18.1/packages/plugin-essentials/sources/commands/cache/clean.ts
+[yarn-config]: https://github.com/yarnpkg/berry/blob/%40yarnpkg/cli/4.18.1/packages/yarnpkg-core/sources/Configuration.ts
 [zig-std]: https://codeberg.org/ziglang/zig/src/tag/0.17.1/lib/std/zig.zig
 [zig-maker]: https://codeberg.org/ziglang/zig/src/tag/0.17.1/lib/compiler/Maker.zig
 [zig-0.13]: https://ziglang.org/download/0.13.0/release-notes.html#codezig-cachecode-renamed-to-codezig-cachecode
