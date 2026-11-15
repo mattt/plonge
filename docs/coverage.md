@@ -285,8 +285,8 @@ Both rules are `clear`, because they also delete packages that projects use.
 
 ## How to read the tables
 
-The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
-and the quiet, active, and busy states.
+The [README](../README.md#try-a-safe-run) explains roots, projects, and caches.
+Its [cleanup guide](../README.md#delete-project-caches) explains activity selection.
 For every row:
 
 - `scan` reports matching project caches and deletes nothing.
@@ -458,7 +458,7 @@ the Deno rules, and the Cargo rules use `delete_contents`.
 A `delete_contents` rule can also list `refuse_names`:
 Plonge skips the rule when its path holds an entry with one of those names
 at any depth, or a directory that it cannot read.
-See the [README](../README.md#global-caches) for the rule format.
+See the [rule reference](rules.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
 names an absolute `WorkspacePath` that no longer exists.
