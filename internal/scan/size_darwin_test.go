@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"encoding/binary"
 	"errors"
 	"math/rand/v2"
 	"os"
@@ -114,5 +115,73 @@ func TestEntrySizeMatchesLstat(t *testing.T) {
 	want, wantOK := statSize(ents[0])
 	if !ok || !wantOK || got.id != want.id || got.linked != want.linked || got.bytes != want.bytes || got.clones != 0 {
 		t.Errorf("entrySize = %+v, %v; lstat gives %+v, %v", got, ok, want, wantOK)
+	}
+}
+
+// attrBuf packs the attributes that attrSize requests, as getattrlist does
+// with FSOPT_PACK_INVAL_ATTRS, with the given returned bitmaps.
+type attrBuf struct {
+	common, file, fork      uint32
+	dev, objType, flags     uint32
+	fileID                  uint64
+	links                   uint32
+	alloc, private, cloneID uint64
+	clones                  uint32
+}
+
+func (a attrBuf) bytes() []byte {
+	le := binary.LittleEndian
+	b := make([]byte, attrBufSize)
+	le.PutUint32(b[0:], 76)
+	le.PutUint32(b[4:], a.common)
+	le.PutUint32(b[16:], a.file)
+	le.PutUint32(b[20:], a.fork)
+	v := b[attrValuesOffset:]
+	le.PutUint32(v[0:], a.dev)
+	le.PutUint32(v[4:], a.objType)
+	le.PutUint32(v[8:], a.flags)
+	le.PutUint64(v[12:], a.fileID)
+	le.PutUint32(v[20:], a.links)
+	le.PutUint64(v[24:], a.alloc)
+	le.PutUint64(v[32:], a.private)
+	le.PutUint64(v[40:], a.cloneID)
+	le.PutUint32(v[48:], a.clones)
+	return b
+}
+
+func TestParseAttrs(t *testing.T) {
+	full := attrBuf{
+		common: attrCmnReturnedAttrs | requiredCommonAttrs | attrCmnFlags,
+		file:   requiredFileAttrs,
+		fork:   requestedForkAttrs,
+		dev:    7, objType: vreg, fileID: 42, links: 1,
+		alloc: 8192, private: 4096, cloneID: 99, clones: 2,
+	}
+	id := inode{dev: 7, ino: 42}
+	tests := []struct {
+		name   string
+		edit   func(*attrBuf)
+		want   fileSize
+		wantOK bool
+	}{
+		{"clone family", func(*attrBuf) {}, fileSize{bytes: 4096, id: id, family: cloneFamily{7, 99}, clones: 2, shared: 4096}, true},
+		{"compressed file uses allocated size", func(a *attrBuf) { a.flags = ufCompressed; a.private = 0 },
+			fileSize{bytes: 8192, id: id}, true},
+		{"no private size uses allocated size", func(a *attrBuf) { a.fork = 0 }, fileSize{bytes: 8192, id: id}, true},
+		{"private size without clone count", func(a *attrBuf) { a.fork = attrCmnExtPrivateSize },
+			fileSize{bytes: 4096, id: id}, true},
+		{"private size above allocated size", func(a *attrBuf) { a.private = 1 << 20 }, fileSize{bytes: 8192, id: id}, true},
+		{"hard link", func(a *attrBuf) { a.links = 2; a.clones = 1 }, fileSize{bytes: 4096, id: id, linked: true}, true},
+		{"no file ID falls back to lstat", func(a *attrBuf) { a.common &^= attrCmnFileID }, fileSize{}, false},
+		{"no allocated size falls back to lstat", func(a *attrBuf) { a.file = attrFileLinkCount }, fileSize{}, false},
+		{"not a regular file falls back to lstat", func(a *attrBuf) { a.objType = 2 }, fileSize{}, false},
+	}
+	for _, tt := range tests {
+		a := full
+		tt.edit(&a)
+		got, ok := parseAttrs(a.bytes())
+		if ok != tt.wantOK || got != tt.want {
+			t.Errorf("%s: parseAttrs = %+v, %v; want %+v, %v", tt.name, got, ok, tt.want, tt.wantOK)
+		}
 	}
 }
