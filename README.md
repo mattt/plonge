@@ -259,7 +259,8 @@ plonge clean --global --apply --include-clear
 By default it lists the commands as a dry run.
 `--apply` runs eligible actions and estimates the space freed.
 Global cleanup does not use the project activity or Git checks,
-except that a `delete_contents` rule refuses a path in a Git repository.
+except that a `delete_contents` rule refuses a path
+that is in or holds a Git repository.
 It cannot be combined with `--root`, `--no-mise`, `--include-active`, or `--min-size`.
 Lookup and check commands run even during a scan or dry run.
 
@@ -575,6 +576,9 @@ is a symlink or resolves through one to a different place;
 is in a Git work tree or Git directory, or Git cannot check it,
 as when the path or a directory above it has a `.git` entry that Git cannot use;
 or does not exist or is not a directory.
+It also skips the rule when the path holds a Git repository at any depth,
+with the [same check as for project caches](#caches-that-hold-a-git-repository),
+because the deletion would lose that repository's commits and uncommitted work.
 It checks the path when it lists the rule and again right before it deletes.
 `tool` must still be available, and a `path` command must still start with it.
 
