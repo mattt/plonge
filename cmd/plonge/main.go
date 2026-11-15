@@ -191,6 +191,10 @@ Global cleanup does not check project activity. A clear rule requires
 --include-clear because it can remove cached data still in use.
 A size marked (whole cache) is the size of a prune rule's cache;
 the tool's policy removes only part of it.
+
+With --apply, clean estimates the space freed from the sizes of the caches,
+and reports the change in free space on your home directory's volume,
+which other processes and snapshots can also change.
 A rule with delete_contents deletes what is in its path, after checks
 that the path is not the home directory, a symlink, or in a Git repository,
 that it holds no Git repository at any depth,

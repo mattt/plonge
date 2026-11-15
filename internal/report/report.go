@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mattt/plonge/internal/clean"
+	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/global"
 	"github.com/mattt/plonge/internal/scan"
 )
@@ -305,8 +306,7 @@ func WriteGlobalClean(w io.Writer, r global.Result, home string) error {
 		fmt.Fprintf(w, "Failed: %d\n", r.Failed)
 	}
 	if r.Applied {
-		_, err := fmt.Fprintf(w, "Estimated freed: %s\n", HumanBytes(r.FreedBytes))
-		return err
+		return writeFreed(w, r.FreedBytes, r.HomeVolume)
 	}
 	_, err := fmt.Fprintln(w, "Dry run; no cleanup action ran. Use --apply to run eligible actions.")
 	return err
@@ -353,11 +353,34 @@ func WriteClean(w io.Writer, r clean.Result, home string) error {
 	writeSources(w, r.ActivitySources)
 	var err error
 	if r.Applied {
-		_, err = fmt.Fprintf(w, "Estimated freed: %s\n", HumanBytes(r.FreedBytes))
+		err = writeFreed(w, r.FreedBytes, r.HomeVolume)
 	} else {
 		fmt.Fprintf(w, "Selected size: %s in %s\n", HumanBytes(r.Selected.Bytes), plural(r.Selected.Caches, "cache"))
 		_, err = fmt.Fprintln(w, "Dry run; nothing was deleted. Use --apply to delete.")
 	}
+	return err
+}
+
+// writeFreed prints the space freed by the caches' sizes
+// and the change in free space on the home directory's volume.
+func writeFreed(w io.Writer, freed int64, vol *disk.Change) error {
+	fmt.Fprintf(w, "Estimated freed: %s (from cache sizes)\n", HumanBytes(freed))
+	if vol == nil {
+		return nil
+	}
+	if vol.Error != "" {
+		_, err := fmt.Fprintf(w, "Free space on ~: cannot measure the change (%s)\n", vol.Error)
+		return err
+	}
+	change := "did not change"
+	switch {
+	case vol.GainedBytes > 0:
+		change = "grew by " + HumanBytes(vol.GainedBytes)
+	case vol.GainedBytes < 0:
+		change = "fell by " + HumanBytes(-vol.GainedBytes)
+	}
+	_, err := fmt.Fprintf(w, "Free space on ~ %s, from %s to %s; other processes and snapshots can change it\n",
+		change, HumanBytes(vol.FreeBefore), HumanBytes(vol.FreeAfter))
 	return err
 }
 

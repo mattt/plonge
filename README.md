@@ -122,7 +122,26 @@ If a path check does not pass, Plonge skips the path or reports an error.
 Plonge can make read-only files and directories writable to remove them.
 It continues after deletion errors and exits with a nonzero status.
 
-The report estimates the space freed; it does not measure volume free space.
+### Disk space
+
+After `--apply`, the report gives two numbers:
+
+```console
+Estimated freed: 29.5 GiB (from cache sizes)
+Free space on ~ grew by 14.0 GiB, from 80.1 GiB to 94.1 GiB; other processes and snapshots can change it
+```
+
+The estimate adds up the sizes of the caches that Plonge deleted or cleaned,
+measured as described below.
+The second line is the change in free space on your home directory's volume,
+which Plonge reads before the first deletion and after the last one.
+It is what became available on that volume, but other processes
+write and delete files at the same time,
+and caches on another volume do not change it.
+With `--json`, `home_volume` has `free_before`, `free_after`, and `gained_bytes`,
+or an `error` when Plonge cannot read free space.
+Dry runs do not have these values.
+
 On Unix, sizes use allocated blocks and count a hard-linked file once per cache.
 On other platforms, sizes use file lengths.
 Files linked elsewhere, filesystem snapshots, and changes during cleanup
@@ -257,7 +276,9 @@ plonge clean --global --apply --include-clear
 
 `plonge clean --global` works only on global caches and leaves your projects alone.
 By default it lists the commands as a dry run.
-`--apply` runs eligible actions and estimates the space freed.
+`--apply` runs eligible actions, estimates the space freed,
+and reports the change in free space on your home directory's volume,
+as [described above](#disk-space).
 Global cleanup does not use the project activity or Git checks,
 except that a `delete_contents` rule refuses a path
 that is in or holds a Git repository.
@@ -614,6 +635,8 @@ A `delete_contents` rule always uses its own `path`, or its `path_env`.
 ## Disk
 
 `plonge disk` prints the free space on your home directory's volume.
+`plonge clean --apply` also reports how much this free space changed,
+as described in [Disk space](#disk-space).
 
 ```console
 plonge disk

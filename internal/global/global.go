@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/rules"
 	"github.com/mattt/plonge/internal/scan"
 )
@@ -378,6 +379,9 @@ type Result struct {
 	Outcomes   []Outcome `json:"outcomes"`
 	FreedBytes int64     `json:"freed_bytes"`
 	Failed     int       `json:"failed"`
+	// HomeVolume is the free space on the home directory's volume
+	// before and after the actions ran; it is nil without Apply.
+	HomeVolume *disk.Change `json:"home_volume,omitempty"`
 }
 
 // Clean runs the clean action of each entry, or only lists it without Apply.

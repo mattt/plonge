@@ -59,8 +59,10 @@ but MCP does not support `--root` or `--no-mise`.
    plonge clean --global --apply
    ```
 
-6. Report the estimated space freed and any skipped or failed cleanup.
-   Run `plonge disk` again to check free space on the home directory's volume.
+6. Report the estimated space freed, the change in free space
+   on the home directory's volume that the same output gives,
+   and any skipped or failed cleanup.
+   Other processes can also change free space, so do not call the change exact.
 
 ## Selection options
 
