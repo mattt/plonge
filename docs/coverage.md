@@ -107,6 +107,47 @@ so a file that you built but did not upload must be built again.
 Plonge matches `dist` beside `pyproject.toml` or `setup.py`,
 in addition to `package.json`.
 
+The Ruby project rules follow the source of Bundler **4.0.24**,
+the current stable release, and Rails **8.1.4.1**.
+Bundler installs gems in `vendor/bundle` when its `path` setting is `vendor/bundle`
+or when `deployment` is set ([source][bundler-path]).
+It expands a relative `path` from the directory of the Gemfile
+([source][bundler-root]), which is named `gems.rb` or `Gemfile`
+([source][bundler-gemfile]).
+`bundle install` installs the gems there again.
+So the rule matches `vendor/bundle` beside `Gemfile` or `gems.rb`,
+and deletes the whole directory, as for `node_modules`.
+A `vendor/bundle` directory with tracked files is not selected,
+as for every project rule.
+
+Plonge has no rule for Bundler's `vendor/cache`.
+[`bundle cache`][bundle-cache] copies the `.gem` files of the bundle there on purpose,
+so that `bundle install` can use them without a network,
+and when the directory exists,
+`bundle install` keeps it up to date ([source][bundler-install-cache]).
+A committed `vendor/cache` has tracked files, so Plonge would not select it.
+An ignored one can hold gems whose source is no longer available,
+and deleting it stops `bundle install` from updating it.
+The parent `vendor` directory is not a cache either:
+it can hold `vendor/cache` and other vendored code.
+
+Rails' default cache store is a file store in `tmp/cache`
+([source][rails-cache-store]),
+and [bootsnap 1.26.0][bootsnap-cache-dir] also puts its cache there
+when the app's `config` directory sets it up and `BOOTSNAP_CACHE_DIR` is not set.
+`bin/rails tmp:cache:clear` deletes what is in `tmp/cache`,
+except names that start with a dot ([source][rails-tmp-rake]).
+Plonge's project rules delete directories and do not run project code,
+so Plonge deletes the directory, and Rails and bootsnap write it again.
+Rails finds an application's root by `config.ru` ([source][rails-find-root]),
+so the rule matches `tmp/cache` only beside `config.ru`.
+New Rails apps ignore `tmp` except for `.keep` files ([source][rails-gitignore]),
+so `tmp/cache` is ignored and has no tracked files.
+The rest of `tmp` is left out:
+it holds pid files, sockets, and, in development and test,
+the secret key base in `tmp/local_secret.txt` ([source][rails-local-secret]),
+which signs and encrypts cookies.
+
 ## How to read the tables
 
 The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
@@ -186,7 +227,7 @@ The global-cache column lists additional rules relevant to that tool.
 | `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); Gradle project `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
 | `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and `yarn`. | Yarn 2+ caches such as `.yarn/cache`; separate pnpm stores not resolved from the home directory; `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
 | `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py`; `build` and `dist` beside `pyproject.toml` or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | tox and nox environments moved by `--workdir`, `work_dir`, or `--envdir`; build output moved by setuptools' `build_base`; `*.egg-info`; `dist` moved by `--outdir` or `--out-dir`; uv-managed Python installations outside mise; caches at other configured paths. |
-| `ruby` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Ruby cache rule. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/bundle` and `vendor/cache`; RubyGems' gem cache; application `tmp/cache`. |
+| `ruby` | Guarded `mise-tools` | `vendor/bundle` beside `Gemfile` or `gems.rb`; `tmp/cache` beside `config.ru` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/cache`, which `bundle cache` fills on purpose; gems installed at a `path` other than `vendor/bundle`; the rest of a Rails app's `tmp`; caches moved by `cache_store` or `BOOTSNAP_CACHE_DIR`; RubyGems' gem cache; Bundler's user cache (`~/.bundle/cache`). |
 | `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Rust rule. | Cargo's registry and Git caches (`~/.cargo/registry`, `~/.cargo/git`); sccache; toolchains managed outside mise. |
 | `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds no Swift rule. | Swift Package Manager's global cache; `.swiftpm`; Xcode build data for existing workspaces, archives, device support, and simulators. |
 | `zig` | Guarded `mise-tools` | `.zig-cache` and `zig-cache` (before Zig 0.13) beside `build.zig` | `zig-global-cache`: built-in deletion of the contents of the `global_cache_dir` that `zig env` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `zig-global-cache`. | `zig-out` install output, which can hold programs and libraries that a user runs; local caches moved with `--cache-dir` or `ZIG_LOCAL_CACHE_DIR`; the global cache when `zig env` prints JSON, as before Zig 0.15 (override the rule with a fixed path). |
@@ -194,7 +235,7 @@ The global-cache column lists additional rules relevant to that tool.
 "None yet" means there is no dedicated rule for that cache.
 An unrelated directory name can still match a generic project rule.
 Outside the shared mise rules, the core tools with no cache rule are
-`elixir`, `erlang`, and `ruby`.
+`elixir` and `erlang`.
 Bun and Deno have project-name matches but no dedicated global-cache rule.
 
 ## Backends
@@ -247,6 +288,8 @@ Global rules require their command to be available, except for the Xcode rule.
 | Maven, Gradle | `target` beside `pom.xml`; `.gradle` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Global repositories and caches remain. |
 | setuptools | `build` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; Plonge does not run `setup.py clean --all` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `build_base` setting that moves the directory is not followed. |
 | build, `uv build` | `dist` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; neither tool has a command that removes `dist` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Output moved by `--outdir` or `--out-dir` is not matched. |
+| Bundler | `vendor/bundle` beside `Gemfile` or `gems.rb` | none | Delete matching project directories; Plonge does not run `bundle clean` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. `vendor/cache` and gems at another `path` are not matched. |
+| Rails, bootsnap | `tmp/cache` beside `config.ru` | none | Delete matching project directories; Plonge does not run `bin/rails tmp:cache:clear` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. The rest of `tmp` is not matched. |
 | uv | `.venv`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py` | `uv` | `uv cache prune` | prune; eligible with `clean --global`; requires `--apply` to run |
 | pip | The same Python environment names | `pip` | `pip cache purge` | clear; requires `clean --global --include-clear --apply` to run |
 | npm | `node_modules` | `npm` | `npm cache clean --force` | clear; requires `clean --global --include-clear --apply` to run |
@@ -308,3 +351,14 @@ without checking Xcode workspace metadata.
 [setuptools-dist]: https://github.com/pypa/setuptools/blob/v84.2.1/setuptools/_distutils/command/sdist.py#L174
 [uv-publish]: https://github.com/astral-sh/uv/blob/0.13.8/crates/uv-cli/src/lib.rs#L7433-L7438
 [nuget-locals-source]: https://github.com/NuGet/NuGet.Client/blob/8.2.0.14/src/NuGet.Core/NuGet.Commands/CommandRunners/LocalsCommandRunner.cs#L109-L117
+[bundler-path]: https://github.com/rubygems/rubygems/blob/v4.0.24/bundler/lib/bundler/settings.rb#L237-L251
+[bundler-root]: https://github.com/rubygems/rubygems/blob/v4.0.24/bundler/lib/bundler.rb#L101-L103
+[bundler-gemfile]: https://github.com/rubygems/rubygems/blob/v4.0.24/bundler/lib/bundler/shared_helpers.rb#L269-L271
+[bundle-cache]: https://github.com/rubygems/rubygems/blob/v4.0.24/bundler/lib/bundler/man/bundle-cache.1.ronn
+[bundler-install-cache]: https://github.com/rubygems/rubygems/blob/v4.0.24/bundler/lib/bundler/cli/install.rb#L53
+[rails-cache-store]: https://github.com/rails/rails/blob/v8.1.4.1/railties/lib/rails/application/configuration.rb#L58
+[bootsnap-cache-dir]: https://github.com/Shopify/bootsnap/blob/v1.26.0/lib/bootsnap.rb#L125-L143
+[rails-tmp-rake]: https://github.com/rails/rails/blob/v8.1.4.1/railties/lib/rails/tasks/tmp.rake#L17-L22
+[rails-find-root]: https://github.com/rails/rails/blob/v8.1.4.1/railties/lib/rails/application.rb#L86-L88
+[rails-gitignore]: https://github.com/rails/rails/blob/v8.1.4.1/railties/lib/rails/generators/rails/app/templates/gitignore.tt#L13-L23
+[rails-local-secret]: https://github.com/rails/rails/blob/v8.1.4.1/railties/lib/rails/application/configuration.rb#L653-L654

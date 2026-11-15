@@ -10,7 +10,7 @@ import (
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 24 || r.QuietHours != 24 {
+	if len(r.Names) != 26 || r.QuietHours != 24 {
 		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
@@ -147,6 +147,18 @@ func TestMatch(t *testing.T) {
 		{"build", []string{"package.json", "build.gradle"}, ""},
 		{"build", []string{"pyproject.toml"}, "build beside pyproject.toml"},
 		{"build", []string{"setup.py"}, "build beside setup.py"},
+		{"vendor/bundle", []string{"Gemfile"}, "vendor/bundle beside Gemfile"},
+		{"vendor/bundle", []string{"gems.rb"}, "vendor/bundle beside gems.rb"},
+		{"vendor/bundle", nil, ""},
+		{"vendor/bundle", []string{"go.mod"}, ""},
+		{"bundle", []string{"Gemfile"}, ""},
+		{"vendor", []string{"Gemfile"}, ""},
+		{"vendor/cache", []string{"Gemfile"}, ""},
+		{"tmp/cache", []string{"config.ru"}, "tmp/cache beside config.ru"},
+		{"tmp/cache", []string{"Gemfile"}, ""},
+		{"cache", []string{"config.ru"}, ""},
+		{"tmp", []string{"config.ru"}, ""},
+		{"tmp/pids", []string{"config.ru"}, ""},
 	}
 	for _, tt := range tests {
 		// The parent of a one-name path is the root.

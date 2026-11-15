@@ -499,7 +499,8 @@ Plonge has these default rules:
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
          ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "bin",
-         "build", "dist", "node_modules", "obj", "target", "venv", "zig-cache"]
+         "build", "dist", "node_modules", "obj", "target", "tmp/cache",
+         "vendor/bundle", "venv", "zig-cache"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -507,6 +508,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
 # Match these names only when a listed project file is in the same directory.
 # A project file can be a pattern, such as "*.csproj".
+# For a path name, such as "vendor/bundle", the project file is beside
+# the first name in the path.
 [beside]
 ".zig-cache" = ["build.zig"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
@@ -514,6 +517,8 @@ build = ["pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
+"tmp/cache" = ["config.ru"]
+"vendor/bundle" = ["Gemfile", "gems.rb"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 zig-cache = ["build.zig"]
 ```

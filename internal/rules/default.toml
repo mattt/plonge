@@ -1,7 +1,8 @@
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
          ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "bin",
-         "build", "dist", "node_modules", "obj", "target", "venv", "zig-cache"]
+         "build", "dist", "node_modules", "obj", "target", "tmp/cache",
+         "vendor/bundle", "venv", "zig-cache"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -14,6 +15,14 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # Zig 0.13 renamed the local cache from zig-cache to .zig-cache.
 # zig-out is left out: it is install output, not a cache, and can hold
 # programs and libraries that a user runs or links from.
+# Bundler installs gems in vendor/bundle beside the Gemfile (or gems.rb)
+# when path is vendor/bundle or deployment is set; bundle install restores them.
+# vendor/cache is left out: bundle cache puts gems there on purpose,
+# for installs without a network, and a gem from a source that is gone
+# cannot be downloaded again.
+# Rails keeps its default cache store in tmp/cache, as bootsnap does its cache,
+# and Rails finds its root by config.ru. The rest of tmp is left out: it holds
+# pid files, sockets, and in development the local secret key base.
 [beside]
 ".zig-cache" = ["build.zig"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
@@ -21,6 +30,8 @@ build = ["pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
+"tmp/cache" = ["config.ru"]
+"vendor/bundle" = ["Gemfile", "gems.rb"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 zig-cache = ["build.zig"]
 

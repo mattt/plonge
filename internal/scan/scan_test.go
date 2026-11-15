@@ -192,6 +192,34 @@ func TestDetect(t *testing.T) {
 			},
 		},
 		{
+			name: "Ruby and Rails projects",
+			files: map[string]string{
+				".gitignore": "vendor/\ntmp/\n",
+				"Gemfile":    "",
+				"config.ru":  "",
+				"vendor/bundle/ruby/3.4.0/gems/rack/x.rb": "",
+				"vendor/cache/rack-3.1.0.gem":             "", // bundle cache output is kept
+				"vendor/javascript/app.js":                "",
+				"tmp/cache/bootsnap/x":                    "",
+				"tmp/pids/server.pid":                     "",
+				"tmp/local_secret.txt":                    "",
+				"gemsrb/gems.rb":                          "",
+				"gemsrb/vendor/bundle/ruby/x":             "",
+				"lib/Gemfile":                             "",
+				"lib/tmp/cache/x":                         "", // no config.ru
+				"lib/bundle/x":                            "", // not inside vendor
+				"pinned/Gemfile":                          "",
+				"pinned/vendor/bundle/ruby/x!":            "", // tracked
+				"go/go.mod":                               "",
+				"go/vendor/bundle/x":                      "", // no Gemfile
+			},
+			want: map[string]string{
+				"vendor/bundle":        "vendor/bundle beside Gemfile",
+				"tmp/cache":            "tmp/cache beside config.ru",
+				"gemsrb/vendor/bundle": "vendor/bundle beside gems.rb",
+			},
+		},
+		{
 			name: "ignored by a parent directory rule",
 			files: map[string]string{
 				".gitignore":            "build/\n",
