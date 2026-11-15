@@ -10,7 +10,7 @@ import (
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 22 || r.QuietHours != 24 {
+	if len(r.Names) != 24 || r.QuietHours != 24 {
 		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
@@ -129,6 +129,11 @@ func TestMatch(t *testing.T) {
 		{"target", []string{"pom.xml"}, "target beside pom.xml"},
 		{"target", []string{"package.json"}, ""},
 		{"src", []string{"package.json"}, ""},
+		{".zig-cache", []string{"build.zig"}, ".zig-cache beside build.zig"},
+		{"zig-cache", []string{"build.zig"}, "zig-cache beside build.zig"},
+		{".zig-cache", nil, ""},
+		{"zig-cache", []string{"build.zig.zon"}, ""},
+		{"zig-out", []string{"build.zig"}, ""},
 		{"bin", nil, ""},
 		{"obj", []string{"package.json"}, ""},
 		{".tox", nil, ".tox"},
@@ -275,6 +280,31 @@ func TestGlobalDeleteContentsValidation(t *testing.T) {
 	labeled := "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t where\"\npath_label = \"cache\"\ndelete_contents = true\nkind = \"clear\"\n"
 	if f, err := parse(labeled, "test"); err != nil || f.Global[0].PathLabel != "cache" {
 		t.Errorf("path_label with delete_contents: %+v, %v", f.Global, err)
+	}
+}
+
+func TestGlobalPathZONFieldValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\nclean = \"t gc\"\nkind = \"prune\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"path = \"t env\"\npath_zon_field = \"global_cache_dir\"\n", ""},
+		{"path = \"~/c\"\npath_zon_field = \"global_cache_dir\"\n", "needs a path command"},
+		{"path = \"t env\"\npath_zon_field = \"env.HOME\"\n", "is not a field name"},
+		{"path = \"t env\"\npath_zon_field = \"1st\"\n", "is not a field name"},
+		{"path = \"t env\"\npath_zon_field = \"global_cache_dir\"\npath_label = \"cache\"\n", "not both"},
+	}
+	for _, c := range cases {
+		f, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil || f.Global[0].PathZONField != "global_cache_dir" {
+				t.Errorf("%q: %+v, %v", c.extra, f.Global, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
+		}
 	}
 }
 

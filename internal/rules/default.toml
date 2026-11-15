@@ -1,7 +1,7 @@
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
-         ".turbo", ".venv", "DerivedData", "__pycache__", "bin", "build", "dist",
-         "node_modules", "obj", "target", "venv"]
+         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "bin",
+         "build", "dist", "node_modules", "obj", "target", "venv", "zig-cache"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -9,13 +9,18 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
 # Match these names only when a listed project file is in the same directory.
 # A project file can be a pattern, such as "*.csproj".
+# Zig 0.13 renamed the local cache from zig-cache to .zig-cache.
+# zig-out is left out: it is install output, not a cache, and can hold
+# programs and libraries that a user runs or links from.
 [beside]
+".zig-cache" = ["build.zig"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 build = ["pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
+zig-cache = ["build.zig"]
 
 # Global caches. Each command starts with the tool and runs without a shell.
 # prune uses the tool's policy to select unused or stale data.
@@ -155,3 +160,16 @@ path = "~/.cache/org.swift.swiftpm"
 clean = "swift package purge-cache --scratch-path .cache/org.swift.swiftpm"
 kind = "clear"
 os = "linux"
+
+# Zig has no command that cleans its global cache, so plonge deletes its
+# contents. The cache holds build output and the packages that zig fetch and
+# zig build download; a later build downloads a package again.
+# zig env prints ZON, with a path inside the home directory relative to it,
+# and it creates the cache directory if it does not exist.
+[[global]]
+id = "zig-global-cache"
+tool = "zig"
+path = "zig env"
+path_zon_field = "global_cache_dir"
+delete_contents = true
+kind = "clear"
