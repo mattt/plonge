@@ -187,6 +187,8 @@ With --global, clean works only on caches outside projects:
 it lists each rule's cleanup action, and with --apply it runs eligible actions.
 Global cleanup does not check project activity. A clear rule requires
 --include-clear because it can remove cached data still in use.
+A rule with delete_contents deletes what is in its path, after checks
+that the path is not the home directory, a symlink, or in a Git repository.
 
 Options:
 `
