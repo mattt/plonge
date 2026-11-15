@@ -243,7 +243,8 @@ Plonge uses cleanup commands from their tools,
 plus a built-in rule for Xcode build data on macOS.
 A rule for a cache without a cleanup command
 can delete the contents of its path instead,
-as `zig-global-cache` does for Zig.
+as `zig-global-cache` does for Zig
+and `hex-packages` and `rebar3-hex` do for the Hex and Rebar3 package caches.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -287,6 +288,8 @@ Neither kind guarantees that the whole reported size will be freed.
 | `swiftpm-linux` | clear | `swift package purge-cache` (Linux) |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
 | `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
+| `hex-packages` | clear | Built-in deletion of the contents of `~/.hex/packages` |
+| `rebar3-hex` | clear | Built-in deletion of the contents of `~/.cache/rebar3/hex` |
 
 Plonge runs a tool through `mise exec --`
 when `mise which` finds it from your home directory,
@@ -443,8 +446,14 @@ It holds build output and the packages that `zig fetch` and `zig build` download
 so later builds can be slower and must download packages again.
 Before Zig 0.15, `zig env` printed JSON, so Plonge skips this rule;
 replace it with a fixed `path` to use it with those versions.
-It makes read-only entries writable first and does not follow symlinks.
-The rule must have kind `clear`,
+The default `hex-packages` and `rebar3-hex` rules use fixed paths,
+because neither Hex nor Rebar3 has a command that prints them.
+They delete only the package folders,
+and keep the Hex configuration and the `rebar3` that `rebar3 local install` makes.
+A package cache moved by `HEX_HOME`, `MIX_XDG`, or `REBAR_CACHE_DIR`
+is not covered; replace the rule with that `path` to use it.
+Plonge makes read-only entries writable first and does not follow symlinks.
+A `delete_contents` rule must have kind `clear`,
 so it runs only with `clean --global --include-clear --apply`.
 It cannot have `clean` or `targets`; it can have a `check`.
 The action reads `delete contents of <path> (built in)`.

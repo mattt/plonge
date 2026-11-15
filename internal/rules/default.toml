@@ -188,3 +188,29 @@ path = "zig env"
 path_zon_field = "global_cache_dir"
 delete_contents = true
 kind = "clear"
+
+# Hex has no command that cleans its package cache, and it prints no path
+# for the packages folder, so this rule uses Hex's default, ~/.hex/packages.
+# HEX_HOME and MIX_XDG move it; that cache is not covered.
+# ~/.hex also holds hex.config, with the user's Hex API key, and the
+# registry cache, so the rule deletes only the contents of packages.
+# The folder holds package tarballs; a later mix deps.get downloads them again,
+# and HEX_OFFLINE cannot use the ones that were deleted.
+[[global]]
+id = "hex-packages"
+tool = "mix"
+path = "~/.hex/packages"
+delete_contents = true
+kind = "clear"
+
+# Rebar3 has no command that cleans its package cache or prints its path.
+# The hex folder of its global cache holds the package index and tarballs.
+# REBAR_CACHE_DIR moves the global cache; that cache is not covered.
+# The global cache also holds the rebar3 that "rebar3 local install" makes,
+# under bin and vsns, and global plugins, so the rule deletes only hex.
+[[global]]
+id = "rebar3-hex"
+tool = "rebar3"
+path = "~/.cache/rebar3/hex"
+delete_contents = true
+kind = "clear"
