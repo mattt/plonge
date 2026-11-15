@@ -42,7 +42,8 @@ For every row:
   If `paseo` is on PATH but fails, every project is busy.
 - `clean --global` shows global cleanup actions instead of project caches.
   Add `--apply` to run eligible prune actions.
-  It does not use project activity or Git checks.
+  It does not use project activity or Git checks,
+  except that a `delete_contents` rule refuses a path in a Git repository.
 - `--include-clear` requires `clean --global` and adds clear actions.
   It still deletes nothing without `--apply`.
 
