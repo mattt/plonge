@@ -143,11 +143,14 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 	if err != nil {
 		return "", err
 	}
-	path := lastLine(out)
-	if g.PathLabel != "" {
-		if path, err = labeledPath(out, g.PathLabel); err != nil {
-			return "", err
-		}
+	path, err := printedPath(out, g)
+	if err != nil {
+		return "", err
+	}
+	if g.PathZONField != "" && path != "" && !filepath.IsAbs(path) {
+		// Zig prints a path inside its working directory relative to it,
+		// and plonge runs the command from the home directory.
+		path = filepath.Join(r.Home, path)
 	}
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("printed %q, which is not an absolute path", path)
@@ -159,6 +162,19 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 // that contain it, so that a prefix such as "info : " is allowed.
 // It fails when no line has the label, or when two lines give different paths,
 // because plonge cannot tell which one the tool means.
+// printedPath selects the path in the output of a rule's path command:
+// a ZON field, the text after a label, or the last line.
+func printedPath(out string, g rules.Global) (string, error) {
+	switch {
+	case g.PathZONField != "":
+		return zonField(out, g.PathZONField)
+	case g.PathLabel != "":
+		return labeledPath(out, g.PathLabel)
+	default:
+		return lastLine(out), nil
+	}
+}
+
 func labeledPath(out, label string) (string, error) {
 	var path string
 	for line := range strings.SplitSeq(out, "\n") {
