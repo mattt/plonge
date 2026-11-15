@@ -78,6 +78,8 @@ A quiet project has a known last activity time at least `quiet_hours` old
 An active project has more recent activity or an unknown activity time.
 A busy project has a Paseo agent with status `running` or `initializing`
 in the project or a directory below it.
+If `paseo` is on PATH but Plonge cannot read its status,
+every project is busy, as [described below](#paseo-failures).
 Busy projects are excluded from project cleanup even with `--include-active`.
 These states depend on the [activity sources](#project-discovery-and-activity),
 not on whether a build or editor is running.
@@ -103,7 +105,9 @@ You can repeat `--root`; `--no-mise` requires at least one root.
 Before each deletion, Plonge checks that the path is still a directory,
 is not a symlink, is inside its root,
 is ignored by Git, and contains no tracked files.
-It asks Paseo again once per project, before the first deletion there.
+It asks Paseo again once per project, before the first deletion there,
+and skips the project's caches if Paseo now reports an agent there
+or if Plonge cannot read Paseo's status.
 If a path check does not pass, Plonge skips the path or reports an error.
 Plonge can make read-only files and directories writable to remove them.
 It continues after deletion errors and exits with a nonzero status.
@@ -145,11 +149,39 @@ Plonge uses the newest activity it can find from these sources:
 - `paseo`: `paseo ls --json --global --background`.
   A busy project gets the scan time as its last activity time.
 
-If Claude or Paseo is missing or its initial query fails,
-Plonge reports that source as skipped and continues.
-If Paseo is unavailable, Plonge cannot detect busy projects through it.
-A failed Paseo recheck before deletion also allows cleanup to continue,
-but is not reported.
+If Claude Code's projects directory is missing or unreadable,
+Plonge reports the `claude` source as skipped and continues.
+If `paseo` is not on PATH, Plonge reports the `paseo` source as skipped,
+because no Paseo agent can run, and no project is busy.
+
+### Paseo failures
+
+If `paseo` is on PATH but `paseo ls` fails, does not finish in 15 seconds,
+or prints output that Plonge cannot read,
+Plonge cannot tell where Paseo agents work.
+It reports the `paseo` source as failed, with the reason,
+and treats every project as busy.
+`scan` shows every project as busy,
+and `clean` selects no project caches, with or without `--apply`:
+
+```console
+$ plonge clean
+Not selected, busy project (Paseo): 1.2 GiB in 14 caches
+Activity source failed: paseo (paseo ls failed: daemon is not running)
+Every project counts as busy. Fix paseo, or remove it from PATH for this run.
+Selected size: 0 B in 0 caches
+Dry run; nothing was deleted. Use --apply to delete.
+```
+
+With `--json`, the `activity_sources` list has
+`{"name": "paseo", "status": "failed", "reason": "..."}`.
+If the recheck before a deletion fails in the same way,
+Plonge skips that project's caches and reports the reason for each one.
+
+To proceed, fix Paseo so that `paseo ls --json --global --background` works.
+If no Paseo agent runs on this machine,
+you can instead remove `paseo` from PATH for that run.
+Plonge then cannot detect busy projects through Paseo.
 
 ## Global caches
 
