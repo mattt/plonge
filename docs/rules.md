@@ -110,6 +110,57 @@ A name in both `names` and `skip` is reported as a cache and is not entered.
 `.git`, `.hg`, `.jj`, and `.svn` cannot be added to `names`,
 alone or as part of a path.
 
+## Project discovery and activity
+
+Plonge reads mise's loaded config records from `$MISE_STATE_DIR/tracked-configs`,
+`$XDG_STATE_HOME/mise/tracked-configs`, or `~/.local/state/mise/tracked-configs`.
+It skips global and system configs and unreadable or broken links.
+`--root` adds a root, and `--no-mise` uses only the roots you give;
+`--no-mise` requires at least one `--root`.
+Plonge skips a root outside a Git work tree,
+but still scans separately listed roots inside it.
+It removes duplicate roots and roots already covered by another Git work tree root.
+Nested repositories use their own Git checks but share the root's activity status.
+The scan does not follow directory symlinks or enter a matched cache.
+
+Activity includes the modification time of the root's Git HEAD log,
+or of `HEAD` if the log is unavailable,
+and Claude Code transcript times under `~/.claude/projects/`
+or `$CLAUDE_CONFIG_DIR/projects`.
+The newest available time wins.
+Uncommitted edits and builds do not update the Git activity time,
+so a quiet status does not prove that a project is unused.
+
+Claude transcript matching includes the root and its descendants.
+Encoded names can also match a sibling such as `app-two` for a root named `app`;
+this can only make the root appear more active.
+A missing or unreadable transcript directory is reported as a skipped source.
+
+## Caches that hold a Git repository
+
+An ignored cache can contain a dependency cloned from Git,
+with commits or edits that the enclosing repository cannot see.
+Plonge refuses a cache with a `.git` entry of any type at any depth,
+or a Git directory (`HEAD` beside `objects` and `refs`), such as a bare clone.
+It also refuses a cache with a directory it cannot read,
+because that directory could hide a repository.
+It checks while measuring the cache and again before deletion,
+without following symlinks.
+
+The report lists each refused cache and its reason, outside the totals:
+
+```console
+Refused ~/code/app/node_modules: contains a Git repository at some-dep
+```
+
+With `--json`, each entry in `refused` has `path`, `project`, `rule`, and `reason`.
+Swift Package Manager keeps Git checkouts and bare clones in `.build`,
+so Plonge refuses that directory when it holds remote dependencies.
+This protection also applies to worktrees with a `.git` file.
+npm, pnpm, and Yarn 1 remove `.git` when installing packages from Git,
+so those packages are not refused for that reason.
+For Swift packages, `swift package clean` removes build output
+but keeps the checkouts; `swift package reset` removes them too.
 
 ## Global caches
 
@@ -180,6 +231,7 @@ when `mise which` finds it from your home directory,
 and otherwise from `PATH`, passing over mise's shims.
 It runs commands from your home directory, without a shell.
 A rule whose tool is missing is skipped and reported.
+Project-specific tool settings may therefore differ from those used for cleanup.
 The SwiftPM rules add `--scratch-path`, relative to the home directory,
 so that `purge-cache` writes its `.build` marker files
 in SwiftPM's cache directory and does not create `~/.build`.
@@ -452,7 +504,7 @@ is in a Git work tree or Git directory, or Git cannot check it,
 as when the path or a directory above it has a `.git` entry that Git cannot use;
 or does not exist or is not a directory.
 It also skips the rule when the path holds a Git repository at any depth,
-with the [same check as for project caches](../README.md#caches-that-hold-a-git-repository),
+with the [same check as for project caches](#caches-that-hold-a-git-repository),
 because the deletion would lose that repository's commits and uncommitted work.
 It checks the path when it lists the rule and again right before it deletes.
 `tool` must still be available, and a `path` command must still start with it.

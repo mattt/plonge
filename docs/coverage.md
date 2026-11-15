@@ -308,7 +308,7 @@ or exact paths of directory names such as `vendor/bundle`.
 Every match must be inside a scanned root, ignored by Git,
 and contain no tracked files.
 Plonge refuses a match that is or holds a Git repository at any depth,
-as the [README](../README.md#caches-that-hold-a-git-repository) describes,
+as the [rule reference](rules.md#caches-that-hold-a-git-repository) describes,
 and a match that holds an entry at one of its rule's `refuse_inside` paths.
 A listed project file must be in the cache directory's parent directory,
 or for a path, in the directory that holds the path's first name.
