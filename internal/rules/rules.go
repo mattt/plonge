@@ -87,7 +87,10 @@ type Global struct {
 	Refuse string `toml:"refuse"`
 	// RefuseReason says in the report what the matches of Refuse mean.
 	RefuseReason string `toml:"refuse_reason"`
-	// Require is a regular expression. Unless a line of Check's output
+	// Checks are more checks that must also pass, in order, after Check.
+	// Each has the same keys as the rule's own check.
+	Checks []CheckSpec `toml:"checks"`
+	// Require is a regular expression. Unless exactly one line of Check's output
 	// matches it, the rule is skipped.
 	Require string `toml:"require"`
 	// Targets is a command that prints, as JSON, what Clean would remove.
@@ -240,26 +243,54 @@ func (g Global) validateDelete() error {
 	return nil
 }
 
+// CheckSpec is a command that must succeed, and must not change anything,
+// before a rule runs, with the patterns that its output must pass.
+type CheckSpec struct {
+	Check        string   `toml:"check"`
+	CheckEnv     []string `toml:"check_env"`
+	Refuse       string   `toml:"refuse"`
+	RefuseReason string   `toml:"refuse_reason"`
+	Require      string   `toml:"require"`
+}
+
+// CheckSpecs returns the rule's own check, if it has one, and then its Checks.
+func (g Global) CheckSpecs() []CheckSpec {
+	if g.Check == "" {
+		return nil
+	}
+	own := CheckSpec{Check: g.Check, CheckEnv: g.CheckEnv, Refuse: g.Refuse, RefuseReason: g.RefuseReason, Require: g.Require}
+	return append([]CheckSpec{own}, g.Checks...)
+}
+
 func (g Global) validateCheck() error {
 	if g.Check == "" {
-		if g.Refuse != "" || g.RefuseReason != "" || g.Require != "" || len(g.CheckEnv) > 0 {
-			return fmt.Errorf("global rule %q: refuse, refuse_reason, require, and check_env need check", g.ID)
+		if g.Refuse != "" || g.RefuseReason != "" || g.Require != "" || len(g.CheckEnv) > 0 || len(g.Checks) > 0 {
+			return fmt.Errorf("global rule %q: refuse, refuse_reason, require, check_env, and checks need check", g.ID)
 		}
 		return nil
 	}
-	if !g.startsWithTool(g.Check) {
+	for _, c := range g.CheckSpecs() {
+		if err := g.validateCheckSpec(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g Global) validateCheckSpec(c CheckSpec) error {
+	if !g.startsWithTool(c.Check) {
 		return fmt.Errorf("global rule %q: check must be a %s command", g.ID, g.Tool)
 	}
-	if g.Refuse == "" && g.RefuseReason != "" {
+	if c.Refuse == "" && c.RefuseReason != "" {
 		return fmt.Errorf("global rule %q: refuse_reason needs refuse", g.ID)
 	}
-	if _, err := regexp.Compile(g.Refuse); err != nil {
+	if _, err := regexp.Compile(c.Refuse); err != nil {
 		return fmt.Errorf("global rule %q: refuse: %w", g.ID, err)
 	}
-	if _, err := regexp.Compile(g.Require); err != nil {
+	if _, err := regexp.Compile(c.Require); err != nil {
 		return fmt.Errorf("global rule %q: require: %w", g.ID, err)
 	}
-	for _, kv := range g.CheckEnv {
+	for _, kv := range c.CheckEnv {
 		if name, _, ok := strings.Cut(kv, "="); !ok || name == "" {
 			return fmt.Errorf("global rule %q: check_env entry %q must be NAME=value", g.ID, kv)
 		}

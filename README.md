@@ -370,10 +370,34 @@ The rule is skipped when the check fails
 or a line of its standard output or standard error matches `refuse`,
 a regular expression.
 `require` is also a regular expression;
-when it is set, the rule is skipped unless a line of that output matches it.
+when it is set, the rule is skipped unless exactly one line of that output
+matches it.
 For example, `check = "yarn --version"` with `require = '^1\.'`
 limits a rule to Yarn 1.
 A skipped rule does not count toward the totals.
+
+A rule can add more checks, each with the same keys,
+in `[[global.checks]]` tables after the rule.
+The rule must have its own `check` first.
+Plonge runs the checks in order and skips the rule at the first one
+that does not pass:
+
+```toml
+[[global]]
+id = "yarn-berry"
+tool = "yarn"
+path = "yarn config get cacheFolder"
+clean = "yarn cache clean"
+kind = "clear"
+check = "yarn --version"
+require = '^[0-9]+\.[0-9]+\.[0-9]+'
+refuse = '^[01]\.[0-9]+\.[0-9]+'
+refuse_reason = "yarn --version did not report Yarn 2 or later"
+
+[[global.checks]]
+check = "yarn config get enableGlobalCache"
+require = '^true$'
+```
 
 A group named `path` in `refuse` limits matches to files that may still exist.
 For absolute paths and `~/` paths, missing files do not count.
@@ -426,7 +450,8 @@ It checks the path when it lists the rule and again right before it deletes.
 `tool` must still be available, and a `path` command must still start with it.
 
 When your rule has the same `id` as a default, it replaces all of the default,
-so copy the default's `check`, `require`, `refuse`, and `targets` to keep them.
+so copy the default's `check`, `require`, `refuse`, `checks`, and `targets`
+to keep them.
 For `mise-tools` with `tool = "mise"` and a `clean` command,
 `path` is used only when mise cannot report its installs directory.
 A `delete_contents` rule always uses its own `path`.

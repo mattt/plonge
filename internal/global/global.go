@@ -39,8 +39,8 @@ type Entry struct {
 	// although the rule has targets.
 	Note string `json:"note,omitempty"`
 
-	argv  []string
-	guard *guard
+	argv   []string
+	guards []*guard
 	// targeted is true when targetPaths, and not Path, gives Bytes.
 	targeted    bool
 	targetPaths []string
@@ -249,7 +249,9 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 			e.argv, e.Command = command(t, g.Clean)
 		}
 		if e.Skipped == "" && g.Check != "" {
-			e.guard = newGuard(t, g)
+			for _, c := range g.CheckSpecs() {
+				e.guards = append(e.guards, newGuard(t, c))
+			}
 			r.passes(ctx, &e)
 		}
 		if e.Skipped == "" && g.Targets != "" {
