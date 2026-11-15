@@ -1,7 +1,8 @@
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
-         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "bin",
-         "build", "dist", "node_modules", "obj", "target", "venv", "zig-cache"]
+         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "_build",
+         "bin", "build", "dist", "node_modules", "obj", "target", "venv",
+         "zig-cache"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -12,8 +13,13 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # Zig 0.13 renamed the local cache from zig-cache to .zig-cache.
 # zig-out is left out: it is install output, not a cache, and can hold
 # programs and libraries that a user runs or links from.
+# Mix and Rebar3 put build output in _build. Rebar3 also puts the sources of
+# dependencies there, so an edit to one is lost; Rebar3 has _checkouts for
+# that. Mix keeps dependency sources in deps, which is left out because
+# an edited Hex package there has no Git data that plonge can check.
 [beside]
 ".zig-cache" = ["build.zig"]
+_build = ["mix.exs", "rebar.config"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 build = ["pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
@@ -21,6 +27,13 @@ obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 zig-cache = ["build.zig"]
+
+# Refuse a match that has an entry at one of these paths, relative to it.
+# A release that Mix or Rebar3 builds goes in _build/<env or profile>/rel.
+# It can hold a generated Erlang cookie and the earlier versions that an
+# upgrade needs, which a new build does not restore.
+[refuse_inside]
+_build = ["*/rel"]
 
 # Global caches. Each command starts with the tool and runs without a shell.
 # prune uses the tool's policy to select unused or stale data.

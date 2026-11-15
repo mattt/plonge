@@ -76,7 +76,8 @@ such as `node_modules` or `.venv`.
 Plonge reports it only if Git ignores it and it contains no tracked files.
 It refuses a cache that is or holds a Git repository,
 as [described below](#caches-that-hold-a-git-repository),
-and a cache that holds an entry that its rule protects.
+and a cache that holds an entry that its rule protects,
+such as a release in a Mix or Rebar3 `_build` directory.
 A rule defines a cache name, any required project file,
 or a global cleanup action.
 
@@ -542,8 +543,9 @@ Plonge has these default rules:
 ```toml
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
-         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "bin",
-         "build", "dist", "node_modules", "obj", "target", "venv", "zig-cache"]
+         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "_build",
+         "bin", "build", "dist", "node_modules", "obj", "target", "venv",
+         "zig-cache"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -553,6 +555,7 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # A project file can be a pattern, such as "*.csproj".
 [beside]
 ".zig-cache" = ["build.zig"]
+_build = ["mix.exs", "rebar.config"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 build = ["pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
@@ -560,6 +563,10 @@ obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 zig-cache = ["build.zig"]
+
+# Refuse a match that has an entry at one of these paths, relative to it.
+[refuse_inside]
+_build = ["*/rel"]
 ```
 
 To add rules, write them to `$XDG_CONFIG_HOME/plonge/rules.toml`
@@ -582,7 +589,10 @@ This `build` entry adds Gradle projects.
 It replaces the default entry, so it lists the default project files too.
 
 A `refuse_inside` entry lists paths, relative to a matching directory,
-that hold data a rebuild cannot restore:
+that hold data a rebuild cannot restore.
+The default entry protects a release that Mix or Rebar3 builds
+in `_build/<env or profile>/rel`,
+which can hold a generated Erlang cookie and earlier release versions:
 
 ```toml
 [refuse_inside]

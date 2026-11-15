@@ -716,3 +716,35 @@ func TestVerifyRefusesInsidePath(t *testing.T) {
 		t.Errorf("after release: reason %q, err %v", reason, err)
 	}
 }
+
+func TestDetectBEAMBuild(t *testing.T) {
+	isolateGit(t)
+	root := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{
+		".gitignore":         "_build/\ndeps/\n",
+		"mix/mix.exs":        "",
+		"rebar/rebar.config": "",
+		"rel/mix.exs":        "",
+		"other/x":            "",
+	})
+	write(t, filepath.Join(root, "mix", "_build", "dev", "lib", "app", "ebin", "app.beam"), "")
+	write(t, filepath.Join(root, "mix", "deps", "dep", "lib", "dep.ex"), "")
+	write(t, filepath.Join(root, "rebar", "_build", "default", "lib", "app", "ebin", "app.beam"), "")
+	write(t, filepath.Join(root, "rel", "_build", "prod", "rel", "app", "releases", "COOKIE"), "x")
+	write(t, filepath.Join(root, "other", "_build", "x"), "")
+
+	roots := []Root{Detect(context.Background(), root, rules.Default())}
+	Measure(roots)
+	want := map[string]string{
+		"mix/_build":   "_build beside mix.exs",
+		"rebar/_build": "_build beside rebar.config",
+	}
+	if f := found(roots[0]); !mapsEqual(f, want) {
+		t.Errorf("found %v, want %v", f, want)
+	}
+	refused := roots[0].Refused
+	if len(refused) != 1 || refused[0].Path != filepath.Join(root, "rel", "_build") ||
+		refused[0].Reason != `contains prod/rel, which refuse_inside "*/rel" protects` {
+		t.Errorf("refused %+v", refused)
+	}
+}

@@ -42,6 +42,13 @@ func TestCoverageTableIncludesDefaultRules(t *testing.T) {
 			t.Errorf("coverage table is missing default global rule ID %q", rule.ID)
 		}
 	}
+	for name, paths := range r.RefuseInside {
+		for _, p := range paths {
+			if !listed[p] {
+				t.Errorf("coverage table is missing refuse_inside path %q for %q", p, name)
+			}
+		}
+	}
 	if !listed[XcodeRuleID] {
 		t.Errorf("coverage table is missing built-in global rule ID %q", XcodeRuleID)
 	}
