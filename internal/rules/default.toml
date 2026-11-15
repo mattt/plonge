@@ -96,6 +96,33 @@ check = "bun --version"
 refuse = '^(0\.|1\.[0-3]\.|1\.4\.[0-3]([^0-9]|$))'
 refuse_reason = "Bun before 1.4.4 has no cache prune command"
 
+# deno clean deletes all of DENO_DIR, which also holds user state:
+# localStorage and Cache API data in location_data, and the REPL history.
+# These rules delete only the caches that deno info --json names.
+[[global]]
+id = "deno-remote"
+tool = "deno"
+path = "deno info --json"
+path_field = "modulesCache"
+delete_contents = true
+kind = "clear"
+
+[[global]]
+id = "deno-npm"
+tool = "deno"
+path = "deno info --json"
+path_field = "npmCache"
+delete_contents = true
+kind = "clear"
+
+[[global]]
+id = "deno-gen"
+tool = "deno"
+path = "deno info --json"
+path_field = "typescriptCache"
+delete_contents = true
+kind = "clear"
+
 # Yarn 1 only. Yarn 2 and later do not provide "yarn cache dir".
 [[global]]
 id = "yarn"

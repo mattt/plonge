@@ -201,7 +201,8 @@ Plonge then cannot detect busy projects through Paseo.
 Global caches are stored outside projects.
 Plonge uses cleanup commands from their tools,
 plus a built-in rule for Xcode build data on macOS.
-A rule for a cache without a cleanup command
+A rule for a cache without a cleanup command,
+or whose command also removes user state,
 can delete the contents of its path instead.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
@@ -238,6 +239,7 @@ Neither kind guarantees that the whole reported size will be freed.
 | `go-build` | clear | `go clean -cache` |
 | `npm` | clear | `npm cache clean --force` |
 | `bun` | clear | `bun pm cache prune` (Bun 1.4.4 or later) |
+| `deno-remote`, `deno-npm`, `deno-gen` | clear | Built-in deletion of the contents of Deno's module, npm, and TypeScript caches |
 | `yarn` | clear | `yarn cache clean` (Yarn 1) |
 | `pip` | clear | `pip cache purge` |
 | `homebrew` | clear | `brew cleanup --prune=all` |

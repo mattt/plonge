@@ -28,8 +28,9 @@ Backend cache locations were checked against
 [mise's source at v2026.10.14][mise-source].
 No cleanup command was applied to build this inventory.
 
-The `bun` rule was checked against the documentation and source
-of [Bun 1.4.4][bun-pm], the current stable release when the rule was added.
+The Bun and Deno rules were checked against the documentation and source
+of [Bun 1.4.4][bun-pm] and [Deno 2.9.8][deno-clean],
+the current stable releases when the rules were added.
 
 ## How to read the tables
 
@@ -96,7 +97,7 @@ The global-cache column lists additional rules relevant to that tool.
 | Core name | Installed versions | Project caches | Global caches: ID, command, kind | Default behavior | Not covered |
 | --- | --- | --- | --- | --- | --- |
 | `bun` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | `bun`: `bun pm cache prune` (clear; Bun 1.4.4 or later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `bun`, which removes package folders in Bun's cache more than 30 days old. | Packages newer than 30 days; the global store (`links/`), Git dependency clones, and package manifests, which `prune` keeps; Bun before 1.4.4, which the rule skips; a cache directory that only a `bunfig.toml`, `.npmrc`, or `.env` file names, which `prune` ignores. |
-| `deno` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | Deno-specific: none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Deno-specific rule. | Deno's dependency and compiled-code cache (`DENO_DIR`). |
+| `deno` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | `deno-remote`, `deno-npm`, `deno-gen`: `delete_contents` of the `modulesCache`, `npmCache`, and `typescriptCache` paths from `deno info --json` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds the three Deno rules. | `deno clean`, which also deletes user state; `location_data` (localStorage and Cache API data) and REPL history, which hold user state; the `registries` and `dl` folders and the analysis, check, and code caches in `DENO_DIR`. |
 | `dotnet` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no .NET cache rule. `clean --global` selects mise rules; `--include-clear` adds no .NET rule. | Project `bin` and `obj`; NuGet global packages and HTTP cache. |
 | `dotnet-core` (alias of `dotnet`) | Guarded `mise-tools`; same tool as `dotnet` | none yet | none yet | Same as `dotnet`: no project rule; global mise rules only; no additional clear rule. | Same .NET and NuGet gaps as `dotnet`. |
 | `elixir` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Elixir cache rule. `clean --global` selects mise rules; `--include-clear` adds no Elixir rule. | Mix `_build` and `deps`; Hex package cache. |
@@ -167,6 +168,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | npm | `node_modules` | `npm` | `npm cache clean --force` | clear; requires `clean --global --include-clear --apply` to run |
 | pnpm | `node_modules` | `pnpm` | `pnpm store prune` | prune; eligible with `clean --global`; requires `--apply` to run |
 | Bun | `node_modules` | `bun` | `bun pm cache prune` | clear; requires `clean --global --include-clear --apply` to run. Bun 1.4.4 or later. |
+| Deno | `node_modules` | `deno-remote`, `deno-npm`, `deno-gen` | `delete_contents` of the paths that `deno info --json` prints | clear; requires `clean --global --include-clear --apply` to run. |
 | Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Yarn 2+ has no matching global rule. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
 | Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. |
@@ -179,7 +181,7 @@ Such a rule must be a clear rule, so it runs only with
 Plonge skips it when the path is not absolute; is `/`, the home directory,
 or contains the home directory; is or resolves through a symlink;
 is in a Git repository; or does not exist.
-No default rule uses `delete_contents` yet.
+The Deno rules use `delete_contents`.
 See the [README](../README.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
@@ -214,6 +216,23 @@ or `~/.bunfig.toml`, and ignores a directory named in another
 `bunfig.toml`, `.npmrc`, or `.env` file.
 See [Bun's `pm cache` documentation][bun-pm] and [prune code][bun-prune].
 
+### Deno
+
+Deno's own command, `deno clean`, deletes all of `DENO_DIR`.
+That directory also holds user state:
+localStorage and Cache API data under `location_data`,
+and the REPL history in `deno_history.txt` unless `DENO_REPL_HISTORY` moves it.
+Plonge does not run `deno clean`.
+Its three Deno rules each read one path from `deno info --json`,
+so they follow `DENO_DIR`, and delete the contents of that path:
+`deno-remote` for remote modules (`remote`),
+`deno-npm` for npm packages (`npm`),
+and `deno-gen` for compiled TypeScript (`gen`).
+The next run downloads or compiles them again.
+The other folders and files in `DENO_DIR` stay.
+See Deno's [clean][deno-clean], [info][deno-info],
+and [`DENO_DIR` layout][deno-dir] code.
+
 [mise-source]: https://github.com/jdx/mise/tree/v2026.10.14/src/backend
 [mise-prune]: https://github.com/jdx/mise/blob/v2026.10.14/src/cli/prune.rs
 [mise-backend]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/mod.rs
@@ -229,3 +248,6 @@ See [Bun's `pm cache` documentation][bun-pm] and [prune code][bun-prune].
 [bun-prune]: https://github.com/oven-sh/bun/blob/bun-v1.4.4/src/runtime/cli/pm_cache_prune_command.rs
 [cargo]: https://mise.jdx.dev/dev-tools/backends/cargo.html
 [pypi]: https://mise.jdx.dev/dev-tools/backends/pypi.html
+[deno-clean]: https://github.com/denoland/deno/blob/v2.9.8/cli/tools/clean.rs
+[deno-info]: https://github.com/denoland/deno/blob/v2.9.8/cli/tools/info.rs
+[deno-dir]: https://github.com/denoland/deno/blob/v2.9.8/libs/resolver/cache/deno_dir.rs

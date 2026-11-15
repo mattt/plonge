@@ -96,3 +96,47 @@ func TestBunBefore144IsSkipped(t *testing.T) {
 		}
 	}
 }
+
+func TestDenoDeletesOnlyItsCaches(t *testing.T) {
+	r, tmp, _, log := deleteSetup(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	denoDir := filepath.Join(tmp, "deno")
+	for _, p := range []string{"remote/m", "npm/p", "gen/g", "location_data/local_storage", "deno_history.txt"} {
+		addFile(t, filepath.Join(denoDir, p))
+	}
+	addTool(t, bin, "deno", fmt.Sprintf(`echo "$*" >> %q
+[ "$*" = "info --json" ] || exit 9
+d=%q
+printf '{\n  "version": 1,\n  "denoDir": "%%s",\n  "modulesCache": "%%s/remote",\n  "npmCache": "%%s/npm",\n  "typescriptCache": "%%s/gen",\n  "originStorage": "%%s/location_data"\n}\n' "$d" "$d" "$d" "$d" "$d"`, log, denoDir))
+	var rs []rules.Global
+	for _, id := range []string{"deno-remote", "deno-npm", "deno-gen"} {
+		rs = append(rs, defaultRule(t, id))
+	}
+	ctx := context.Background()
+	entries := r.List(ctx, rs)
+	for i, dir := range []string{"remote", "npm", "gen"} {
+		e := entries[i]
+		want := "delete contents of " + filepath.Join(denoDir, dir) + " (built in)"
+		if e.Skipped != "" || e.Command != want || e.Kind != rules.KindClear {
+			t.Errorf("entry = %+v", e)
+		}
+	}
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	if res.Failed != 0 {
+		t.Errorf("result = %+v", res)
+	}
+	for _, dir := range []string{"remote", "npm", "gen"} {
+		if ents, err := os.ReadDir(filepath.Join(denoDir, dir)); err != nil || len(ents) != 0 {
+			t.Errorf("%s: entries = %v, err = %v", dir, ents, err)
+		}
+	}
+	for _, p := range []string{"location_data/local_storage", "deno_history.txt"} {
+		if _, err := os.Stat(filepath.Join(denoDir, p)); err != nil {
+			t.Errorf("deleted user state %s: %v", p, err)
+		}
+	}
+	data, _ := os.ReadFile(log)
+	if strings.Contains(string(data), "clean") {
+		t.Errorf("log = %q", data)
+	}
+}
