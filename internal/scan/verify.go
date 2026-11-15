@@ -33,7 +33,7 @@ func Verify(ctx context.Context, root string, c Candidate) (reason string, err e
 	if err != nil {
 		return "", err
 	}
-	if !inside(filepath.Join(realParent, filepath.Base(c.Path)), realRoot) {
+	if !Inside(filepath.Join(realParent, filepath.Base(c.Path)), realRoot) {
 		return "is no longer inside its root", nil
 	}
 	kept, err := filterIgnored(ctx, c.repo, []Candidate{c})
@@ -46,7 +46,7 @@ func Verify(ctx context.Context, root string, c Candidate) (reason string, err e
 	return "", nil
 }
 
-// inside reports whether path is strictly below dir.
-func inside(path, dir string) bool {
+// Inside reports whether path is strictly below dir.
+func Inside(path, dir string) bool {
 	return strings.HasPrefix(path, strings.TrimSuffix(dir, string(filepath.Separator))+string(filepath.Separator))
 }

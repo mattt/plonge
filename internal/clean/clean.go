@@ -180,22 +180,54 @@ func RemoveTree(path string) error {
 	return os.RemoveAll(path)
 }
 
+// RemoveContents deletes everything in dir and keeps dir itself.
+// Like RemoveTree, it makes the tree writable and tries again
+// when permissions stop the removal, and it does not follow symlinks.
+func RemoveContents(dir string) error {
+	err := removeEntries(dir)
+	if err == nil || !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	if info, err := os.Lstat(dir); err == nil && info.IsDir() {
+		addWritable(dir, info)
+	}
+	return removeEntries(dir)
+}
+
+func removeEntries(dir string) error {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, ent := range ents {
+		if err := RemoveTree(filepath.Join(dir, ent.Name())); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func makeWritable(root string) {
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		need := fs.FileMode(0o200)
-		if d.IsDir() {
-			need = 0o700
-		}
-		if perm := info.Mode().Perm(); perm&need != need {
-			_ = os.Chmod(path, perm|need)
+		if info, err := d.Info(); err == nil {
+			addWritable(path, info)
 		}
 		return nil
 	})
+}
+
+// addWritable lets the owner change path: write a file,
+// or list, enter, and change a directory.
+func addWritable(path string, info fs.FileInfo) {
+	need := fs.FileMode(0o200)
+	if info.IsDir() {
+		need = 0o700
+	}
+	if perm := info.Mode().Perm(); perm&need != need {
+		_ = os.Chmod(path, perm|need)
+	}
 }

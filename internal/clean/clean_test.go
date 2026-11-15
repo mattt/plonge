@@ -313,6 +313,32 @@ func TestRemoveTreeReadOnly(t *testing.T) {
 	}
 }
 
+func TestRemoveContentsKeepsTheDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cache")
+	write(t, filepath.Join(dir, "a", "b", "f"), "x")
+	write(t, filepath.Join(dir, "top"), "x")
+	outside := filepath.Join(t.TempDir(), "outside")
+	write(t, filepath.Join(outside, "keep"), "x")
+	if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"a/b", "a", "."} {
+		if err := os.Chmod(filepath.Join(dir, p), 0o555); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RemoveContents(dir); err != nil {
+		t.Fatal(err)
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil || len(ents) != 0 {
+		t.Errorf("entries = %v, err = %v", ents, err)
+	}
+	if !exists(filepath.Join(outside, "keep")) {
+		t.Error("deleted through a symlink")
+	}
+}
+
 func TestContinuesAfterError(t *testing.T) {
 	root := repoWith(t)
 	parent := filepath.Join(root, "locked")
