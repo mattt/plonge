@@ -80,6 +80,8 @@ A quiet project has a known last activity time at least `quiet_hours` old
 An active project has more recent activity or an unknown activity time.
 A busy project has a Paseo agent with status `running` or `initializing`
 in the project or a directory below it.
+If `paseo` is on PATH but Plonge cannot read its status,
+every project is busy, as [described below](#paseo-failures).
 Busy projects are excluded from project cleanup even with `--include-active`.
 These states depend on the [activity sources](#project-discovery-and-activity),
 not on whether a build or editor is running.
@@ -105,7 +107,9 @@ You can repeat `--root`; `--no-mise` requires at least one root.
 Before each deletion, Plonge checks that the path is still a directory,
 is not a symlink, is inside its root,
 is ignored by Git, and contains no tracked files.
-It asks Paseo again once per project, before the first deletion there.
+It asks Paseo again once per project, before the first deletion there,
+and skips the project's caches if Paseo now reports an agent there
+or if Plonge cannot read Paseo's status.
 If a path check does not pass, Plonge skips the path or reports an error.
 Plonge can make read-only files and directories writable to remove them.
 It continues after deletion errors and exits with a nonzero status.
@@ -150,19 +154,55 @@ Plonge uses the newest activity it can find from these sources:
   This can also match a sibling such as `app-two` for a root named `app`,
   which can only make the root appear more active.
 - `paseo`: `paseo ls --json --global --background`.
+  Plonge expands a leading `~` in an agent's working directory
+  to the home directory.
   A busy project gets the scan time as its last activity time.
 
-If Claude or Paseo is missing or its initial query fails,
-Plonge reports that source as skipped and continues.
-If Paseo is unavailable, Plonge cannot detect busy projects through it.
-A failed Paseo recheck before deletion also allows cleanup to continue,
-but is not reported.
+If Claude Code's projects directory is missing or unreadable,
+Plonge reports the `claude` source as skipped and continues.
+If `paseo` is not on PATH, Plonge cannot ask Paseo,
+so it does not know of any running Paseo agent.
+It reports the `paseo` source as skipped, and no project is busy.
+
+### Paseo failures
+
+If `paseo` is on PATH but `paseo ls` fails, does not finish in 15 seconds,
+or prints output that Plonge cannot use,
+Plonge cannot tell where Paseo agents work.
+Output that Plonge cannot use includes output that is not a JSON array,
+and a running or initializing agent whose working directory is empty
+or is not an absolute path after `~` expansion.
+It reports the `paseo` source as failed, with the reason,
+and treats every project as busy.
+`scan` shows every project as busy,
+and `clean` selects no project caches, with or without `--apply`:
+
+```console
+$ plonge clean
+Not selected, busy project (Paseo): 1.2 GiB in 14 caches
+Activity source failed: paseo (paseo ls failed: daemon is not running)
+Every project counts as busy. Fix paseo, or remove it from PATH for this run.
+Selected size: 0 B in 0 caches
+Dry run; nothing was deleted. Use --apply to delete.
+```
+
+With `--json`, the `activity_sources` list has
+`{"name": "paseo", "status": "failed", "reason": "..."}`.
+If the recheck before a deletion fails in the same way,
+Plonge skips that project's caches and reports the reason for each one.
+
+To proceed, fix Paseo so that `paseo ls --json --global --background` works.
+If no Paseo agent runs on this machine,
+you can instead remove `paseo` from PATH for that run.
+Plonge then cannot detect busy projects through Paseo.
 
 ## Global caches
 
 Global caches are stored outside projects.
 Plonge uses cleanup commands from their tools,
 plus a built-in rule for Xcode build data on macOS.
+A rule for a cache without a cleanup command
+can delete the contents of its path instead.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -175,7 +215,8 @@ plonge clean --global --apply --include-clear
 `plonge clean --global` works only on global caches and leaves your projects alone.
 By default it lists the commands as a dry run.
 `--apply` runs eligible actions and estimates the space freed.
-Global cleanup does not use the project activity or Git checks.
+Global cleanup does not use the project activity or Git checks,
+except that a `delete_contents` rule refuses a path in a Git repository.
 It cannot be combined with `--root`, `--no-mise`, `--include-active`, or `--min-size`.
 Lookup and check commands run even during a scan or dry run.
 
@@ -312,6 +353,33 @@ to a list of `{"version": ..., "install_path": ...}` objects.
 `targets` must start with `tool`.
 Each object needs a nonempty `version` and an absolute `install_path`.
 The rule's size is then the total of those directories, not its whole `path`.
+
+A cache with no cleanup command can use `delete_contents` in place of `clean`:
+
+```toml
+[[global]]
+id = "mytool-cache"
+tool = "mytool"
+path = "~/.mytool/cache"
+delete_contents = true
+kind = "clear"
+```
+
+Plonge then deletes what is in `path` and keeps the directory itself.
+It makes read-only entries writable first and does not follow symlinks.
+The rule must have kind `clear`,
+so it runs only with `clean --global --include-clear --apply`.
+It cannot have `clean` or `targets`; it can have a `check`.
+The action reads `delete contents of <path> (built in)`.
+Plonge skips the rule, and reports why, when the path is not absolute;
+is `/`, the home directory, or a directory that contains the home directory,
+compared by file identity so that a differently cased name cannot pass;
+is a symlink or resolves through one to a different place;
+is in a Git work tree or Git directory, or Git cannot check it,
+as when the path or a directory above it has a `.git` entry that Git cannot use;
+or does not exist or is not a directory.
+It checks the path when it lists the rule and again right before it deletes.
+`tool` must still be available, and a `path` command must still start with it.
 
 When your rule has the same `id` as a default, it replaces all of the default,
 so copy the default's `check` and `targets` to keep them.

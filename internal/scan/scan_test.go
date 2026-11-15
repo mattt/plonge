@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -368,5 +369,86 @@ func TestDiskUsage(t *testing.T) {
 	}
 	if got := Sizes([]string{one, two}); !slices.Equal(got, []int64{a, b}) {
 		t.Errorf("Sizes = %v, want [%d %d]", got, a, b)
+	}
+}
+
+func TestInRepository(t *testing.T) {
+	isolateGit(t)
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	newRepo(t, repo, map[string]string{".gitignore": "cache/\n"})
+	outside := filepath.Join(tmp, "outside")
+	for _, dir := range []string{filepath.Join(repo, "cache", "x"), outside} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	for dir, want := range map[string]bool{
+		repo:                              true,
+		filepath.Join(repo, "cache", "x"): true,
+		filepath.Join(repo, ".git"):       true,
+		outside:                           false,
+	} {
+		got, err := InRepository(ctx, dir)
+		if err != nil || got != want {
+			t.Errorf("InRepository(%s) = %v, %v; want %v", dir, got, err, want)
+		}
+	}
+	if _, err := InRepository(ctx, filepath.Join(tmp, "missing")); err == nil {
+		t.Error("no error for a missing directory")
+	}
+}
+
+func TestInRepositoryIgnoresInheritedDiscoveryLimits(t *testing.T) {
+	isolateGit(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, repo, map[string]string{"cache/tracked": "x"})
+	t.Setenv("GIT_CEILING_DIRECTORIES", repo)
+	t.Setenv("GIT_DISCOVERY_ACROSS_FILESYSTEM", "0")
+	got, err := InRepository(context.Background(), filepath.Join(repo, "cache"))
+	if err != nil || !got {
+		t.Errorf("InRepository = %v, %v; want true", got, err)
+	}
+}
+
+func TestInRepositoryRefusesBrokenMetadata(t *testing.T) {
+	isolateGit(t)
+	tmp := t.TempDir()
+	brokenFile := filepath.Join(tmp, "file")
+	write(t, filepath.Join(brokenFile, ".git"), "gitdir: "+filepath.Join(tmp, "missing")+"\n")
+	brokenDir := filepath.Join(tmp, "dir")
+	if err := os.MkdirAll(filepath.Join(brokenDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{brokenFile, brokenDir} {
+		sub := filepath.Join(root, "cache")
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := InRepository(context.Background(), sub); err == nil {
+			t.Errorf("InRepository(%s) = %v with no error", sub, got)
+		}
+	}
+}
+
+func TestInRepositoryRefusesUnexpectedOutput(t *testing.T) {
+	dir := t.TempDir()
+	bin := t.TempDir()
+	t.Setenv("PATH", bin)
+	for _, out := range []string{"", "true", "maybe\nfalse", "false\nfalse\nfalse", "FALSE\nfalse"} {
+		script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %q\n", out)
+		if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := InRepository(context.Background(), dir); err == nil {
+			t.Errorf("output %q: InRepository = %v with no error", out, got)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nprintf 'false\\nfalse\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := InRepository(context.Background(), dir); err != nil || got {
+		t.Errorf("false, false: InRepository = %v, %v", got, err)
 	}
 }

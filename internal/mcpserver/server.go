@@ -20,7 +20,7 @@ const scanDescription = `Report the caches that developer tools and coding agent
 
 const cleanDescription = `Delete caches. This is a dry run unless apply is true. Always call it first without apply, show the dry run to the user, and get the user's approval before you call it with apply: true.
 
-A quiet project has known activity at least quiet_hours old (default: 24 hours). Active projects have newer or unknown activity; include_active selects them too. min_size (such as "100MiB") leaves out smaller caches. A busy project has a running or initializing Paseo agent and is excluded. If Paseo is unavailable, its busy check provides no protection.
+A quiet project has known activity at least quiet_hours old (default: 24 hours). Active projects have newer or unknown activity; include_active selects them too. min_size (such as "100MiB") leaves out smaller caches. A busy project has a running or initializing Paseo agent and is excluded. If paseo is on PATH but its status cannot be read, the paseo entry in activity_sources has status "failed" and every project is busy, so nothing is deleted; tell the user the reason. If paseo is not on PATH, the busy check provides no protection.
 
 With global, it selects only global cleanup actions, without checking project activity. apply runs eligible actions. A prune rule uses the tool's cleanup policy; a clear rule can also remove cached data still in use. Clear rules require include_clear. Later commands may need to download dependencies or rebuild files. Show this effect before asking for approval. Sizes and freed space are estimates.`
 

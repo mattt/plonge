@@ -57,6 +57,7 @@ For every row:
 - `clean` shows a dry run for quiet projects.
   Add `--apply` to delete selected project caches after the path and Git checks.
   Busy projects are excluded; `--include-active` adds active projects.
+  If `paseo` is on PATH but fails, every project is busy.
 - `clean --global` shows global cleanup actions instead of project caches.
   Add `--apply` to run eligible prune actions.
   It does not use project activity or Git checks.
@@ -185,6 +186,17 @@ Global rules require their command to be available, except for the Xcode rule.
 | Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Yarn 2+ has no matching global rule. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
 | Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. |
+
+A global rule can also set `delete_contents` in place of a cleanup command,
+for a cache whose tool has none.
+Plonge then deletes the contents of the rule's path and keeps the directory.
+Such a rule must be a clear rule, so it runs only with
+`clean --global --include-clear --apply`.
+Plonge skips it when the path is not absolute; is `/`, the home directory,
+or contains the home directory; is or resolves through a symlink;
+is in a Git repository; or does not exist.
+No default rule uses `delete_contents` yet.
+See the [README](../README.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
 names an absolute `WorkspacePath` that no longer exists.

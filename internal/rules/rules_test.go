@@ -234,6 +234,34 @@ os = "darwin"
 	}
 }
 
+func TestGlobalDeleteContentsValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\ndelete_contents = true\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"kind = \"clear\"\n", ""},
+		{"kind = \"clear\"\ncheck = \"t dry\"\n", ""},
+		{"kind = \"prune\"\n", "delete_contents needs kind \"clear\""},
+		{"kind = \"clear\"\nclean = \"t gc\"\n", "not both"},
+		{"kind = \"clear\"\ntargets = \"t ls\"\n", "targets does not apply"},
+	}
+	for _, c := range cases {
+		f, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil || !f.Global[0].DeleteContents {
+				t.Errorf("%q: %+v, %v", c.extra, f.Global, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
+		}
+	}
+	if _, err := parse("[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\nkind = \"clear\"\n", "test"); err == nil {
+		t.Error("a rule with neither clean nor delete_contents has no error")
+	}
+}
+
 func TestGlobalCheckValidation(t *testing.T) {
 	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\nclean = \"t gc\"\nkind = \"prune\"\n"
 	cases := []struct {

@@ -254,7 +254,8 @@ func TestCleanKeepsBusyRootAndReportsSources(t *testing.T) {
 	t.Setenv("GIT_CEILING_DIRECTORIES", home)
 	project := filepath.Join(home, "app")
 	quietRepo(t, project)
-	fakeTool(t, "paseo", fmt.Sprintf(`echo '[{"cwd":%q,"status":"running"}]'`, project))
+	// Paseo writes paths inside the home directory with a leading ~/.
+	fakeTool(t, "paseo", `echo '[{"cwd":"~/app","status":"running"}]'`)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"clean", "--no-mise", "--root", project, "--apply", "--include-active"}
@@ -291,6 +292,70 @@ func TestCleanKeepsBusyRootAndReportsSources(t *testing.T) {
 	}
 	if len(rep.Sources) != 2 {
 		t.Errorf("sources = %+v", rep.Sources)
+	}
+}
+
+// TestCleanKeepsEveryRootWhenPaseoFails checks that the dry run and --apply
+// both treat every project as busy when paseo is on PATH but fails.
+func TestCleanKeepsEveryRootWhenPaseoFails(t *testing.T) {
+	home := setup(t)
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	project := filepath.Join(home, "app")
+	quietRepo(t, project)
+	fakeTool(t, "paseo", `echo "no daemon" >&2; exit 1`)
+
+	for _, args := range [][]string{
+		{"clean", "--no-mise", "--root", project},
+		{"clean", "--no-mise", "--root", project, "--apply", "--include-active"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("%v: exit %d: %s", args, code, stderr.String())
+		}
+		out := stdout.String()
+		for _, want := range []string{
+			"busy project (Paseo)", "1 cache",
+			"Activity source failed: paseo (paseo ls failed: no daemon)",
+			"Every project counts as busy. Fix paseo, or remove it from PATH for this run.",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%v: output lacks %q:\n%s", args, want, out)
+			}
+		}
+		if strings.Contains(out, "would delete") {
+			t.Errorf("%v: a cache was selected:\n%s", args, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(project, "node_modules")); err != nil {
+		t.Errorf("a cache was deleted while Paseo failed: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"clean", "--no-mise", "--root", project, "--json"}
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	var res struct {
+		Items       []struct{} `json:"items"`
+		NotSelected struct {
+			Busy struct{ Caches int } `json:"busy"`
+		} `json:"not_selected"`
+		Sources []struct{ Name, Status, Reason string } `json:"activity_sources"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 0 || res.NotSelected.Busy.Caches != 1 {
+		t.Errorf("result = %s", stdout.String())
+	}
+	found := false
+	for _, s := range res.Sources {
+		if s.Name == "paseo" {
+			found = s.Status == "failed" && strings.Contains(s.Reason, "no daemon")
+		}
+	}
+	if !found {
+		t.Errorf("sources = %+v", res.Sources)
 	}
 }
 

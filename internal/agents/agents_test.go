@@ -49,23 +49,24 @@ func source(t *testing.T, sources []scan.Source, name string) scan.Source {
 
 func TestPaseoBusy(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	tmp := t.TempDir()
-	home := mkdir(t, filepath.Join(tmp, "home"))
-	running := mkdir(t, filepath.Join(tmp, "running"))
-	starting := mkdir(t, filepath.Join(tmp, "starting"))
-	idle := mkdir(t, filepath.Join(tmp, "idle"))
-	other := mkdir(t, filepath.Join(tmp, "running-other"))
-	sub := mkdir(t, filepath.Join(running, "pkg"))
+	home := t.TempDir()
+	running := mkdir(t, filepath.Join(home, "running"))
+	starting := mkdir(t, filepath.Join(home, "starting"))
+	idle := mkdir(t, filepath.Join(home, "idle"))
+	other := mkdir(t, filepath.Join(home, "running-other"))
+	mkdir(t, filepath.Join(running, "pkg"))
 	// The link makes the agent's directory differ from the root's spelling.
-	link := filepath.Join(tmp, "link")
-	if err := os.Symlink(starting, link); err != nil {
+	if err := os.Symlink(starting, filepath.Join(home, "link")); err != nil {
 		t.Fatal(err)
 	}
+	// Paseo writes paths inside the home directory with a leading ~/.
+	// An idle agent's directory is not used, so it need not be absolute.
 	fakePaseo(t, `[ "$*" = "ls --json --global --background" ] || exit 9
-/bin/cat <<EOF
-[{"cwd":"`+sub+`","status":"running"},
- {"cwd":"`+link+`","status":"initializing"},
- {"cwd":"`+idle+`","status":"idle"}]
+/bin/cat <<'EOF'
+[{"cwd":"~/running/pkg","status":"running"},
+ {"cwd":"~/link","status":"initializing"},
+ {"cwd":"~/idle","status":"idle"},
+ {"cwd":"","status":"idle"}]
 EOF`)
 	now := time.Now()
 	old := now.Add(-72 * time.Hour)
@@ -90,36 +91,101 @@ EOF`)
 	if s := source(t, sources, SourcePaseo); s.Status != scan.SourceUsed {
 		t.Errorf("paseo source = %+v", s)
 	}
-	if !Busy(context.Background(), running) || Busy(context.Background(), idle) {
+	if Busy(context.Background(), running, home) == "" || Busy(context.Background(), idle, home) != "" {
 		t.Error("Busy disagrees with Apply")
 	}
 }
 
-func TestPaseoSkipped(t *testing.T) {
+func TestPaseoMissing(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	noPaseo(t)
+	root := t.TempDir()
+	roots := []scan.Root{{Path: root}}
+	s := source(t, Apply(context.Background(), roots, t.TempDir(), time.Now()), SourcePaseo)
+	if s.Status != scan.SourceSkipped || !strings.Contains(s.Reason, "not on PATH") {
+		t.Errorf("source = %+v", s)
+	}
+	if roots[0].Busy || Busy(context.Background(), root, t.TempDir()) != "" {
+		t.Error("a root is busy without paseo on PATH")
+	}
+}
+
+// TestPaseoFailed checks that every root is busy
+// when paseo is on PATH but its status cannot be read.
+func TestPaseoFailed(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := t.TempDir()
 	tests := []struct {
 		name   string
-		setup  func(t *testing.T)
+		script string
 		reason string
 	}{
-		{"missing", noPaseo, "not on PATH"},
-		{"fails", func(t *testing.T) { fakePaseo(t, `echo "no daemon" >&2; exit 1`) }, "no daemon"},
-		{"bad output", func(t *testing.T) { fakePaseo(t, `echo not json`) }, "cannot read"},
+		{"fails", `echo "no daemon" >&2; exit 1`, "no daemon"},
+		{"bad output", `echo not json`, "cannot read"},
+		{"null", `echo null`, "not a JSON array"},
+		{"object", `echo '{"cwd":"/","status":"running"}'`, "cannot read"},
+		{"empty cwd", `echo '[{"cwd":"","status":"running"}]'`, "no absolute working directory"},
+		{"missing cwd", `echo '[{"status":"initializing"}]'`, "no absolute working directory"},
+		{"relative cwd", `echo '[{"cwd":"code/app","status":"running"}]'`, "no absolute working directory"},
+		{"other user", `echo '[{"cwd":"~other/app","status":"running"}]'`, "no absolute working directory"},
+		// exec makes the timeout kill the sleep itself.
+		{"times out", `exec /bin/sleep 5`, "did not finish"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setup(t)
+			fakePaseo(t, tt.script)
+			saved := paseoTimeout
+			paseoTimeout = 200 * time.Millisecond
+			t.Cleanup(func() { paseoTimeout = saved })
+
+			old := time.Now().Add(-72 * time.Hour)
 			root := t.TempDir()
-			roots := []scan.Root{{Path: root}}
+			roots := []scan.Root{
+				{Path: root, LastActivity: old, ActivitySource: "git"},
+				{Path: t.TempDir(), Skipped: "not in a Git work tree"},
+			}
 			s := source(t, Apply(context.Background(), roots, home, time.Now()), SourcePaseo)
-			if s.Status != scan.SourceSkipped || !strings.Contains(s.Reason, tt.reason) {
+			if s.Status != scan.SourceFailed || !strings.Contains(s.Reason, tt.reason) {
 				t.Errorf("source = %+v", s)
 			}
-			if roots[0].Busy || Busy(context.Background(), root) {
-				t.Error("a root is busy without a source")
+			if !roots[0].Busy || !roots[0].LastActivity.Equal(old) || roots[0].ActivitySource != "git" {
+				t.Errorf("root = %+v", roots[0])
+			}
+			if roots[1].Busy {
+				t.Error("a skipped root is busy")
+			}
+			if got := Busy(context.Background(), root, home); !strings.Contains(got, "Paseo status unknown") || !strings.Contains(got, tt.reason) {
+				t.Errorf("Busy = %q", got)
 			}
 		})
+	}
+}
+
+func TestExpandHome(t *testing.T) {
+	tests := []struct{ path, home, want string }{
+		{"~", "/h", "/h"},
+		{"~/", "/h", "/h"},
+		{"~/code/app", "/h", "/h/code/app"},
+		{"~other/app", "/h", "~other/app"},
+		{"/abs/~/x", "/h", "/abs/~/x"},
+		{"~/code", "", "~/code"},
+	}
+	for _, tt := range tests {
+		if got := expandHome(tt.path, tt.home); got != tt.want {
+			t.Errorf("expandHome(%q, %q) = %q, want %q", tt.path, tt.home, got, tt.want)
+		}
+	}
+}
+
+// TestPaseoBareHome checks that an agent whose cwd is ~ makes the home root busy.
+func TestPaseoBareHome(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	fakePaseo(t, `echo '[{"cwd":"~","status":"running"}]'`)
+	roots := []scan.Root{{Path: home}, {Path: t.TempDir()}}
+	Apply(context.Background(), roots, home, time.Now())
+	if !roots[0].Busy || roots[1].Busy {
+		t.Errorf("roots = %+v", roots)
 	}
 }
 

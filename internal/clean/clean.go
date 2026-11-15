@@ -28,9 +28,10 @@ type Options struct {
 	MinSize       int64
 	QuietHours    float64
 	Now           time.Time
-	// StillBusy, when set, asks again whether an agent works in a root.
+	// StillBusy, when set, asks again whether an agent might work in a root.
+	// It returns why the root is busy, or "" when it is not.
 	// Run calls it once per root, before the first deletion there.
-	StillBusy func(root string) bool
+	StillBusy func(root string) string
 }
 
 // Item is one selected cache and what happened to it.
@@ -120,7 +121,7 @@ func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) 
 		}
 		return plan[a].item.Path < plan[b].item.Path
 	})
-	busy := map[string]bool{}
+	busy := map[string]string{}
 	for _, p := range plan {
 		if opts.Apply {
 			if opts.StillBusy != nil {
@@ -128,8 +129,8 @@ func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) 
 					busy[p.root] = opts.StillBusy(p.root)
 				}
 			}
-			if busy[p.root] {
-				p.item.Status, p.item.Reason = Skipped, "Paseo now reports a running or initializing agent in this project"
+			if reason := busy[p.root]; reason != "" {
+				p.item.Status, p.item.Reason = Skipped, reason
 			} else {
 				apply(ctx, &p)
 			}
@@ -179,22 +180,54 @@ func RemoveTree(path string) error {
 	return os.RemoveAll(path)
 }
 
+// RemoveContents deletes everything in dir and keeps dir itself.
+// Like RemoveTree, it makes the tree writable and tries again
+// when permissions stop the removal, and it does not follow symlinks.
+func RemoveContents(dir string) error {
+	err := removeEntries(dir)
+	if err == nil || !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	if info, err := os.Lstat(dir); err == nil && info.IsDir() {
+		addWritable(dir, info)
+	}
+	return removeEntries(dir)
+}
+
+func removeEntries(dir string) error {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, ent := range ents {
+		if err := RemoveTree(filepath.Join(dir, ent.Name())); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func makeWritable(root string) {
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		need := fs.FileMode(0o200)
-		if d.IsDir() {
-			need = 0o700
-		}
-		if perm := info.Mode().Perm(); perm&need != need {
-			_ = os.Chmod(path, perm|need)
+		if info, err := d.Info(); err == nil {
+			addWritable(path, info)
 		}
 		return nil
 	})
+}
+
+// addWritable lets the owner change path: write a file,
+// or list, enter, and change a directory.
+func addWritable(path string, info fs.FileInfo) {
+	need := fs.FileMode(0o200)
+	if info.IsDir() {
+		need = 0o700
+	}
+	if perm := info.Mode().Perm(); perm&need != need {
+		_ = os.Chmod(path, perm|need)
+	}
 }

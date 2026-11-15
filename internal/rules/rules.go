@@ -44,7 +44,8 @@ const (
 // XcodeRuleID names the built-in rule for stale Xcode DerivedData folders.
 const XcodeRuleID = "xcode-derived-data"
 
-// Global describes a cache that a tool's own command cleans.
+// Global describes a cache that a tool's own command cleans,
+// or whose contents plonge deletes.
 type Global struct {
 	ID   string `toml:"id"`
 	Tool string `toml:"tool"` // the command that must be available
@@ -55,6 +56,10 @@ type Global struct {
 	Clean     string `toml:"clean"` // the command that cleans the cache
 	Kind      string `toml:"kind"`
 	OS        string `toml:"os"` // when set, the rule applies only on this GOOS
+
+	// DeleteContents makes plonge delete what is in Path, in place of Clean.
+	// It is for caches that have no cleanup command, and needs kind clear.
+	DeleteContents bool `toml:"delete_contents"`
 
 	// Check is a command that must succeed before the rule runs.
 	// It must not change anything.
@@ -155,13 +160,33 @@ func (g Global) validate() error {
 	if g.PathLabel != "" && (g.fixedPath() || strings.ContainsAny(g.PathLabel, "\r\n")) {
 		return fmt.Errorf("global rule %q: path_label must be one line and needs a path command", g.ID)
 	}
-	if !g.startsWithTool(g.Clean) {
+	if g.DeleteContents {
+		if err := g.validateDelete(); err != nil {
+			return err
+		}
+	} else if !g.startsWithTool(g.Clean) {
 		return fmt.Errorf("global rule %q: clean must be a %s command", g.ID, g.Tool)
 	}
 	if g.Targets != "" && !g.startsWithTool(g.Targets) {
 		return fmt.Errorf("global rule %q: targets must be a %s command", g.ID, g.Tool)
 	}
 	return g.validateCheck()
+}
+
+// validateDelete checks a rule whose contents plonge deletes.
+// Such a rule can remove data still in use, so it must be a clear rule.
+// Targets would size only part of what plonge deletes, so it is not allowed.
+func (g Global) validateDelete() error {
+	if g.Clean != "" {
+		return fmt.Errorf("global rule %q: use clean or delete_contents, not both", g.ID)
+	}
+	if g.Kind != KindClear {
+		return fmt.Errorf("global rule %q: delete_contents needs kind %q", g.ID, KindClear)
+	}
+	if g.Targets != "" {
+		return fmt.Errorf("global rule %q: targets does not apply with delete_contents", g.ID)
+	}
+	return nil
 }
 
 func (g Global) validateCheck() error {

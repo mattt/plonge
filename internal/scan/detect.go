@@ -43,6 +43,8 @@ const SourceGit = "git"
 const (
 	SourceUsed    = "used"
 	SourceSkipped = "skipped"
+	// SourceFailed means the source is present but plonge cannot read it.
+	SourceFailed = "failed"
 )
 
 // Source says whether plonge could read one source of agent activity.

@@ -190,6 +190,38 @@ func TestCleanTool(t *testing.T) {
 	}
 }
 
+// TestCleanToolKeepsCachesWhenPaseoFails checks that the clean tool
+// deletes nothing when paseo is on PATH but fails.
+func TestCleanToolKeepsCachesWhenPaseoFails(t *testing.T) {
+	_, project := env(t)
+	body := "#!/bin/sh\necho 'no daemon' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(os.Getenv("PATH"), "paseo"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := connect(t)
+	var res struct {
+		Items       []struct{ Status string }
+		NotSelected struct {
+			Busy struct{ Caches int } `json:"busy"`
+		} `json:"not_selected"`
+		Sources []struct{ Name, Status, Reason string } `json:"activity_sources"`
+	}
+	for _, args := range []map[string]any{{}, {"apply": true, "include_active": true}} {
+		if msg := call(t, s, "clean", args, &res); msg != "" {
+			t.Fatal(msg)
+		}
+		if len(res.Items) != 0 || res.NotSelected.Busy.Caches != 1 {
+			t.Errorf("%v: result = %+v", args, res)
+		}
+		if len(res.Sources) != 2 || res.Sources[1].Status != "failed" || !strings.Contains(res.Sources[1].Reason, "no daemon") {
+			t.Errorf("%v: sources = %+v", args, res.Sources)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(project, "node_modules")); err != nil {
+		t.Errorf("a cache was deleted while Paseo failed: %v", err)
+	}
+}
+
 func TestCleanToolIncludeActive(t *testing.T) {
 	_, project := env(t)
 	now := time.Now()

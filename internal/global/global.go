@@ -43,6 +43,8 @@ type Entry struct {
 	targeted    bool
 	targetPaths []string
 	stale       []string // for the built-in Xcode rule, the folders to delete
+	// deleteContents is true when plonge deletes what is in Path itself.
+	deleteContents bool
 }
 
 // Runner resolves tools and runs them from the home directory,
@@ -183,13 +185,19 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 			}
 			tools[g.Tool] = t
 		}
-		e.argv, e.Command = command(t, g.Clean)
 		path, err := r.cachePath(ctx, g, t)
-		if err != nil {
-			e.Skipped = "path command failed: " + err.Error()
-			e.Command, e.argv = "", nil
-		}
 		e.Path = path
+		switch {
+		case err != nil:
+			e.Skipped = "path command failed: " + err.Error()
+		case g.DeleteContents:
+			e.deleteContents = true
+			if e.Skipped = r.refuseDelete(ctx, path); e.Skipped == "" {
+				e.Command = r.deleteAction(path)
+			}
+		default:
+			e.argv, e.Command = command(t, g.Clean)
+		}
 		if e.Skipped == "" && g.Check != "" {
 			e.guard = newGuard(t, g)
 			r.passes(ctx, &e)
@@ -270,7 +278,7 @@ type Result struct {
 	Failed     int       `json:"failed"`
 }
 
-// Clean runs the clean command of each entry, or only lists it without Apply.
+// Clean runs the clean action of each entry, or only lists it without Apply.
 // A clear rule runs only with IncludeClear.
 func (r Runner) Clean(ctx context.Context, entries []Entry, opts Options) Result {
 	res := Result{Applied: opts.Apply, Outcomes: make([]Outcome, 0, len(entries))}
@@ -293,7 +301,8 @@ func (r Runner) Clean(ctx context.Context, entries []Entry, opts Options) Result
 	return res
 }
 
-// apply runs one rule's command and measures the cache again.
+// apply runs one rule's command, or deletes its contents,
+// and measures the cache again.
 func (r Runner) apply(ctx context.Context, o *Outcome) {
 	if !r.passes(ctx, &o.Entry) {
 		o.Status, o.Reason = Skipped, o.Skipped
@@ -301,6 +310,10 @@ func (r Runner) apply(ctx context.Context, o *Outcome) {
 	}
 	if o.ID == rules.XcodeRuleID {
 		applyXcode(ctx, o)
+		return
+	}
+	if o.deleteContents {
+		r.applyDelete(ctx, o)
 		return
 	}
 	before := o.Bytes

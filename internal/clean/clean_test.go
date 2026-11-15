@@ -168,9 +168,9 @@ func TestStillBusyStopsDeletion(t *testing.T) {
 	roots, sizes := scanOne(t, root)
 	calls := 0
 	opts := quietOpts(true)
-	opts.StillBusy = func(string) bool { calls++; return true }
+	opts.StillBusy = func(string) string { calls++; return "Paseo status unknown: no daemon" }
 	res := Run(context.Background(), roots, sizes, opts)
-	if calls != 1 || res.Skipped != 2 || res.Items[0].Status != Skipped {
+	if calls != 1 || res.Skipped != 2 || res.Items[0].Status != Skipped || res.Items[0].Reason != "Paseo status unknown: no daemon" {
 		t.Errorf("%d calls, result = %+v", calls, res)
 	}
 	if !exists(filepath.Join(root, "node_modules")) {
@@ -310,6 +310,32 @@ func TestRemoveTreeReadOnly(t *testing.T) {
 	info, err := os.Stat(outside)
 	if err != nil || info.Mode().Perm() != 0o444 {
 		t.Errorf("symlink target changed: %v %v", info, err)
+	}
+}
+
+func TestRemoveContentsKeepsTheDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cache")
+	write(t, filepath.Join(dir, "a", "b", "f"), "x")
+	write(t, filepath.Join(dir, "top"), "x")
+	outside := filepath.Join(t.TempDir(), "outside")
+	write(t, filepath.Join(outside, "keep"), "x")
+	if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"a/b", "a", "."} {
+		if err := os.Chmod(filepath.Join(dir, p), 0o555); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RemoveContents(dir); err != nil {
+		t.Fatal(err)
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil || len(ents) != 0 {
+		t.Errorf("entries = %v, err = %v", ents, err)
+	}
+	if !exists(filepath.Join(outside, "keep")) {
+		t.Error("deleted through a symlink")
 	}
 }
 
