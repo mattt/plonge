@@ -123,8 +123,12 @@ and `$XDG_CACHE_HOME`, or `~/.cache`, on Linux
 ([swift-foundation 6.4.2][foundation-xdg]).
 Only the `--cache-path` option moves it ([source][spm-cache-path]),
 and SwiftPM has no command that prints it,
-so the rules use the default path for each system,
-and a cache moved by `XDG_CACHE_HOME` is measured at the wrong path.
+so each rule measures the default path for its system
+and passes the same path to `--cache-path`.
+The command then cleans the cache that Plonge measured,
+even when `XDG_CACHE_HOME` moves SwiftPM's own default;
+a cache moved by `XDG_CACHE_HOME` or by another `--cache-path` is not covered.
+This was checked with Swift 6.4.2 on macOS, in temporary directories.
 Outside a package, SwiftPM writes `CACHEDIR.TAG` and a build-system file
 to `.build` in its working directory
 ([scratch path][spm-scratch], [files][spm-scratch-files]).
@@ -282,7 +286,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | pnpm | `node_modules` | `pnpm` | `pnpm store prune` | prune; eligible with `clean --global`; requires `--apply` to run |
 | Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Yarn 2+ has no matching global rule. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
-| Swift Package Manager | `.build` | `swiftpm-macos`, `swiftpm-linux` | `swift package purge-cache`, with a `--scratch-path` in the cache directory | clear; requires `clean --global --include-clear --apply` to run. Each rule applies only on its system. `artifacts` and `prebuilts` remain. |
+| Swift Package Manager | `.build` | `swiftpm-macos`, `swiftpm-linux` | `swift package purge-cache`, with `--cache-path` and `--scratch-path` set to the measured cache directory | clear; requires `clean --global --include-clear --apply` to run. Each rule applies only on its system. `artifacts` and `prebuilts` remain. |
 | Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. |
 
 A global rule can also set `delete_contents` in place of a cleanup command,

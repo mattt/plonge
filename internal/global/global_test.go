@@ -373,8 +373,18 @@ func TestSwiftPMRules(t *testing.T) {
 				t.Fatal(err)
 			}
 			log := filepath.Join(t.TempDir(), "log")
+			// The fake follows SwiftPM: --cache-path, or else the XDG cache on Linux.
+			xdg := t.TempDir()
+			t.Setenv("XDG_CACHE_HOME", xdg)
+			addFile(t, filepath.Join(xdg, "org.swift.swiftpm", "blob"))
 			addTool(t, bin, "swift", fmt.Sprintf(`echo "$PWD $*" >> %q
-[ "$1 $2 $3" = "package purge-cache --scratch-path" ] && /bin/rm "$4/blob"`, log))
+cache=""
+while [ $# -gt 0 ]; do
+  [ "$1" = --cache-path ] && cache=$2
+  shift
+done
+[ -n "$cache" ] || cache="$XDG_CACHE_HOME/org.swift.swiftpm"
+/bin/rm -f "$cache/blob"`, log))
 			ctx := context.Background()
 			got := map[string]Entry{}
 			var picked []Entry
@@ -384,7 +394,7 @@ func TestSwiftPMRules(t *testing.T) {
 					picked = append(picked, e)
 				}
 			}
-			want := "swift package purge-cache --scratch-path " + tc.cache
+			want := "swift package purge-cache --cache-path " + tc.cache + " --scratch-path " + tc.cache
 			e := got[tc.id]
 			if e.Skipped != "" || e.Path != cache || e.Command != want || e.Kind != rules.KindClear || e.Bytes < 50_000 {
 				t.Errorf("%s = %+v", tc.id, e)
@@ -407,11 +417,14 @@ func TestSwiftPMRules(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if line := strings.TrimSpace(string(data)); line != r.Home+" package purge-cache --scratch-path "+tc.cache {
+			if line := strings.TrimSpace(string(data)); line != r.Home+" package purge-cache --cache-path "+tc.cache+" --scratch-path "+tc.cache {
 				t.Errorf("swift ran as %q", line)
 			}
 			if _, err := os.Stat(filepath.Join(r.Home, ".build")); err == nil {
 				t.Error("~/.build exists")
+			}
+			if _, err := os.Stat(filepath.Join(xdg, "org.swift.swiftpm", "blob")); err != nil {
+				t.Errorf("the XDG cache changed: %v", err)
 			}
 		})
 	}

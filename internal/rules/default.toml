@@ -136,8 +136,10 @@ kind = "clear"
 
 # Swift Package Manager keeps one shared cache per user, in the user's caches
 # directory, and prints no command for its path. --cache-path is the only
-# setting that moves it, so these rules use the default for each system;
-# on Linux, Foundation puts the caches directory in $XDG_CACHE_HOME when set.
+# setting that moves it, so these rules use the default for each system
+# and pass it as --cache-path, so the command cleans the cache that plonge measures.
+# On Linux, Foundation puts SwiftPM's own default in $XDG_CACHE_HOME when set;
+# that cache is not covered.
 # purge-cache removes the cached Git repositories, registry downloads, and
 # manifest cache, including ones that projects use, so the rules are clear.
 # It keeps the artifacts and prebuilts folders, which plonge still measures.
@@ -149,7 +151,7 @@ kind = "clear"
 id = "swiftpm-macos"
 tool = "swift"
 path = "~/Library/Caches/org.swift.swiftpm"
-clean = "swift package purge-cache --scratch-path Library/Caches/org.swift.swiftpm"
+clean = "swift package purge-cache --cache-path Library/Caches/org.swift.swiftpm --scratch-path Library/Caches/org.swift.swiftpm"
 kind = "clear"
 os = "darwin"
 
@@ -157,7 +159,7 @@ os = "darwin"
 id = "swiftpm-linux"
 tool = "swift"
 path = "~/.cache/org.swift.swiftpm"
-clean = "swift package purge-cache --scratch-path .cache/org.swift.swiftpm"
+clean = "swift package purge-cache --cache-path .cache/org.swift.swiftpm --scratch-path .cache/org.swift.swiftpm"
 kind = "clear"
 os = "linux"
 
