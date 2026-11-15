@@ -237,6 +237,7 @@ Neither kind guarantees that the whole reported size will be freed.
 | `go-modules` | clear | `go clean -modcache` |
 | `go-build` | clear | `go clean -cache` |
 | `npm` | clear | `npm cache clean --force` |
+| `bun` | clear | `bun pm cache prune` (Bun 1.4.4 or later) |
 | `yarn` | clear | `yarn cache clean` (Yarn 1) |
 | `pip` | clear | `pip cache purge` |
 | `homebrew` | clear | `brew cleanup --prune=all` |

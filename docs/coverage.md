@@ -28,6 +28,9 @@ Backend cache locations were checked against
 [mise's source at v2026.10.14][mise-source].
 No cleanup command was applied to build this inventory.
 
+The `bun` rule was checked against the documentation and source
+of [Bun 1.4.4][bun-pm], the current stable release when the rule was added.
+
 ## How to read the tables
 
 The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
@@ -92,7 +95,7 @@ The global-cache column lists additional rules relevant to that tool.
 
 | Core name | Installed versions | Project caches | Global caches: ID, command, kind | Default behavior | Not covered |
 | --- | --- | --- | --- | --- | --- |
-| `bun` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | Bun-specific: none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Bun-specific rule. | Bun's package cache (`~/.bun/install/cache`) and runtime caches outside matching project directories. |
+| `bun` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | `bun`: `bun pm cache prune` (clear; Bun 1.4.4 or later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `bun`, which removes package folders in Bun's cache more than 30 days old. | Packages newer than 30 days; the global store (`links/`), Git dependency clones, and package manifests, which `prune` keeps; Bun before 1.4.4, which the rule skips; a cache directory that only a `bunfig.toml`, `.npmrc`, or `.env` file names, which `prune` ignores. |
 | `deno` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | Deno-specific: none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Deno-specific rule. | Deno's dependency and compiled-code cache (`DENO_DIR`). |
 | `dotnet` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no .NET cache rule. `clean --global` selects mise rules; `--include-clear` adds no .NET rule. | Project `bin` and `obj`; NuGet global packages and HTTP cache. |
 | `dotnet-core` (alias of `dotnet`) | Guarded `mise-tools`; same tool as `dotnet` | none yet | none yet | Same as `dotnet`: no project rule; global mise rules only; no additional clear rule. | Same .NET and NuGet gaps as `dotnet`. |
@@ -111,7 +114,6 @@ The global-cache column lists additional rules relevant to that tool.
 An unrelated directory name can still match a generic project rule.
 Outside the shared mise rules, the core tools with no cache rule are
 `dotnet` (also named `dotnet-core`), `elixir`, `erlang`, `ruby`, and `zig`.
-Bun and Deno have project-name matches but no dedicated global-cache rule.
 
 ## Backends
 
@@ -134,7 +136,7 @@ See mise's [install and uninstall code][mise-backend].
 | `asdf`, `vfox` | Plugin metadata, retained downloads, and any caches a plugin's install code creates | `mise-cache` reaches mise's cache directory; `mise-tools` delegates uninstall to the backend | Plugin directories and caches outside mise's cache directory have no general rule; plugin behavior varies |
 | `cargo` | Cargo registry and Git downloads after source builds; optional compiler caches; prebuilt binaries when available | `mise-tools` removes selected installs; project `target` applies only in scanned roots beside `Cargo.toml` | Cargo registry, Git cache, and sccache have no global rule ([backend][cargo]) |
 | `go` | Go module downloads and build cache | `go-modules` and `go-build` clear the paths returned by `go env GOMODCACHE` and `go env GOCACHE` from the home directory | Caches at other configured paths |
-| `npm` | Embedded installer cache and store under mise's cache directory, or external npm/pnpm/Bun caches when configured | `mise-cache` reaches the embedded cache; `npm` clears npm's cache; `pnpm` prunes its resolved store | Bun's package cache and other stores not resolved by the rules ([source][mise-npm]) |
+| `npm` | Embedded installer cache and store under mise's cache directory, or external npm/pnpm/Bun caches when configured | `mise-cache` reaches the embedded cache; `npm` clears npm's cache; `pnpm` prunes its resolved store; `bun` prunes Bun's cache | Stores not resolved by the rules ([source][mise-npm]) |
 | `pypi` | Per-tool environments and uv cache, or pip cache when installing through pipx | `mise-tools` removes selected environments; `uv` prunes and `pip` clears their resolved caches | Other pipx state and environments outside mise; caches at other configured paths ([backend][pypi]) |
 | `gem` | Per-tool gems and gem archives under each install; separate RubyGems and Bundler caches | `mise-tools` removes selected installs as a whole | No rule to prune archives within retained installs or separate gem/Bundler caches ([source][mise-gem]) |
 | `dotnet` | .NET tool installs and NuGet package/HTTP caches | `mise-tools` removes selected installs | NuGet caches have no rule ([source][mise-dotnet]) |
@@ -164,6 +166,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | pip | The same Python environment names | `pip` | `pip cache purge` | clear; requires `clean --global --include-clear --apply` to run |
 | npm | `node_modules` | `npm` | `npm cache clean --force` | clear; requires `clean --global --include-clear --apply` to run |
 | pnpm | `node_modules` | `pnpm` | `pnpm store prune` | prune; eligible with `clean --global`; requires `--apply` to run |
+| Bun | `node_modules` | `bun` | `bun pm cache prune` | clear; requires `clean --global --include-clear --apply` to run. Bun 1.4.4 or later. |
 | Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Yarn 2+ has no matching global rule. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
 | Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. |
@@ -186,6 +189,31 @@ and workspaces on unmounted volumes under `/Volumes`.
 The project `DerivedData` rule is different: it uses the project checks,
 without checking Xcode workspace metadata.
 
+### Bun
+
+The `bun` rule asks `bun pm cache` for the cache path
+and runs `bun pm cache prune`.
+That command removes package folders that Bun has neither extracted nor,
+where the file system records access times, linked from in 30 days.
+macOS and `noatime` mounts do not record those access times,
+so a package that projects still install every day can count as old.
+For this reason the rule has kind clear.
+The next install downloads a removed package again.
+`prune` keeps the global store in `links/`,
+which projects with `globalStore = true` link to,
+and Git dependency clones, package manifests, and transpiler output.
+Plonge does not use `bun pm cache rm`,
+because it also deletes the global store and so breaks those projects
+until each one runs `bun install` again.
+
+Bun added `prune` in 1.4.4,
+so the rule's check runs `bun --version`
+and skips the rule for an earlier version.
+`prune` takes its directory from `BUN_INSTALL_CACHE_DIR`, `BUN_INSTALL`,
+or `~/.bunfig.toml`, and ignores a directory named in another
+`bunfig.toml`, `.npmrc`, or `.env` file.
+See [Bun's `pm cache` documentation][bun-pm] and [prune code][bun-prune].
+
 [mise-source]: https://github.com/jdx/mise/tree/v2026.10.14/src/backend
 [mise-prune]: https://github.com/jdx/mise/blob/v2026.10.14/src/cli/prune.rs
 [mise-backend]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/mod.rs
@@ -197,5 +225,7 @@ without checking Xcode workspace metadata.
 [mise-conda]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/conda.rs
 [mise-spinel]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/spinel.rs
 [mise-spm]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/spm.rs
+[bun-pm]: https://github.com/oven-sh/bun/blob/bun-v1.4.4/docs/pm/cli/pm.mdx#cache
+[bun-prune]: https://github.com/oven-sh/bun/blob/bun-v1.4.4/src/runtime/cli/pm_cache_prune_command.rs
 [cargo]: https://mise.jdx.dev/dev-tools/backends/cargo.html
 [pypi]: https://mise.jdx.dev/dev-tools/backends/pypi.html
