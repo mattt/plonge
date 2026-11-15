@@ -58,6 +58,21 @@ Neither tool has a command that removes its environments,
 so Plonge deletes the matching project directories.
 Both names are specific to their tools, so they need no project file.
 
+The Python `build` rule follows [setuptools 84.2.1][setuptools-build],
+whose `build` command uses `build` in the project directory
+as its `build_base` by default.
+A [strict editable install][setuptools-editable] also puts its link tree
+in that directory.
+Setuptools has no command that removes `build`,
+so Plonge deletes the directory.
+The next build writes it again; a strict editable install stops working
+until it is installed again.
+`build` is a common directory name, so the rule matches it only
+beside `pyproject.toml` or `setup.py`, the files that start a setuptools build.
+No other default rule uses the name `build`.
+A `build` directory that matches is not entered,
+so a cache inside it, such as `__pycache__`, is part of that match.
+
 ## How to read the tables
 
 The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
@@ -131,9 +146,9 @@ The global-cache column lists additional rules relevant to that tool.
 | `elixir` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Elixir cache rule. `clean --global` selects mise rules; `--include-clear` adds no Elixir rule. | Mix `_build` and `deps`; Hex package cache. |
 | `erlang` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Erlang cache rule. `clean --global` selects mise rules; `--include-clear` adds no Erlang rule. | Rebar3 `_build` and global package cache. |
 | `go` | Guarded `mise-tools` | none yet | `go-modules`: `go clean -modcache` (clear); `go-build`: `go clean -cache` (clear) | `scan` and `clean` have no Go project rule. `clean --global` selects mise rules; `--include-clear` adds both Go rules. | Project binaries, `vendor`, and caches at paths other than those returned by Go from the home directory. |
-| `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); Gradle project `build` output. |
-| `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and `yarn`. | Yarn 2+ caches such as `.yarn/cache`; separate pnpm stores not resolved from the home directory; generic `build` output. |
-| `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | tox and nox environments moved by `--workdir`, `work_dir`, or `--envdir`; Python `build` output, and `dist` without `package.json`; uv-managed Python installations outside mise; caches at other configured paths. |
+| `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); Gradle project `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
+| `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and `yarn`. | Yarn 2+ caches such as `.yarn/cache`; separate pnpm stores not resolved from the home directory; `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
+| `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py`; `build` beside `pyproject.toml` or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | tox and nox environments moved by `--workdir`, `work_dir`, or `--envdir`; build output moved by setuptools' `build_base`; `*.egg-info`; `dist` without `package.json`; uv-managed Python installations outside mise; caches at other configured paths. |
 | `ruby` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Ruby cache rule. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/bundle` and `vendor/cache`; RubyGems' gem cache; application `tmp/cache`. |
 | `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Rust rule. | Cargo's registry and Git caches (`~/.cargo/registry`, `~/.cargo/git`); sccache; toolchains managed outside mise. |
 | `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds no Swift rule. | Swift Package Manager's global cache; `.swiftpm`; Xcode build data for existing workspaces, archives, device support, and simulators. |
@@ -193,6 +208,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | mypy, pytest, Ruff | `.mypy_cache`, `.pytest_cache`, `.ruff_cache` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. |
 | tox, nox | `.tox`, `.nox` | none | Delete matching project directories; neither tool has a cleanup command | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Environments moved by `--workdir`, `work_dir`, or `--envdir` are not matched. |
 | Maven, Gradle | `target` beside `pom.xml`; `.gradle` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Global repositories and caches remain. |
+| setuptools | `build` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; setuptools has no cleanup command | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `build_base` setting that moves the directory is not followed. |
 | uv | `.venv`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py` | `uv` | `uv cache prune` | prune; eligible with `clean --global`; requires `--apply` to run |
 | pip | The same Python environment names | `pip` | `pip cache purge` | clear; requires `clean --global --include-clear --apply` to run |
 | npm | `node_modules` | `npm` | `npm cache clean --force` | clear; requires `clean --global --include-clear --apply` to run |
@@ -241,4 +257,6 @@ without checking Xcode workspace metadata.
 [tox-root]: https://github.com/tox-dev/tox/blob/4.67.13/src/tox/config/sets.py#L328-L333
 [nox-envdir]: https://github.com/wntrblm/nox/blob/2026.10.20/nox/_options.py#L212-L221
 [nox-chdir]: https://github.com/wntrblm/nox/blob/2026.10.20/nox/tasks.py#L119-L138
+[setuptools-build]: https://github.com/pypa/setuptools/blob/v84.2.1/setuptools/_distutils/command/build.py#L54
+[setuptools-editable]: https://github.com/pypa/setuptools/blob/v84.2.1/setuptools/command/editable_wheel.py#L373-L379
 [nuget-locals-source]: https://github.com/NuGet/NuGet.Client/blob/8.2.0.14/src/NuGet.Core/NuGet.Commands/CommandRunners/LocalsCommandRunner.cs#L109-L117

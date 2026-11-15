@@ -165,6 +165,28 @@ func TestDetect(t *testing.T) {
 			},
 		},
 		{
+			name: "Python build output",
+			files: map[string]string{
+				".gitignore":                          "build/\n__pycache__/\n",
+				"lib/pyproject.toml":                  "",
+				"lib/build/lib/pkg/m.py":              "",
+				"lib/build/lib/pkg/__pycache__/m.pyc": "", // inside a candidate
+				"old/setup.py":                        "",
+				"old/build/temp/x.o":                  "",
+				"web/package.json":                    "{}",
+				"web/build/index.html":                "", // not a Python project
+				"app/build.gradle":                    "",
+				"app/build/classes/x":                 "", // not a Python project
+				"docs/build/html/index.html":          "", // no project file
+				"src/pkg/__pycache__/m.pyc":           "",
+			},
+			want: map[string]string{
+				"lib/build":           "build beside pyproject.toml",
+				"old/build":           "build beside setup.py",
+				"src/pkg/__pycache__": "__pycache__",
+			},
+		},
+		{
 			name: "ignored by a parent directory rule",
 			files: map[string]string{
 				".gitignore":            "build/\n",

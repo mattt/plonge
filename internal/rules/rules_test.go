@@ -10,11 +10,14 @@ import (
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 21 || r.QuietHours != 24 {
+	if len(r.Names) != 22 || r.QuietHours != 24 {
 		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
 		t.Errorf("beside target = %q", r.Beside["target"])
+	}
+	if !slices.Equal(r.Beside["build"], []string{"pyproject.toml", "setup.py"}) {
+		t.Errorf("beside build = %q", r.Beside["build"])
 	}
 }
 
@@ -127,6 +130,10 @@ func TestMatch(t *testing.T) {
 		{"obj", []string{"package.json"}, ""},
 		{".tox", nil, ".tox"},
 		{".nox", nil, ".nox"},
+		{"build", nil, ""},
+		{"build", []string{"package.json", "build.gradle"}, ""},
+		{"build", []string{"pyproject.toml"}, "build beside pyproject.toml"},
+		{"build", []string{"setup.py"}, "build beside setup.py"},
 	}
 	for _, tt := range tests {
 		got := r.Match(tt.name, func(m string) bool { return slices.Contains(tt.siblings, m) })

@@ -473,7 +473,7 @@ Plonge has these default rules:
 ```toml
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
-         ".turbo", ".venv", "DerivedData", "__pycache__", "bin", "dist",
+         ".turbo", ".venv", "DerivedData", "__pycache__", "bin", "build", "dist",
          "node_modules", "obj", "target", "venv"]
 quiet_hours = 24
 
@@ -484,6 +484,7 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # A project file can be a pattern, such as "*.csproj".
 [beside]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
+build = ["pyproject.toml", "setup.py"]
 dist = ["package.json"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
@@ -498,14 +499,17 @@ and a `quiet_hours` value replaces the default.
 For example:
 
 ```toml
-names = [".cache", "build"]
+names = [".cache"]
 quiet_hours = 72
 skip = ["third_party"]
 
 [beside]
-build = ["build.gradle", "build.gradle.kts"]
+build = ["build.gradle", "build.gradle.kts", "pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml"]
 ```
+
+This `build` entry adds Gradle projects.
+It replaces the default entry, so it lists the default project files too.
 
 A `beside` project file can be a pattern, such as `*.csproj`,
 in the syntax of Go's [`filepath.Match`](https://pkg.go.dev/path/filepath#Match).
