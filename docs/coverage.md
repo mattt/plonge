@@ -148,6 +148,26 @@ it holds pid files, sockets, and, in development and test,
 the secret key base in `tmp/local_secret.txt` ([source][rails-local-secret]),
 which signs and encrypts cookies.
 
+The `rubygems-cache` rule follows the source of RubyGems **4.0.24**.
+When RubyGems installs a gem, it keeps a copy of the `.gem` file
+in the `cache` directory of the gem directory ([source][rubygems-cache-file]).
+`gem env gemdir` prints that gem directory ([source][rubygems-env]),
+so the rule runs it from the home directory and adds `cache` with `path_subdir`.
+RubyGems has no command that removes these copies,
+so the rule uses the built-in deletion of the directory's contents.
+[`gem cleanup`][rubygems-cleanup] is a different action:
+it uninstalls old versions of installed gems,
+which a project's `Gemfile.lock` can still need,
+so Plonge does not run it and has no rule for it.
+After a clear, [`gem pristine`][rubygems-pristine] downloads a copy that is missing.
+Bundler looks for `.gem` files in `vendor/cache` and in this directory
+([source][bundler-caches]),
+and `bundle cache` stops with "Missing gem file" when neither has the file,
+unless `--all-platforms` lets it download the gem ([source][bundler-cache-missing]).
+The rule is `clear` because the copies belong to gems that are still installed.
+Each Ruby version has its own gem directory,
+and the rule reaches only the one of the Ruby that `gem` runs from the home directory.
+
 ## How to read the tables
 
 The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
@@ -227,7 +247,7 @@ The global-cache column lists additional rules relevant to that tool.
 | `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); Gradle project `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
 | `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and `yarn`. | Yarn 2+ caches such as `.yarn/cache`; separate pnpm stores not resolved from the home directory; `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
 | `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py`; `build` and `dist` beside `pyproject.toml` or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | tox and nox environments moved by `--workdir`, `work_dir`, or `--envdir`; build output moved by setuptools' `build_base`; `*.egg-info`; `dist` moved by `--outdir` or `--out-dir`; uv-managed Python installations outside mise; caches at other configured paths. |
-| `ruby` | Guarded `mise-tools` | `vendor/bundle` beside `Gemfile` or `gems.rb`; `tmp/cache` beside `config.ru` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/cache`, which `bundle cache` fills on purpose; gems installed at a `path` other than `vendor/bundle`; the rest of a Rails app's `tmp`; caches moved by `cache_store` or `BOOTSNAP_CACHE_DIR`; RubyGems' gem cache; Bundler's user cache (`~/.bundle/cache`). |
+| `ruby` | Guarded `mise-tools` | `vendor/bundle` beside `Gemfile` or `gems.rb`; `tmp/cache` beside `config.ru` | `rubygems-cache`: built-in deletion of the contents of `cache` in the directory that `gem env gemdir` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `rubygems-cache`. | Bundler's `vendor/cache`, which `bundle cache` fills on purpose; gems installed at a `path` other than `vendor/bundle`; the rest of a Rails app's `tmp`; caches moved by `cache_store` or `BOOTSNAP_CACHE_DIR`; gem caches of other Ruby versions and of `--user-install` gems; old gem versions, which `gem cleanup` uninstalls; Bundler's user cache (`~/.bundle/cache`); RubyGems' spec cache. |
 | `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Rust rule. | Cargo's registry and Git caches (`~/.cargo/registry`, `~/.cargo/git`); sccache; toolchains managed outside mise. |
 | `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds no Swift rule. | Swift Package Manager's global cache; `.swiftpm`; Xcode build data for existing workspaces, archives, device support, and simulators. |
 | `zig` | Guarded `mise-tools` | `.zig-cache` and `zig-cache` (before Zig 0.13) beside `build.zig` | `zig-global-cache`: built-in deletion of the contents of the `global_cache_dir` that `zig env` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `zig-global-cache`. | `zig-out` install output, which can hold programs and libraries that a user runs; local caches moved with `--cache-dir` or `ZIG_LOCAL_CACHE_DIR`; the global cache when `zig env` prints JSON, as before Zig 0.15 (override the rule with a fixed path). |
@@ -261,7 +281,7 @@ See mise's [install and uninstall code][mise-backend].
 | `go` | Go module downloads and build cache | `go-modules` and `go-build` clear the paths returned by `go env GOMODCACHE` and `go env GOCACHE` from the home directory | Caches at other configured paths |
 | `npm` | Embedded installer cache and store under mise's cache directory, or external npm/pnpm/Bun caches when configured | `mise-cache` reaches the embedded cache; `npm` clears npm's cache; `pnpm` prunes its resolved store | Bun's package cache and other stores not resolved by the rules ([source][mise-npm]) |
 | `pypi` | Per-tool environments and uv cache, or pip cache when installing through pipx | `mise-tools` removes selected environments; `uv` prunes and `pip` clears their resolved caches | Other pipx state and environments outside mise; caches at other configured paths ([backend][pypi]) |
-| `gem` | Per-tool gems and gem archives under each install; separate RubyGems and Bundler caches | `mise-tools` removes selected installs as a whole | No rule to prune archives within retained installs or separate gem/Bundler caches ([source][mise-gem]) |
+| `gem` | Per-tool gems and gem archives under each install; separate RubyGems and Bundler caches | `mise-tools` removes selected installs as a whole; `rubygems-cache` clears the gem cache of the Ruby that `gem` runs from the home directory | No rule to prune archives within retained installs; gem caches of other Ruby versions; Bundler's user cache ([source][mise-gem]) |
 | `dotnet` | .NET tool installs and NuGet package/HTTP caches | `mise-tools` removes selected installs; `nuget-packages` and `nuget-http-cache` clear the folders that `dotnet nuget locals` lists from the home directory | NuGet folders set for a single project; NuGet's `temp` and `plugins-cache` folders ([source][mise-dotnet]) |
 | `conda` | Channel metadata under mise's cache directory; shared archives in its data directory under `conda-packages` | `mise-cache` reaches channel metadata; `mise-tools` removes selected environments | Shared `conda-packages` archives have no rule; external conda package caches have no rule ([source][mise-conda]) |
 | `spinel` | Source checkout and compiler output in mise's download directory when retained | Shared mise rules reach version metadata and selected installs | Retained source/build downloads outside the prune selection; external compiler caches ([source][mise-spinel]) |
@@ -295,6 +315,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | npm | `node_modules` | `npm` | `npm cache clean --force` | clear; requires `clean --global --include-clear --apply` to run |
 | pnpm | `node_modules` | `pnpm` | `pnpm store prune` | prune; eligible with `clean --global`; requires `--apply` to run |
 | Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Yarn 2+ has no matching global rule. |
+| RubyGems | none | `rubygems-cache` | Built-in deletion of the contents of `cache` in the directory that `gem env gemdir` prints; Plonge does not run `gem cleanup`, which uninstalls old gem versions | clear; requires `clean --global --include-clear --apply` to run. Installed gems stay; only the copies of their `.gem` files are deleted. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
 | Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. |
 
@@ -306,7 +327,7 @@ Such a rule must be a clear rule, so it runs only with
 Plonge skips it when the path is not absolute; is `/`, the home directory,
 or contains the home directory; is or resolves through a symlink;
 is in a Git repository; or does not exist.
-The default `zig-global-cache` rule uses `delete_contents`.
+The default `zig-global-cache` and `rubygems-cache` rules use `delete_contents`.
 See the [README](../README.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
@@ -362,3 +383,9 @@ without checking Xcode workspace metadata.
 [rails-find-root]: https://github.com/rails/rails/blob/v8.1.4.1/railties/lib/rails/application.rb#L86-L88
 [rails-gitignore]: https://github.com/rails/rails/blob/v8.1.4.1/railties/lib/rails/generators/rails/app/templates/gitignore.tt#L13-L23
 [rails-local-secret]: https://github.com/rails/rails/blob/v8.1.4.1/railties/lib/rails/application/configuration.rb#L653-L654
+[rubygems-cache-file]: https://github.com/rubygems/rubygems/blob/v4.0.24/lib/rubygems/installer.rb#L926-L931
+[rubygems-env]: https://github.com/rubygems/rubygems/blob/v4.0.24/lib/rubygems/commands/environment_command.rb#L82-L83
+[rubygems-cleanup]: https://github.com/rubygems/rubygems/blob/v4.0.24/lib/rubygems/commands/cleanup_command.rb#L8-L12
+[rubygems-pristine]: https://github.com/rubygems/rubygems/blob/v4.0.24/lib/rubygems/commands/pristine_command.rb#L169-L188
+[bundler-caches]: https://github.com/rubygems/rubygems/blob/v4.0.24/bundler/lib/bundler/source/rubygems.rb#L36-L38
+[bundler-cache-missing]: https://github.com/rubygems/rubygems/blob/v4.0.24/bundler/lib/bundler/source/rubygems.rb#L233-L235

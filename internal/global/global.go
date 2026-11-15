@@ -155,7 +155,7 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("printed %q, which is not an absolute path", path)
 	}
-	return filepath.Clean(path), nil
+	return filepath.Join(path, filepath.FromSlash(g.PathSubdir)), nil
 }
 
 // labeledPath returns the text after "label: " on the lines of out

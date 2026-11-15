@@ -203,7 +203,7 @@ Plonge uses cleanup commands from their tools,
 plus a built-in rule for Xcode build data on macOS.
 A rule for a cache without a cleanup command
 can delete the contents of its path instead,
-as `zig-global-cache` does for Zig.
+as `zig-global-cache` does for Zig and `rubygems-cache` does for RubyGems.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -245,6 +245,7 @@ Neither kind guarantees that the whole reported size will be freed.
 | `nuget-http-cache` | clear | `dotnet nuget locals http-cache --clear` |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
 | `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
+| `rubygems-cache` | clear | Built-in deletion of the `.gem` files in RubyGems' cache |
 
 Plonge runs a tool through `mise exec --`
 when `mise which` finds it from your home directory,
@@ -340,6 +341,18 @@ has a field twice, has no such field,
 or has a value that is not a nonempty string.
 A rule can have `path_label` or `path_zon_field`, not both.
 
+When the `path` command prints the directory above the cache,
+`path_subdir` names the cache's relative path below it:
+
+```toml
+path = "gem env gemdir"
+path_subdir = "cache"
+```
+
+Plonge joins the two after it reads the printed path.
+`path_subdir` needs a `path` command,
+and it must be a relative path of directory names, without `.` or `..`.
+
 A rule can name a `check`, a command that must not change anything:
 
 ```toml
@@ -412,6 +425,18 @@ as when the path or a directory above it has a `.git` entry that Git cannot use;
 or does not exist or is not a directory.
 It checks the path when it lists the rule and again right before it deletes.
 `tool` must still be available, and a `path` command must still start with it.
+
+The default `rubygems-cache` rule deletes the `cache` directory's contents
+in the gem directory that `gem env gemdir` prints.
+RubyGems keeps a copy of each `.gem` file that it installs there,
+and has no command that removes the copies.
+`gem cleanup` does something else: it uninstalls old gem versions,
+which a project can still need, so Plonge does not run it.
+After a clear, `gem pristine` downloads a missing copy.
+`bundle cache` reports a missing gem file for a gem whose copy is gone;
+with `--all-platforms`, it can download the gem instead.
+The rule reaches only the Ruby that `gem` runs from your home directory;
+each Ruby version has its own gem directory.
 
 When your rule has the same `id` as a default, it replaces all of the default,
 so copy the default's `check` and `targets` to keep them.

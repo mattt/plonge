@@ -67,9 +67,13 @@ type Global struct {
 	// is relative to the home directory, where plonge runs the command.
 	// A rule can have PathLabel or PathZONField, not both.
 	PathZONField string `toml:"path_zon_field"`
-	Clean        string `toml:"clean"` // the command that cleans the cache
-	Kind         string `toml:"kind"`
-	OS           string `toml:"os"` // when set, the rule applies only on this GOOS
+	// PathSubdir is a relative path, such as "cache", that plonge joins
+	// to the path that the path command prints, for a tool that prints
+	// the directory above its cache, as "gem env gemdir" does.
+	PathSubdir string `toml:"path_subdir"`
+	Clean      string `toml:"clean"` // the command that cleans the cache
+	Kind       string `toml:"kind"`
+	OS         string `toml:"os"` // when set, the rule applies only on this GOOS
 
 	// DeleteContents makes plonge delete what is in Path, in place of Clean.
 	// It is for caches that have no cleanup command, and needs kind clear.
@@ -194,6 +198,9 @@ func (g Global) validate() error {
 		if !validZONField(g.PathZONField) {
 			return fmt.Errorf("global rule %q: path_zon_field %q is not a field name", g.ID, g.PathZONField)
 		}
+	}
+	if g.PathSubdir != "" && (g.fixedPath() || !validCacheName(g.PathSubdir)) {
+		return fmt.Errorf("global rule %q: path_subdir must be a relative path of directory names and needs a path command", g.ID)
 	}
 	if g.DeleteContents {
 		if err := g.validateDelete(); err != nil {

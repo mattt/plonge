@@ -159,3 +159,19 @@ path = "zig env"
 path_zon_field = "global_cache_dir"
 delete_contents = true
 kind = "clear"
+
+# RubyGems keeps a copy of each .gem file that it installs in the cache
+# directory of the gem directory, and has no command that removes the copies.
+# gem cleanup is a different action: it uninstalls old gem versions, which a
+# project's Gemfile.lock can still need, so plonge does not run it.
+# gem pristine downloads a missing copy again. bundle cache copies from this
+# directory and, without --all-platforms, fails for a gem whose copy is gone.
+# gem env gemdir prints the gem directory of one Ruby, the one that gem runs
+# from the home directory; other Ruby versions keep their own caches.
+[[global]]
+id = "rubygems-cache"
+tool = "gem"
+path = "gem env gemdir"
+path_subdir = "cache"
+delete_contents = true
+kind = "clear"

@@ -331,6 +331,28 @@ func TestGlobalDeleteContentsValidation(t *testing.T) {
 	}
 }
 
+func TestGlobalPathSubdirValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\nclean = \"t gc\"\nkind = \"prune\"\n"
+	cases := []struct {
+		extra string
+		ok    bool
+	}{
+		{"path = \"t env\"\npath_subdir = \"cache\"\n", true},
+		{"path = \"t env\"\npath_subdir = \"a/cache\"\n", true},
+		{"path = \"~/c\"\npath_subdir = \"cache\"\n", false},
+		{"path = \"t env\"\npath_subdir = \"/cache\"\n", false},
+		{"path = \"t env\"\npath_subdir = \"../cache\"\n", false},
+		{"path = \"t env\"\npath_subdir = \"cache/\"\n", false},
+		{"path = \"t env\"\npath_subdir = \".\"\n", false},
+	}
+	for _, c := range cases {
+		_, err := parse(base+c.extra, "test")
+		if (err == nil) != c.ok {
+			t.Errorf("%q: err = %v", c.extra, err)
+		}
+	}
+}
+
 func TestGlobalPathZONFieldValidation(t *testing.T) {
 	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\nclean = \"t gc\"\nkind = \"prune\"\n"
 	cases := []struct {
