@@ -425,15 +425,16 @@ Cargo has no stable command that prints the Cargo home.
 Cargo uses `CARGO_HOME` when it is set and not empty,
 and otherwise `.cargo` in the home directory
 ([source][cargo-home-env]).
-The rules follow the same order with `path_env = "CARGO_HOME"`.
+The rule follows the same order with `path_env = "CARGO_HOME"`.
 Cargo resolves a relative `CARGO_HOME` from its working directory,
-which Plonge cannot know for every command, so Plonge skips both rules
+which Plonge cannot know for every command, so Plonge skips the rule
 when `CARGO_HOME` is not an absolute path.
 Plonge reads `CARGO_HOME` from its own environment.
 If `CARGO_HOME` is set only in the environment that `mise exec` gives `cargo`,
 Plonge uses `~/.cargo`.
-Deletion keeps the `registry` and `git` folders,
-and their contents get the same checks as other `delete_contents` rules.
+Deletion keeps the `registry` folder itself,
+and its contents get the same checks as other `delete_contents` rules;
+the `git` folder is not touched.
 A Cargo build that runs at the same time can fail,
 because Cargo can read a file that Plonge then deletes.
 

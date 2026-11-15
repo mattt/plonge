@@ -481,6 +481,7 @@ func TestCargoRulesFollowCargoHome(t *testing.T) {
 			}
 			kept := []string{
 				filepath.Join(cargoHome, "git", "checkouts", "dep-1", "abc", "Cargo.toml"),
+				filepath.Join(cargoHome, "git", "db", "dep-1", "HEAD"),
 				filepath.Join(cargoHome, "bin", "cargo-tool"),
 				filepath.Join(cargoHome, "config.toml"),
 				filepath.Join(cargoHome, ".crates.toml"),
@@ -490,7 +491,6 @@ func TestCargoRulesFollowCargoHome(t *testing.T) {
 			}
 			addFile(t, filepath.Join(cargoHome, "registry", "cache", "index.crates.io-1", "serde-1.0.0.crate"))
 			addFile(t, filepath.Join(cargoHome, "registry", "src", "index.crates.io-1", "serde-1.0.0", "lib.rs"))
-			addFile(t, filepath.Join(cargoHome, "git", "db", "dep-1", "HEAD"))
 			ctx := context.Background()
 			entries := r.List(ctx, []rules.Global{defaultRule(t, "cargo-registry")})
 			for i, sub := range []string{"registry"} {
