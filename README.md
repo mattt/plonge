@@ -471,10 +471,10 @@ so the agent sees the warning and can offer to run the skill.
 Plonge has these default rules:
 
 ```toml
-names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
-         ".pytest_cache", ".ruff_cache", ".svelte-kit", ".turbo", ".venv",
-         "DerivedData", "__pycache__", "bin", "dist", "node_modules", "obj",
-         "target", "venv"]
+names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
+         ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
+         ".turbo", ".venv", "DerivedData", "__pycache__", "bin", "dist",
+         "node_modules", "obj", "target", "venv"]
 quiet_hours = 24
 
 # Do not scan inside these directories.

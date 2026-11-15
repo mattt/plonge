@@ -147,6 +147,24 @@ func TestDetect(t *testing.T) {
 			},
 		},
 		{
+			name: "Python test environments",
+			files: map[string]string{
+				".gitignore":               ".tox/\n.nox/\n",
+				"tox.ini":                  "",
+				".tox/py313/bin/python":    "",
+				".tox/.pkg/x":              "",
+				"noxfile.py":               "",
+				".nox/tests/bin/python":    "",
+				"sub/.nox/lint/bin/python": "", // nox has no fixed project file
+				".tox/py313/lib/.nox/x":    "", // inside a candidate
+			},
+			want: map[string]string{
+				".tox":     ".tox",
+				".nox":     ".nox",
+				"sub/.nox": ".nox",
+			},
+		},
+		{
 			name: "ignored by a parent directory rule",
 			files: map[string]string{
 				".gitignore":            "build/\n",
