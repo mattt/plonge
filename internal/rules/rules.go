@@ -271,7 +271,7 @@ func (g Global) validatePathKeys() error {
 		return fmt.Errorf("global rule %q: %s needs a path command", g.ID, keys[0])
 	case strings.ContainsAny(g.PathLabel, "\r\n"):
 		return fmt.Errorf("global rule %q: path_label must be one line", g.ID)
-	case g.PathZONField != "" && !validZONField(g.PathZONField):
+	case g.PathZONField != "" && !validIdentifier(g.PathZONField):
 		return fmt.Errorf("global rule %q: path_zon_field %q is not a field name", g.ID, g.PathZONField)
 	}
 	return nil
@@ -286,26 +286,12 @@ func (g Global) validateEnvAndSubdir() error {
 		return fmt.Errorf("global rule %q: path_subdir %q must be a relative path of directory names inside the path", g.ID, g.PathSubdir)
 	case g.PathEnv == "":
 		return nil
-	case !validEnvName(g.PathEnv):
+	case !validIdentifier(g.PathEnv):
 		return fmt.Errorf("global rule %q: path_env %q is not an environment variable name", g.ID, g.PathEnv)
 	case !g.fixedPath():
 		return fmt.Errorf("global rule %q: path_env needs a fixed path as its default", g.ID)
 	}
 	return nil
-}
-
-// validEnvName reports whether name is a portable environment variable name:
-// letters, digits, and underscores, not starting with a digit.
-func validEnvName(name string) bool {
-	for i, c := range name {
-		switch {
-		case c == '_', 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z':
-		case '0' <= c && c <= '9' && i > 0:
-		default:
-			return false
-		}
-	}
-	return name != ""
 }
 
 // validateDelete checks a rule whose contents plonge deletes.
@@ -379,9 +365,11 @@ func (g Global) validateCheckSpec(c CheckSpec) error {
 	return nil
 }
 
-// validZONField reports whether name is a plain Zig identifier,
-// the form that the ZON fields plonge reads are written in.
-func validZONField(name string) bool {
+// validIdentifier reports whether name is letters, digits, and underscores,
+// not starting with a digit. This is the form of a portable environment
+// variable name and of a plain Zig identifier, in which the ZON fields
+// that plonge reads are written.
+func validIdentifier(name string) bool {
 	for i, c := range name {
 		switch {
 		case c == '_', 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z':
