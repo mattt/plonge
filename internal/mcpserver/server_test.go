@@ -286,3 +286,39 @@ func TestDiskTool(t *testing.T) {
 		t.Errorf("out = %+v", out)
 	}
 }
+
+// TestScanToolKeepsProjectsInsideRootOutsideGit gives the folder above the
+// project a mise record. That folder is not a Git work tree,
+// so it must not hide the project inside it.
+func TestScanToolKeepsProjectsInsideRootOutsideGit(t *testing.T) {
+	home, project := env(t)
+	folder := filepath.Dir(project)
+	mkfile(t, filepath.Join(folder, "mise.toml"), "")
+	tracked := filepath.Join(home, "state", "mise", "tracked-configs")
+	if err := os.Symlink(filepath.Join(folder, "mise.toml"), filepath.Join(tracked, "folder")); err != nil {
+		t.Fatal(err)
+	}
+	s := connect(t)
+	var rep struct {
+		Caches       []struct{ Path string } `json:"caches"`
+		SkippedRoots []struct{ Path string } `json:"skipped_roots"`
+	}
+	if msg := call(t, s, "scan", map[string]any{}, &rep); msg != "" {
+		t.Fatal(msg)
+	}
+	if len(rep.Caches) != 1 || rep.Caches[0].Path != filepath.Join(project, "node_modules") {
+		t.Errorf("caches = %+v", rep.Caches)
+	}
+	if len(rep.SkippedRoots) != 1 || rep.SkippedRoots[0].Path != folder {
+		t.Errorf("skipped roots = %+v", rep.SkippedRoots)
+	}
+	var res struct {
+		Items []struct{ Path string } `json:"items"`
+	}
+	if msg := call(t, s, "clean", map[string]any{}, &res); msg != "" {
+		t.Fatal(msg)
+	}
+	if len(res.Items) != 1 || res.Items[0].Path != filepath.Join(project, "node_modules") {
+		t.Errorf("clean items = %+v", res.Items)
+	}
+}
