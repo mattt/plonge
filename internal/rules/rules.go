@@ -72,6 +72,9 @@ type Global struct {
 	Refuse string `toml:"refuse"`
 	// RefuseReason says in the report what the matches of Refuse mean.
 	RefuseReason string `toml:"refuse_reason"`
+	// Require is a regular expression. Unless a line of Check's output
+	// matches it, the rule is skipped.
+	Require string `toml:"require"`
 	// Targets is a command that prints, as JSON, what Clean would remove.
 	// The rule's size is then the size of those items, not of its whole path.
 	Targets string `toml:"targets"`
@@ -184,8 +187,8 @@ func (g Global) validateDelete() error {
 
 func (g Global) validateCheck() error {
 	if g.Check == "" {
-		if g.Refuse != "" || g.RefuseReason != "" || len(g.CheckEnv) > 0 {
-			return fmt.Errorf("global rule %q: refuse, refuse_reason, and check_env need check", g.ID)
+		if g.Refuse != "" || g.RefuseReason != "" || g.Require != "" || len(g.CheckEnv) > 0 {
+			return fmt.Errorf("global rule %q: refuse, refuse_reason, require, and check_env need check", g.ID)
 		}
 		return nil
 	}
@@ -197,6 +200,9 @@ func (g Global) validateCheck() error {
 	}
 	if _, err := regexp.Compile(g.Refuse); err != nil {
 		return fmt.Errorf("global rule %q: refuse: %w", g.ID, err)
+	}
+	if _, err := regexp.Compile(g.Require); err != nil {
+		return fmt.Errorf("global rule %q: require: %w", g.ID, err)
 	}
 	for _, kv := range g.CheckEnv {
 		if name, _, ok := strings.Cut(kv, "="); !ok || name == "" {

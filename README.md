@@ -335,6 +335,10 @@ and again right before `--apply` runs the rule.
 The rule is skipped when the check fails
 or a line of its standard output or standard error matches `refuse`,
 a regular expression.
+`require` is also a regular expression;
+when it is set, the rule is skipped unless a line of that output matches it.
+For example, `check = "yarn --version"` with `require = '^1\.'`
+limits a rule to Yarn 1.
 A skipped rule does not count toward the totals.
 
 A group named `path` in `refuse` limits matches to files that may still exist.
