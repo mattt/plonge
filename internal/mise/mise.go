@@ -78,7 +78,7 @@ func (e Env) isGlobal(file string) bool {
 
 // Projects is the result of reading mise's tracked configs.
 type Projects struct {
-	Roots       []string // project roots, sorted, with nested roots removed
+	Roots       []string // project roots, sorted, without duplicates
 	BrokenLinks int      // links whose target is missing or is not a regular file
 }
 
@@ -115,7 +115,7 @@ func ReadProjects(e Env) (Projects, error) {
 		}
 		roots = append(roots, ProjectRoot(target))
 	}
-	p.Roots = DropNested(roots)
+	p.Roots = DropNested(roots, nil)
 	return p, nil
 }
 
@@ -148,8 +148,11 @@ func ProjectRoot(file string) string {
 	return dir
 }
 
-// DropNested sorts and removes duplicate roots and roots inside another root.
-func DropNested(roots []string) []string {
+// DropNested sorts the roots and removes duplicates.
+// It also removes each root inside another root for which covers is true,
+// because a scan of that root includes it.
+// A nil covers removes only duplicates.
+func DropNested(roots []string, covers func(root string) bool) []string {
 	clean := make([]string, 0, len(roots))
 	for _, r := range roots {
 		clean = append(clean, filepath.Clean(r))
@@ -159,7 +162,7 @@ func DropNested(roots []string) []string {
 	for _, r := range clean {
 		nested := false
 		for _, o := range out {
-			if within(r, o) {
+			if r == o || covers != nil && within(r, o) && covers(o) {
 				nested = true
 				break
 			}
