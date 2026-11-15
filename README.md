@@ -156,6 +156,8 @@ but is not reported.
 Global caches are stored outside projects.
 Plonge uses cleanup commands from their tools,
 plus a built-in rule for Xcode build data on macOS.
+A rule for a cache without a cleanup command
+can delete the contents of its path instead.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -168,7 +170,8 @@ plonge clean --global --apply --include-clear
 `plonge clean --global` works only on global caches and leaves your projects alone.
 By default it lists the commands as a dry run.
 `--apply` runs eligible actions and estimates the space freed.
-Global cleanup does not use the project activity or Git checks.
+Global cleanup does not use the project activity or Git checks,
+except that a `delete_contents` rule refuses a path in a Git repository.
 It cannot be combined with `--root`, `--no-mise`, `--include-active`, or `--min-size`.
 Lookup and check commands run even during a scan or dry run.
 
@@ -298,6 +301,31 @@ to a list of `{"version": ..., "install_path": ...}` objects.
 `targets` must start with `tool`.
 Each object needs a nonempty `version` and an absolute `install_path`.
 The rule's size is then the total of those directories, not its whole `path`.
+
+A cache with no cleanup command can use `delete_contents` in place of `clean`:
+
+```toml
+[[global]]
+id = "mytool-cache"
+tool = "mytool"
+path = "~/.mytool/cache"
+delete_contents = true
+kind = "clear"
+```
+
+Plonge then deletes what is in `path` and keeps the directory itself.
+It makes read-only entries writable first and does not follow symlinks.
+The rule must have kind `clear`,
+so it runs only with `clean --global --include-clear --apply`.
+It cannot have `clean` or `targets`; it can have a `check`.
+The action reads `delete contents of <path> (built in)`.
+Plonge skips the rule, and reports why, when the path is not absolute;
+is `/`, the home directory, or a directory that contains the home directory;
+is a symlink or resolves through one to a different place;
+is in a Git work tree or Git directory, or Git cannot check it;
+or does not exist or is not a directory.
+It checks the path when it lists the rule and again right before it deletes.
+`tool` must still be available, and a `path` command must still start with it.
 
 When your rule has the same `id` as a default, it replaces all of the default,
 so copy the default's `check` and `targets` to keep them.

@@ -15,6 +15,11 @@ venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 # Global caches. Each command starts with the tool and runs without a shell.
 # prune uses the tool's policy to select unused or stale data.
 # clear can remove cached data still in use and requires --include-clear.
+# For a cache with no cleanup command, delete_contents = true replaces clean:
+# plonge deletes what is in path and keeps the directory. It needs kind clear,
+# and plonge refuses a path that is not absolute; is /, the home directory,
+# or contains it; is or resolves through a symlink; is in a Git repository;
+# or does not exist.
 
 # This fixed path assumes mise's default installs directory.
 # Override this rule in rules.toml if mise uses a different directory.
