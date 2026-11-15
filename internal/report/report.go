@@ -166,7 +166,7 @@ func WriteTable(w io.Writer, r Report, home string) error {
 	if len(r.Errors) > 0 {
 		fmt.Fprintf(w, "Git errors: %d (caches in those repositories are not listed)\n", len(r.Errors))
 	}
-	writeSkippedSources(w, r.ActivitySources)
+	writeSources(w, r.ActivitySources)
 	if r.Global != nil {
 		if err := writeGlobal(w, r.Global, home); err != nil {
 			return err
@@ -176,10 +176,16 @@ func WriteTable(w io.Writer, r Report, home string) error {
 	return err
 }
 
-func writeSkippedSources(w io.Writer, sources []scan.Source) {
+// writeSources reports the activity sources that were not used.
+// A failed source makes every project busy, so the line says how to proceed.
+func writeSources(w io.Writer, sources []scan.Source) {
 	for _, s := range sources {
-		if s.Status == scan.SourceSkipped {
+		switch s.Status {
+		case scan.SourceSkipped:
 			fmt.Fprintf(w, "Activity source skipped: %s (%s)\n", s.Name, s.Reason)
+		case scan.SourceFailed:
+			fmt.Fprintf(w, "Activity source failed: %s (%s)\n", s.Name, s.Reason)
+			fmt.Fprintf(w, "Every project counts as busy. Fix %s, or remove it from PATH for this run.\n", s.Name)
 		}
 	}
 }
@@ -300,7 +306,7 @@ func WriteClean(w io.Writer, r clean.Result, home string) error {
 	if r.Failed > 0 {
 		fmt.Fprintf(w, "Failed: %d\n", r.Failed)
 	}
-	writeSkippedSources(w, r.ActivitySources)
+	writeSources(w, r.ActivitySources)
 	var err error
 	if r.Applied {
 		_, err = fmt.Fprintf(w, "Estimated freed: %s\n", HumanBytes(r.FreedBytes))

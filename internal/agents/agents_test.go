@@ -90,34 +90,65 @@ EOF`)
 	if s := source(t, sources, SourcePaseo); s.Status != scan.SourceUsed {
 		t.Errorf("paseo source = %+v", s)
 	}
-	if !Busy(context.Background(), running) || Busy(context.Background(), idle) {
+	if Busy(context.Background(), running) == "" || Busy(context.Background(), idle) != "" {
 		t.Error("Busy disagrees with Apply")
 	}
 }
 
-func TestPaseoSkipped(t *testing.T) {
+func TestPaseoMissing(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	noPaseo(t)
+	root := t.TempDir()
+	roots := []scan.Root{{Path: root}}
+	s := source(t, Apply(context.Background(), roots, t.TempDir(), time.Now()), SourcePaseo)
+	if s.Status != scan.SourceSkipped || !strings.Contains(s.Reason, "not on PATH") {
+		t.Errorf("source = %+v", s)
+	}
+	if roots[0].Busy || Busy(context.Background(), root) != "" {
+		t.Error("a root is busy without paseo on PATH")
+	}
+}
+
+// TestPaseoFailed checks that every root is busy
+// when paseo is on PATH but its status cannot be read.
+func TestPaseoFailed(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	home := t.TempDir()
 	tests := []struct {
 		name   string
-		setup  func(t *testing.T)
+		script string
 		reason string
 	}{
-		{"missing", noPaseo, "not on PATH"},
-		{"fails", func(t *testing.T) { fakePaseo(t, `echo "no daemon" >&2; exit 1`) }, "no daemon"},
-		{"bad output", func(t *testing.T) { fakePaseo(t, `echo not json`) }, "cannot read"},
+		{"fails", `echo "no daemon" >&2; exit 1`, "no daemon"},
+		{"bad output", `echo not json`, "cannot read"},
+		// exec makes the timeout kill the sleep itself.
+		{"times out", `exec /bin/sleep 5`, "did not finish"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setup(t)
+			fakePaseo(t, tt.script)
+			saved := paseoTimeout
+			paseoTimeout = 200 * time.Millisecond
+			t.Cleanup(func() { paseoTimeout = saved })
+
+			old := time.Now().Add(-72 * time.Hour)
 			root := t.TempDir()
-			roots := []scan.Root{{Path: root}}
+			roots := []scan.Root{
+				{Path: root, LastActivity: old, ActivitySource: "git"},
+				{Path: t.TempDir(), Skipped: "not in a Git work tree"},
+			}
 			s := source(t, Apply(context.Background(), roots, home, time.Now()), SourcePaseo)
-			if s.Status != scan.SourceSkipped || !strings.Contains(s.Reason, tt.reason) {
+			if s.Status != scan.SourceFailed || !strings.Contains(s.Reason, tt.reason) {
 				t.Errorf("source = %+v", s)
 			}
-			if roots[0].Busy || Busy(context.Background(), root) {
-				t.Error("a root is busy without a source")
+			if !roots[0].Busy || !roots[0].LastActivity.Equal(old) || roots[0].ActivitySource != "git" {
+				t.Errorf("root = %+v", roots[0])
+			}
+			if roots[1].Busy {
+				t.Error("a skipped root is busy")
+			}
+			if got := Busy(context.Background(), root); !strings.Contains(got, "Paseo status unknown") || !strings.Contains(got, tt.reason) {
+				t.Errorf("Busy = %q", got)
 			}
 		})
 	}

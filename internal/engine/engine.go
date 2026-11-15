@@ -106,7 +106,7 @@ func Clean(ctx context.Context, opts CleanOptions) (clean.Result, Inventory, err
 		MinSize:       opts.MinSize,
 		QuietHours:    inv.Rules.QuietHours,
 		Now:           inv.Now,
-		StillBusy:     func(root string) bool { return agents.Busy(ctx, root) },
+		StillBusy:     func(root string) string { return agents.Busy(ctx, root) },
 	})
 	res.ActivitySources = inv.Sources
 	return res, inv, nil
