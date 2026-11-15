@@ -1,8 +1,8 @@
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
          ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "_build",
-         "bin", "build", "dist", "node_modules", "obj", "target", "venv",
-         "zig-cache"]
+         "bin", "build", "dist", "node_modules", "obj", "target", "tmp/cache",
+         "vendor/bundle", "venv", "zig-cache"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -10,6 +10,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
 # Match these names only when a listed project file is in the same directory.
 # A project file can be a pattern, such as "*.csproj".
+# For a path name, such as "vendor/bundle", the project file is beside
+# the first name in the path.
 # Zig 0.13 renamed the local cache from zig-cache to .zig-cache.
 # zig-out is left out: it is install output, not a cache, and can hold
 # programs and libraries that a user runs or links from.
@@ -20,6 +22,14 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # that plonge can check. Rebar3 also uses _build, but it puts dependency
 # sources in _build/<profile>/lib, so _build beside rebar.config is left out,
 # and a _build that holds dependency sources is refused.
+# Bundler installs gems in vendor/bundle beside the Gemfile (or gems.rb)
+# when path is vendor/bundle or deployment is set; bundle install restores them.
+# vendor/cache is left out: bundle cache puts gems there on purpose,
+# for installs without a network, and a gem from a source that is gone
+# cannot be downloaded again.
+# Rails keeps its default cache store in tmp/cache, as bootsnap does its cache,
+# and Rails finds its root by config.ru. The rest of tmp is left out: it holds
+# pid files, sockets, and in development the local secret key base.
 [beside]
 ".zig-cache" = ["build.zig"]
 _build = ["mix.exs"]
@@ -29,6 +39,8 @@ build = ["build.gradle", "build.gradle.kts", "pyproject.toml", "settings.gradle"
 dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
+"tmp/cache" = ["config.ru"]
+"vendor/bundle" = ["Gemfile", "gems.rb"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 zig-cache = ["build.zig"]
 
@@ -101,7 +113,8 @@ kind = "clear"
 # for 1 to 3 months, as cache.auto-clean-frequency sets. The cargo clean gc
 # command that cleans on request is unstable, so plonge deletes the contents
 # of registry in the Cargo home: $CARGO_HOME, or ~/.cargo when it is
-# not set. Cargo has no stable command that prints the Cargo home.
+# not set; path_subdir joins registry to either one.
+# Cargo has no stable command that prints the Cargo home.
 # registry holds the crate index, downloaded .crate files, and their sources,
 # which a later build downloads again.
 # git is left out: its checkouts are working trees, and an edit there is lost.
@@ -110,9 +123,9 @@ kind = "clear"
 [[global]]
 id = "cargo-registry"
 tool = "cargo"
-path = "~/.cargo/registry"
+path = "~/.cargo"
 path_env = "CARGO_HOME"
-path_env_subdir = "registry"
+path_subdir = "registry"
 delete_contents = true
 kind = "clear"
 
@@ -326,9 +339,9 @@ kind = "clear"
 [[global]]
 id = "gradle-caches"
 tool = "java"
-path = "~/.gradle/caches"
+path = "~/.gradle"
 path_env = "GRADLE_USER_HOME"
-path_env_subdir = "caches"
+path_subdir = "caches"
 delete_contents = true
 kind = "clear"
 
@@ -353,3 +366,19 @@ path = "~/.m2/repository"
 delete_contents = true
 kind = "clear"
 refuse_names = ["maven-metadata-local.xml"]
+
+# RubyGems keeps a copy of each .gem file that it installs in the cache
+# directory of the gem directory, and has no command that removes the copies.
+# gem cleanup is a different action: it uninstalls old gem versions, which a
+# project's Gemfile.lock can still need, so plonge does not run it.
+# gem pristine downloads a missing copy again. bundle cache copies from this
+# directory and, without --all-platforms, fails for a gem whose copy is gone.
+# gem env gemdir prints the gem directory of one Ruby, the one that gem runs
+# from the home directory; other Ruby versions keep their own caches.
+[[global]]
+id = "rubygems-cache"
+tool = "gem"
+path = "gem env gemdir"
+path_subdir = "cache"
+delete_contents = true
+kind = "clear"

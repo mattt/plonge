@@ -21,9 +21,12 @@ var defaultTOML string
 // Rules are the cache names, their marker files, and the quiet period.
 type Rules struct {
 	// Names are directory names that are caches.
+	// A name with "/", such as "vendor/bundle", is a path:
+	// it matches a directory whose path ends with those names.
 	Names []string
 	// Beside maps a name to project files; the name counts only
-	// when one of them is in the same parent directory.
+	// when one of them is in the directory that holds the name.
+	// For a path such as "vendor/bundle", that is the directory that holds vendor.
 	// A project file can be a pattern, such as "*.csproj"; see IsPattern.
 	Beside map[string][]string
 	// RefuseInside maps a name to paths relative to a matching directory.
@@ -61,11 +64,9 @@ type Global struct {
 	Tool string `toml:"tool"` // the command that must be available
 	Path string `toml:"path"` // a command that prints the path, or a fixed path
 	// PathEnv names an environment variable that holds a tool's directory,
-	// such as CARGO_HOME. When it is set and not empty, plonge uses its value,
-	// joined with PathEnvSubdir, in place of the fixed Path.
+	// such as CARGO_HOME. When it is set and not empty, plonge uses its value
+	// in place of the fixed Path.
 	PathEnv string `toml:"path_env"`
-	// PathEnvSubdir is a relative path inside the directory that PathEnv gives.
-	PathEnvSubdir string `toml:"path_env_subdir"`
 	// PathLabel, when set, selects the last line of the path command's output
 	// that contains the label followed by ": ", and takes the path after it.
 	PathLabel string `toml:"path_label"`
@@ -74,9 +75,14 @@ type Global struct {
 	// is relative to the home directory, where plonge runs the command.
 	// A rule can set only one of PathLabel, PathZONField, and PathField.
 	PathZONField string `toml:"path_zon_field"`
-	Clean        string `toml:"clean"` // the command that cleans the cache
-	Kind         string `toml:"kind"`
-	OS           string `toml:"os"` // when set, the rule applies only on this GOOS
+	// PathSubdir is a relative path, such as "cache", that plonge joins
+	// to the path it resolves from Path or PathEnv, for a tool whose cache
+	// is inside the directory that it prints or that a variable names,
+	// as with "gem env gemdir" and CARGO_HOME.
+	PathSubdir string `toml:"path_subdir"`
+	Clean      string `toml:"clean"` // the command that cleans the cache
+	Kind       string `toml:"kind"`
+	OS         string `toml:"os"` // when set, the rule applies only on this GOOS
 
 	// PathField names the string field that holds the path
 	// when the path command prints a JSON object.
@@ -129,6 +135,14 @@ func validName(n string) bool {
 	return n != "" && n != "." && n != ".." && !strings.ContainsRune(n, '/')
 }
 
+// validCacheName reports whether n is a directory name
+// or a relative path of directory names, such as "vendor/bundle".
+func validCacheName(n string) bool {
+	return !slices.ContainsFunc(strings.Split(n, "/"), func(part string) bool {
+		return !validName(part)
+	})
+}
+
 func parse(data, name string) (file, error) {
 	var f file
 	md, err := toml.Decode(data, &f)
@@ -143,11 +157,13 @@ func parse(data, name string) (file, error) {
 		return f, fmt.Errorf("%s: unknown keys: %s", name, strings.Join(keys, ", "))
 	}
 	for _, n := range f.Names {
-		if !validName(n) {
-			return f, fmt.Errorf("%s: invalid name %q", name, n)
-		}
-		if slices.Contains(versionControlDirs, n) {
+		if slices.ContainsFunc(strings.Split(n, "/"), func(part string) bool {
+			return slices.Contains(versionControlDirs, part)
+		}) {
 			return f, fmt.Errorf("%s: %q holds version control data and cannot be a cache", name, n)
+		}
+		if !validCacheName(n) {
+			return f, fmt.Errorf("%s: invalid name %q", name, n)
 		}
 	}
 	for n, markers := range f.Beside {
@@ -204,7 +220,7 @@ func (g Global) validate() error {
 	if err := g.validatePathKeys(); err != nil {
 		return err
 	}
-	if err := g.validatePathEnv(); err != nil {
+	if err := g.validateEnvAndSubdir(); err != nil {
 		return err
 	}
 	if len(g.RefuseNames) > 0 && !g.DeleteContents {
@@ -261,21 +277,19 @@ func (g Global) validatePathKeys() error {
 	return nil
 }
 
-// validatePathEnv checks path_env and path_env_subdir.
+// validateEnvAndSubdir checks path_env and path_subdir.
 // The variable replaces a fixed path, which stays as the default,
-// and the subdirectory must stay inside the directory that the variable gives.
-func (g Global) validatePathEnv() error {
+// and the subdirectory must stay inside the path that the rule resolves.
+func (g Global) validateEnvAndSubdir() error {
 	switch {
-	case g.PathEnv == "" && g.PathEnvSubdir != "":
-		return fmt.Errorf("global rule %q: path_env_subdir needs path_env", g.ID)
+	case g.PathSubdir != "" && !validCacheName(g.PathSubdir):
+		return fmt.Errorf("global rule %q: path_subdir %q must be a relative path of directory names inside the path", g.ID, g.PathSubdir)
 	case g.PathEnv == "":
 		return nil
 	case !validEnvName(g.PathEnv):
 		return fmt.Errorf("global rule %q: path_env %q is not an environment variable name", g.ID, g.PathEnv)
 	case !g.fixedPath():
 		return fmt.Errorf("global rule %q: path_env needs a fixed path as its default", g.ID)
-	case g.PathEnvSubdir != "" && (!filepath.IsLocal(g.PathEnvSubdir) || filepath.Clean(g.PathEnvSubdir) == "."):
-		return fmt.Errorf("global rule %q: path_env_subdir %q must be a relative path inside the directory", g.ID, g.PathEnvSubdir)
 	}
 	return nil
 }
@@ -498,22 +512,43 @@ func IsPattern(marker string) bool {
 	return strings.ContainsAny(marker, `*?[\`)
 }
 
-// Match returns the rule that a directory named name matches,
-// given a function that says whether its parent directory holds an entry
-// with a listed project file name, or one that matches a pattern.
-// The result is empty when nothing matches.
-func (r Rules) Match(name string, siblings func(string) bool) string {
-	if !slices.Contains(r.Names, name) {
-		return ""
-	}
-	markers, ok := r.Beside[name]
-	if !ok {
-		return name
-	}
-	for _, m := range markers {
-		if siblings(m) {
-			return name + " beside " + m
+// Match returns the rule that a directory matches.
+// rel is the directory's path below the scan root, with "/" between names.
+// A name matches when it is the last name in rel;
+// a path name, such as "vendor/bundle", matches the last names in rel.
+// has says whether a directory, given by its path below the root
+// ("" for the root), holds an entry with a listed project file name,
+// or one that matches a pattern. For a beside rule, that directory is
+// the one that holds the name: the parent of rel, or for "vendor/bundle",
+// the parent of vendor.
+// Match returns the matched entry of Names, such as "vendor/bundle",
+// which is the key for Beside and RefuseInside,
+// and the rule's display text, such as "vendor/bundle beside Gemfile".
+// Both are empty when nothing matches.
+func (r Rules) Match(rel string, has func(dir, marker string) bool) (key, rule string) {
+	for _, n := range r.Names {
+		dir, ok := holder(rel, n)
+		if !ok {
+			continue
+		}
+		markers, ok := r.Beside[n]
+		if !ok {
+			return n, n
+		}
+		for _, m := range markers {
+			if has(dir, m) {
+				return n, n + " beside " + m
+			}
 		}
 	}
-	return ""
+	return "", ""
+}
+
+// holder returns the part of rel before name, when rel ends with name.
+func holder(rel, name string) (string, bool) {
+	if rel == name {
+		return "", true
+	}
+	dir, ok := strings.CutSuffix(rel, "/"+name)
+	return dir, ok && dir != ""
 }

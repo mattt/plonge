@@ -335,6 +335,9 @@ esac`, packages, http))
 	if e := got["zig-global-cache"]; e.Skipped != "tool not found" || e.Kind != "clear" {
 		t.Errorf("zig-global-cache = %+v", e)
 	}
+	if e := got["rubygems-cache"]; e.Skipped != "tool not found" || e.Kind != "clear" {
+		t.Errorf("rubygems-cache = %+v", e)
+	}
 }
 
 // TestDefaultZigRule resolves the Zig global cache through a fake zig env
@@ -372,6 +375,65 @@ func TestDefaultZigRule(t *testing.T) {
 	data, err := os.ReadFile(log)
 	if err != nil || strings.TrimSpace(string(data)) != "env" {
 		t.Errorf("zig calls = %q, err = %v", data, err)
+	}
+}
+
+// TestDefaultRubyGemsRule finds RubyGems' cache below the gem directory
+// that a fake gem env gemdir prints, and deletes only its contents.
+func TestDefaultRubyGemsRule(t *testing.T) {
+	r, tmp, _, _ := deleteSetup(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	gemdir := filepath.Join(tmp, "gems", "4.0.0")
+	cache := filepath.Join(gemdir, "cache")
+	installed := filepath.Join(gemdir, "gems", "rack-3.1.0", "lib", "rack.rb")
+	addFile(t, filepath.Join(cache, "rack-3.1.0.gem"))
+	addFile(t, installed)
+	log := filepath.Join(tmp, "gem.log")
+	addTool(t, bin, "gem", fmt.Sprintf(`echo "$*" >> %q; [ "$*" = "env gemdir" ] && echo %q`, log, gemdir))
+	var rule rules.Global
+	for _, g := range rules.Default().Global {
+		if g.ID == "rubygems-cache" {
+			rule = g
+		}
+	}
+	ctx := context.Background()
+	entries := r.List(ctx, []rules.Global{rule})
+	e := entries[0]
+	if e.Skipped != "" || e.Path != cache || e.Kind != "clear" ||
+		e.Command != "delete contents of "+cache+" (built in)" {
+		t.Fatalf("entry = %+v", e)
+	}
+	if res := r.Clean(ctx, entries, Options{Apply: true}); res.Outcomes[0].Status == Ran {
+		t.Errorf("ran without --include-clear: %+v", res.Outcomes[0])
+	}
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	if o := res.Outcomes[0]; o.Status != Ran {
+		t.Errorf("outcome = %+v", o)
+	}
+	if ents, err := os.ReadDir(cache); err != nil || len(ents) != 0 {
+		t.Errorf("cache entries = %v, err = %v", ents, err)
+	}
+	if _, err := os.Stat(installed); err != nil {
+		t.Errorf("installed gem: %v", err)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil || strings.TrimSpace(string(data)) != "env gemdir" {
+		t.Errorf("gem calls = %q, err = %v", data, err)
+	}
+}
+
+// TestPathSubdirMissing skips a delete_contents rule
+// when the directory below the printed path does not exist.
+func TestPathSubdirMissing(t *testing.T) {
+	r, tmp, _, _ := deleteSetup(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	gemdir := filepath.Join(tmp, "gems")
+	addFile(t, filepath.Join(gemdir, "gems", "x"))
+	addTool(t, bin, "gem", fmt.Sprintf(`echo %q`, gemdir))
+	rule := rules.Global{ID: "g", Tool: "gem", Path: "gem env gemdir", PathSubdir: "cache", DeleteContents: true, Kind: rules.KindClear}
+	e := r.List(context.Background(), []rules.Global{rule})[0]
+	if e.Skipped == "" || e.Path != filepath.Join(gemdir, "cache") {
+		t.Errorf("entry = %+v", e)
 	}
 }
 
@@ -767,8 +829,8 @@ func TestPathEnvMustBeAbsolute(t *testing.T) {
 	addTool(t, bin, "mytool", "exit 9")
 	t.Setenv("MYTOOL_HOME", "relative/home")
 	r := runner(t)
-	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool/cache", PathEnv: "MYTOOL_HOME",
-		PathEnvSubdir: "cache", Kind: rules.KindClear, DeleteContents: true}
+	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool", PathEnv: "MYTOOL_HOME",
+		PathSubdir: "cache", Kind: rules.KindClear, DeleteContents: true}
 	entries := r.List(context.Background(), []rules.Global{rule})
 	e := entries[0]
 	if e.Skipped != `MYTOOL_HOME is "relative/home", which is not an absolute path` || e.Command != "" {
@@ -781,13 +843,13 @@ func TestPathEnvMustBeAbsolute(t *testing.T) {
 }
 
 // TestPathEnvReplacesFixedPath uses the variable when it is set and not empty,
-// and the fixed path otherwise.
+// and the fixed path otherwise, and joins path_subdir to either one.
 func TestPathEnvReplacesFixedPath(t *testing.T) {
 	bin := fakeTools(t)
 	addTool(t, bin, "mytool", "exit 9")
 	r := runner(t)
-	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool/cache", PathEnv: "MYTOOL_HOME",
-		PathEnvSubdir: "cache", Clean: "mytool gc", Kind: rules.KindClear}
+	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool", PathEnv: "MYTOOL_HOME",
+		PathSubdir: "cache", Clean: "mytool gc", Kind: rules.KindClear}
 	dir := t.TempDir()
 	for value, want := range map[string]string{
 		"":  filepath.Join(r.Home, ".mytool", "cache"),

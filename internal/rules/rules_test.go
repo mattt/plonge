@@ -11,7 +11,7 @@ import (
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 25 || r.QuietHours != 24 {
+	if len(r.Names) != 27 || r.QuietHours != 24 {
 		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
@@ -70,7 +70,12 @@ func TestLoad(t *testing.T) {
 		},
 		{name: "quiet hours", body: "quiet_hours = 72", wantQuiet: 72},
 		{name: "unknown key", body: "nmaes = [\"x\"]", wantErr: true},
-		{name: "name with slash", body: `names = ["a/b"]`, wantErr: true},
+		{name: "path name", body: `names = ["out/gen"]`, wantNames: []string{"out/gen"}, wantQuiet: 24},
+		{name: "absolute path name", body: `names = ["/a"]`, wantErr: true},
+		{name: "path name with trailing slash", body: `names = ["a/"]`, wantErr: true},
+		{name: "path name with empty part", body: `names = ["a//b"]`, wantErr: true},
+		{name: "path name with dot dot", body: `names = ["a/../b"]`, wantErr: true},
+		{name: "path name with dot", body: `names = ["./a"]`, wantErr: true},
 		{name: "negative quiet hours", body: "quiet_hours = -1", wantErr: true},
 		{name: "bad toml", body: "names = [", wantErr: true},
 	}
@@ -160,11 +165,54 @@ func TestMatch(t *testing.T) {
 		{"build", []string{"build.gradle.dcl", "gradle.properties"}, ""},
 		{"build", []string{"pyproject.toml"}, "build beside pyproject.toml"},
 		{"build", []string{"setup.py"}, "build beside setup.py"},
+		{"vendor/bundle", []string{"Gemfile"}, "vendor/bundle beside Gemfile"},
+		{"vendor/bundle", []string{"gems.rb"}, "vendor/bundle beside gems.rb"},
+		{"vendor/bundle", nil, ""},
+		{"vendor/bundle", []string{"go.mod"}, ""},
+		{"bundle", []string{"Gemfile"}, ""},
+		{"vendor", []string{"Gemfile"}, ""},
+		{"vendor/cache", []string{"Gemfile"}, ""},
+		{"tmp/cache", []string{"config.ru"}, "tmp/cache beside config.ru"},
+		{"tmp/cache", []string{"Gemfile"}, ""},
+		{"cache", []string{"config.ru"}, ""},
+		{"tmp", []string{"config.ru"}, ""},
+		{"tmp/pids", []string{"config.ru"}, ""},
 	}
 	for _, tt := range tests {
-		got := r.Match(tt.name, func(m string) bool { return slices.Contains(tt.siblings, m) })
-		if got != tt.want {
-			t.Errorf("Match(%q, %q) = %q, want %q", tt.name, tt.siblings, got, tt.want)
+		// The parent of a one-name path is the root.
+		key, got := r.Match(tt.name, func(dir, m string) bool { return dir == "" && slices.Contains(tt.siblings, m) })
+		if wantKey, _, _ := strings.Cut(tt.want, " beside "); got != tt.want || key != wantKey {
+			t.Errorf("Match(%q, %q) = %q, %q; want %q", tt.name, tt.siblings, key, got, tt.want)
+		}
+	}
+}
+
+func TestMatchPathName(t *testing.T) {
+	r, err := Load(writeRules(t, "names = [\"out/gen\", \"tmp/x\"]\n[beside]\n\"out/gen\" = [\"x.proj\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		rel  string
+		dir  string // the directory that holds the project file
+		want string
+	}{
+		{"out/gen", "", "out/gen beside x.proj"},
+		{"app/out/gen", "app", "out/gen beside x.proj"},
+		{"a/b/out/gen", "a/b", "out/gen beside x.proj"},
+		{"app/out/gen", "app/out", ""}, // the project file is beside gen, not beside out
+		{"gen", "", ""},
+		{"app/gen", "app", ""},
+		{"app/myout/gen", "app", ""},
+		{"out", "", ""},
+		{"tmp/x", "", "tmp/x"},
+		{"a/tmp/x", "", "tmp/x"},
+		{"tmp/x/y", "", ""},
+	}
+	for _, tt := range tests {
+		key, got := r.Match(tt.rel, func(dir, m string) bool { return dir == tt.dir && m == "x.proj" })
+		if wantKey, _, _ := strings.Cut(tt.want, " beside "); got != tt.want || key != wantKey {
+			t.Errorf("Match(%q) with x.proj in %q = %q, %q; want %q", tt.rel, tt.dir, key, got, tt.want)
 		}
 	}
 }
@@ -238,7 +286,7 @@ func TestSkip(t *testing.T) {
 	if !slices.Equal(r.Skip, want) {
 		t.Errorf("merged skip = %q, want %q", r.Skip, want)
 	}
-	for _, body := range []string{`skip = ["a/b"]`, `skip = [""]`, `names = [".git"]`, `names = [".jj"]`} {
+	for _, body := range []string{`skip = ["a/b"]`, `skip = [""]`, `names = [".git"]`, `names = [".jj"]`, `names = ["a/.git"]`, `names = [".svn/x"]`} {
 		if _, err := Load(writeRules(t, body)); err == nil {
 			t.Errorf("Load(%s) gave no error", body)
 		}
@@ -330,6 +378,28 @@ func TestGlobalDeleteContentsValidation(t *testing.T) {
 	labeled := "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t where\"\npath_label = \"cache\"\ndelete_contents = true\nkind = \"clear\"\n"
 	if f, err := parse(labeled, "test"); err != nil || f.Global[0].PathLabel != "cache" {
 		t.Errorf("path_label with delete_contents: %+v, %v", f.Global, err)
+	}
+}
+
+func TestGlobalPathSubdirValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\nclean = \"t gc\"\nkind = \"prune\"\n"
+	cases := []struct {
+		extra string
+		ok    bool
+	}{
+		{"path = \"t env\"\npath_subdir = \"cache\"\n", true},
+		{"path = \"t env\"\npath_subdir = \"a/cache\"\n", true},
+		{"path = \"~/c\"\npath_subdir = \"cache\"\n", true},
+		{"path = \"t env\"\npath_subdir = \"/cache\"\n", false},
+		{"path = \"t env\"\npath_subdir = \"../cache\"\n", false},
+		{"path = \"t env\"\npath_subdir = \"cache/\"\n", false},
+		{"path = \"t env\"\npath_subdir = \".\"\n", false},
+	}
+	for _, c := range cases {
+		_, err := parse(base+c.extra, "test")
+		if (err == nil) != c.ok {
+			t.Errorf("%q: err = %v", c.extra, err)
+		}
 	}
 }
 
@@ -443,16 +513,16 @@ func TestGlobalPathEnvValidation(t *testing.T) {
 	cases := []struct {
 		extra, want string
 	}{
-		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c\"\n", ""},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_subdir = \"c\"\n", ""},
 		{"path = \"/t/c\"\npath_env = \"T_HOME\"\n", ""},
-		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c/d\"\n", ""},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_subdir = \"c/d\"\n", ""},
 		{"path = \"t where\"\npath_env = \"T_HOME\"\n", "path_env needs a fixed path"},
-		{"path = \"~/.t/c\"\npath_env_subdir = \"c\"\n", "path_env_subdir needs path_env"},
+		{"path = \"~/.t\"\npath_subdir = \"c\"\n", ""},
 		{"path = \"~/.t/c\"\npath_env = \"T-HOME\"\n", "is not an environment variable name"},
 		{"path = \"~/.t/c\"\npath_env = \"1HOME\"\n", "is not an environment variable name"},
-		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"../c\"\n", "must be a relative path inside"},
-		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"/c\"\n", "must be a relative path inside"},
-		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c/..\"\n", "must be a relative path inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_subdir = \"../c\"\n", "must be a relative path of directory names inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_subdir = \"/c\"\n", "must be a relative path of directory names inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_subdir = \"c/..\"\n", "must be a relative path of directory names inside"},
 	}
 	for _, c := range cases {
 		_, err := parse(base+c.extra, "test")
@@ -482,7 +552,7 @@ func TestCargoRulesKeepCargoHomeState(t *testing.T) {
 			continue
 		}
 		delete(want, g.ID)
-		if g.PathEnv != "CARGO_HOME" || g.PathEnvSubdir != sub || g.Path != "~/.cargo/"+sub ||
+		if g.PathEnv != "CARGO_HOME" || g.PathSubdir != sub || g.Path != "~/.cargo" ||
 			!g.DeleteContents || g.Kind != KindClear || g.Tool != "cargo" {
 			t.Errorf("%s = %+v", g.ID, g)
 		}
