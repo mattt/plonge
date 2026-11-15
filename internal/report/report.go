@@ -231,13 +231,14 @@ func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
 			continue
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-			e.ID, HumanBytes(e.Bytes), e.Kind, Tilde(e.Path, home), e.Command)
+			e.ID, globalSize(e), e.Kind, Tilde(e.Path, home), e.Command)
 		total += e.Bytes
 		n++
 	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
+	writeWholeCacheNote(w, entries)
 	for _, e := range entries {
 		if e.Skipped != "" {
 			fmt.Fprintf(w, "Skipped %s: %s\n", e.ID, e.Skipped)
@@ -249,6 +250,30 @@ func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
 	return err
 }
 
+// wholeCacheLabel follows the size of a prune rule's whole cache.
+const wholeCacheLabel = " (whole cache)"
+
+// globalSize formats a rule's size and labels the size of a prune rule's
+// whole cache, because the rule's tool removes only part of it.
+func globalSize(e global.Entry) string {
+	if e.WholeCache {
+		return HumanBytes(e.Bytes) + wholeCacheLabel
+	}
+	return HumanBytes(e.Bytes)
+}
+
+// writeWholeCacheNote explains the label of globalSize
+// when one of the entries has it.
+func writeWholeCacheNote(w io.Writer, entries []global.Entry) {
+	for _, e := range entries {
+		if e.WholeCache && e.Skipped == "" {
+			fmt.Fprintln(w, "A size marked (whole cache) is the size of a prune rule's cache.")
+			fmt.Fprintln(w, "The tool removes only the part that its policy selects, which can be much less.")
+			return
+		}
+	}
+}
+
 // WriteGlobalClean prints the outcome of a global clean and ends with the space freed.
 func WriteGlobalClean(w io.Writer, r global.Result, home string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -258,11 +283,16 @@ func WriteGlobalClean(w io.Writer, r global.Result, home string) error {
 		if o.Reason != "" {
 			status += ": " + o.Reason
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", o.ID, HumanBytes(o.Bytes), o.Kind, o.Command, status)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", o.ID, globalSize(o.Entry), o.Kind, o.Command, status)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
+	entries := make([]global.Entry, len(r.Outcomes))
+	for i, o := range r.Outcomes {
+		entries[i] = o.Entry
+	}
+	writeWholeCacheNote(w, entries)
 	for _, o := range r.Outcomes {
 		if len(o.Refused) > 0 {
 			fmt.Fprintf(w, "Skipped %s: %s\n", o.ID, o.Reason)

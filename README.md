@@ -272,6 +272,16 @@ and requires `--include-clear`.
 Later commands may need to download dependencies or rebuild files.
 Neither kind guarantees that the whole reported size will be freed.
 
+For most prune rules, the size is the size of the whole cache,
+and the tool's policy selects which part of it to remove,
+so the space that a prune frees can be much smaller.
+`scan --global` and `clean --global` mark such a size `(whole cache)`,
+and with `--json`, the rule has `"whole_cache": true`.
+A prune rule that lists what it removes, as `mise-tools` does,
+and `xcode-derived-data` report the size of what they would remove instead,
+without the mark.
+A clear rule's size is the size of its cache, without the mark.
+
 | ID | Kind | Action |
 | --- | --- | --- |
 | `mise-tools` | prune | `mise prune --tools --yes` |

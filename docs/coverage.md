@@ -297,6 +297,8 @@ For every row:
   If `paseo` is on PATH but fails, every project is busy.
 - `clean --global` shows global cleanup actions instead of project caches.
   Add `--apply` to run eligible prune actions.
+  A prune rule's size marked `(whole cache)` is the size of its whole cache,
+  of which the tool's policy removes only part.
   It does not use project activity or Git checks,
   except that a `delete_contents` rule refuses a path
   that is in or holds a Git repository.

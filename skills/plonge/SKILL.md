@@ -50,6 +50,8 @@ but MCP does not support `--root` or `--no-mise`.
 5. Get the user's approval of the dry run before `--apply`.
    State the selected paths or actions and the estimated space to recover.
    Do not promise that the whole reported size will become free space.
+   A size marked `(whole cache)` is a prune rule's whole cache;
+   say that the tool removes only part of it.
    Keep the approved selection options when you apply the cleanup.
 
    ```console

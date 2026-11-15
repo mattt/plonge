@@ -192,3 +192,53 @@ func TestWriteGlobalRefusedAndTargets(t *testing.T) {
 		}
 	}
 }
+
+func TestWholeCacheLabel(t *testing.T) {
+	entries := []global.Entry{
+		{ID: "uv", Kind: "prune", Bytes: 3 << 30, Command: "uv cache prune", WholeCache: true},
+		{ID: "pip", Kind: "clear", Bytes: 1 << 30, Command: "pip cache purge"},
+	}
+	var buf bytes.Buffer
+	if err := writeGlobal(&buf, entries, "/home"); err != nil {
+		t.Fatal(err)
+	}
+	scanOut := buf.String()
+	buf.Reset()
+	res := global.Result{Outcomes: []global.Outcome{
+		{Entry: entries[0], Status: global.WouldRun},
+		{Entry: entries[1], Status: global.WouldRun},
+	}}
+	if err := WriteGlobalClean(&buf, res, "/home"); err != nil {
+		t.Fatal(err)
+	}
+	for name, out := range map[string]string{"scan": scanOut, "clean": buf.String()} {
+		if !strings.Contains(out, "3.0 GiB (whole cache)") || strings.Contains(out, "1.0 GiB (whole cache)") {
+			t.Errorf("%s: sizes are not labeled by kind:\n%s", name, out)
+		}
+		if !strings.Contains(out, "A size marked (whole cache)") {
+			t.Errorf("%s: no note explains the label:\n%s", name, out)
+		}
+	}
+
+	buf.Reset()
+	if err := writeGlobal(&buf, entries[1:], "/home"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "whole cache") {
+		t.Errorf("a clear rule alone gets the note:\n%s", buf.String())
+	}
+
+	buf.Reset()
+	if err := WriteJSON(&buf, res); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Outcomes []map[string]any `json:"outcomes"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Outcomes[0]["whole_cache"] != true || got.Outcomes[1]["whole_cache"] != nil {
+		t.Errorf("JSON outcomes = %v", got.Outcomes)
+	}
+}
