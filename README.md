@@ -240,6 +240,8 @@ Neither kind guarantees that the whole reported size will be freed.
 | `yarn` | clear | `yarn cache clean` (Yarn 1) |
 | `pip` | clear | `pip cache purge` |
 | `homebrew` | clear | `brew cleanup --prune=all` |
+| `nuget-packages` | clear | `dotnet nuget locals global-packages --clear` |
+| `nuget-http-cache` | clear | `dotnet nuget locals http-cache --clear` |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
 
 Plonge runs a tool through `mise exec --`
@@ -304,6 +306,15 @@ os = "darwin"
 `tool` is the command that must be available.
 `path` is a command that prints the cache's path,
 or a fixed path that starts with `/` or `~/`.
+Plonge uses the last line that the command prints.
+If the tool prints a label before the path, set `path_label`:
+with `path_label = "global-packages"`, Plonge uses the text after
+`global-packages: ` on the last line that contains it,
+so a line such as `info : global-packages: /path/` gives `/path/`.
+Plonge skips the rule when no line has the label,
+or when two lines with the label give different paths.
+A `delete_contents` rule can also use `path_label`;
+the labeled path gets the same checks as any other path.
 Both `path` and `clean` commands must start with `tool`.
 Command strings are split at whitespace.
 Shell quoting, pipes, and variable expansion are not supported.
@@ -462,15 +473,19 @@ Plonge has these default rules:
 ```toml
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
          ".pytest_cache", ".ruff_cache", ".svelte-kit", ".turbo", ".venv",
-         "DerivedData", "__pycache__", "dist", "node_modules", "target", "venv"]
+         "DerivedData", "__pycache__", "bin", "dist", "node_modules", "obj",
+         "target", "venv"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
 skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
 # Match these names only when a listed project file is in the same directory.
+# A project file can be a pattern, such as "*.csproj".
 [beside]
+bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 dist = ["package.json"]
+obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 ```
@@ -491,6 +506,11 @@ skip = ["third_party"]
 build = ["build.gradle", "build.gradle.kts"]
 dist = ["package.json", "pyproject.toml"]
 ```
+
+A `beside` project file can be a pattern, such as `*.csproj`,
+in the syntax of Go's [`filepath.Match`](https://pkg.go.dev/path/filepath#Match).
+A name that contains `*`, `?`, `[`, or `\` is a pattern;
+a pattern matches any entry in the same directory, as a literal name does.
 
 The scan never enters a directory in `skip`.
 This keeps out caches that are nested in a tool's own cache,

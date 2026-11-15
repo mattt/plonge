@@ -1,14 +1,18 @@
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
          ".pytest_cache", ".ruff_cache", ".svelte-kit", ".turbo", ".venv",
-         "DerivedData", "__pycache__", "dist", "node_modules", "target", "venv"]
+         "DerivedData", "__pycache__", "bin", "dist", "node_modules", "obj",
+         "target", "venv"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
 skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
 # Match these names only when a listed project file is in the same directory.
+# A project file can be a pattern, such as "*.csproj".
 [beside]
+bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 dist = ["package.json"]
+obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 
@@ -102,4 +106,24 @@ id = "homebrew"
 tool = "brew"
 path = "brew --cache"
 clean = "brew cleanup --prune=all"
+kind = "clear"
+
+# NuGet prints "global-packages: <path>"; the examples in Microsoft's
+# documentation also show "info : " before it, so path_label selects the path.
+# Clearing removes every package, including ones that projects use;
+# dotnet restore downloads them again.
+[[global]]
+id = "nuget-packages"
+tool = "dotnet"
+path = "dotnet nuget locals global-packages --list"
+path_label = "global-packages"
+clean = "dotnet nuget locals global-packages --clear"
+kind = "clear"
+
+[[global]]
+id = "nuget-http-cache"
+tool = "dotnet"
+path = "dotnet nuget locals http-cache --list"
+path_label = "http-cache"
+clean = "dotnet nuget locals http-cache --clear"
 kind = "clear"

@@ -124,6 +124,29 @@ func TestDetect(t *testing.T) {
 			},
 		},
 		{
+			name: ".NET project output",
+			files: map[string]string{
+				".gitignore":              "bin/\nobj/\n",
+				"App/App.csproj":          "",
+				"App/bin/Debug/App.dll":   "",
+				"App/obj/project.assets":  "",
+				"Lib/Lib.fsproj":          "",
+				"Lib/obj/x":               "",
+				"Vb/Vb.vbproj":            "",
+				"Vb/bin/x":                "",
+				"tools/bin/run.sh":        "", // no project file
+				"App.sln":                 "",
+				"bin/x":                   "", // beside a solution only
+				"App/bin/Debug/sub/obj/x": "", // inside a candidate
+			},
+			want: map[string]string{
+				"App/bin": "bin beside *.csproj",
+				"App/obj": "obj beside *.csproj",
+				"Lib/obj": "obj beside *.fsproj",
+				"Vb/bin":  "bin beside *.vbproj",
+			},
+		},
+		{
 			name: "ignored by a parent directory rule",
 			files: map[string]string{
 				".gitignore":            "build/\n",
@@ -144,6 +167,36 @@ func TestDetect(t *testing.T) {
 				t.Errorf("found %v, want %v", f, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectBesidePattern(t *testing.T) {
+	isolateGit(t)
+	r := rules.Default()
+	r.Names = append(r.Names, "out")
+	r.Beside["out"] = []string{"*.proj"}
+	root := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{
+		".gitignore":      "out/\n",
+		"app/App.proj":    "",
+		"app/out/x":       "",
+		"lib/proj":        "", // does not match *.proj
+		"lib/out/x":       "",
+		"dir/sub.proj/x":  "", // a directory also matches, as a literal name does
+		"dir/out/x":       "",
+		"none/out/x":      "",
+		"none/x.proj.bak": "",
+	})
+	got := Detect(context.Background(), root, r)
+	if got.Skipped != "" || len(got.Errors) > 0 {
+		t.Fatalf("skipped %q, errors %q", got.Skipped, got.Errors)
+	}
+	want := map[string]string{
+		"app/out": "out beside *.proj",
+		"dir/out": "out beside *.proj",
+	}
+	if f := found(got); !mapsEqual(f, want) {
+		t.Errorf("found %v, want %v", f, want)
 	}
 }
 
