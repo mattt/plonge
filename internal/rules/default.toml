@@ -16,8 +16,9 @@ venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 # prune uses the tool's policy to select unused or stale data.
 # clear can remove cached data still in use and requires --include-clear.
 
-# This fixed path assumes mise's default installs directory.
-# Override this rule in rules.toml if mise uses a different directory.
+# Plonge measures the installs directory that mise uses:
+# $MISE_INSTALLS_DIR, or installs in the data directory from "mise doctor --json".
+# This path is used only when mise cannot report that directory.
 # A tracked config that mise cannot load does not protect its tool versions,
 # so a prune can remove a version that a project needs.
 # mise prints the load warnings only at the info log level or lower,
