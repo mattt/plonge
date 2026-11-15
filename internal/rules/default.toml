@@ -13,13 +13,14 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # Zig 0.13 renamed the local cache from zig-cache to .zig-cache.
 # zig-out is left out: it is install output, not a cache, and can hold
 # programs and libraries that a user runs or links from.
-# Mix and Rebar3 put build output in _build. Rebar3 also puts the sources of
-# dependencies there, so an edit to one is lost; Rebar3 has _checkouts for
-# that. Mix keeps dependency sources in deps, which is left out because
-# an edited Hex package there has no Git data that plonge can check.
+# Mix puts build output in _build. Mix keeps dependency sources in deps,
+# which is left out because an edited Hex package there has no Git data
+# that plonge can check. Rebar3 also uses _build, but it puts dependency
+# sources in _build/<profile>/lib, so _build beside rebar.config is left out,
+# and a _build that holds dependency sources is refused.
 [beside]
 ".zig-cache" = ["build.zig"]
-_build = ["mix.exs", "rebar.config"]
+_build = ["mix.exs"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 build = ["pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
@@ -32,8 +33,10 @@ zig-cache = ["build.zig"]
 # A release that Mix or Rebar3 builds goes in _build/<env or profile>/rel.
 # It can hold a generated Erlang cookie and the earlier versions that an
 # upgrade needs, which a new build does not restore.
+# A Rebar3 build puts dependency sources in _build/<profile>/lib/<dep>/src,
+# where an edit has no Git data that plonge can check.
 [refuse_inside]
-_build = ["*/rel"]
+_build = ["*/rel", "*/lib/*/src"]
 
 # Global caches. Each command starts with the tool and runs without a shell.
 # prune uses the tool's policy to select unused or stale data.

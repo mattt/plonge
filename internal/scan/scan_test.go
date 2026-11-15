@@ -725,6 +725,8 @@ func TestDetectBEAMBuild(t *testing.T) {
 		"mix/mix.exs":        "",
 		"rebar/rebar.config": "",
 		"rel/mix.exs":        "",
+		"both/mix.exs":       "",
+		"both/rebar.config":  "",
 		"other/x":            "",
 	})
 	write(t, filepath.Join(root, "mix", "_build", "dev", "lib", "app", "ebin", "app.beam"), "")
@@ -732,19 +734,26 @@ func TestDetectBEAMBuild(t *testing.T) {
 	write(t, filepath.Join(root, "rebar", "_build", "default", "lib", "app", "ebin", "app.beam"), "")
 	write(t, filepath.Join(root, "rel", "_build", "prod", "rel", "app", "releases", "COOKIE"), "x")
 	write(t, filepath.Join(root, "other", "_build", "x"), "")
+	// Rebar3 keeps dependency sources in _build, where an edit has no Git data.
+	write(t, filepath.Join(root, "both", "_build", "default", "lib", "dep", "src", "dep.erl"), "edited")
 
 	roots := []Root{Detect(context.Background(), root, rules.Default())}
 	Measure(roots)
 	want := map[string]string{
-		"mix/_build":   "_build beside mix.exs",
-		"rebar/_build": "_build beside rebar.config",
+		"mix/_build": "_build beside mix.exs",
 	}
 	if f := found(roots[0]); !mapsEqual(f, want) {
 		t.Errorf("found %v, want %v", f, want)
 	}
-	refused := roots[0].Refused
-	if len(refused) != 1 || refused[0].Path != filepath.Join(root, "rel", "_build") ||
-		refused[0].Reason != `contains prod/rel, which refuse_inside "*/rel" protects` {
-		t.Errorf("refused %+v", refused)
+	reasons := map[string]string{}
+	for _, c := range roots[0].Refused {
+		reasons[c.Path] = c.Reason
+	}
+	wantRefused := map[string]string{
+		filepath.Join(root, "rel", "_build"):  `contains prod/rel, which refuse_inside "*/rel" protects`,
+		filepath.Join(root, "both", "_build"): `contains default/lib/dep/src, which refuse_inside "*/lib/*/src" protects`,
+	}
+	if !mapsEqual(reasons, wantRefused) {
+		t.Errorf("refused %v, want %v", reasons, wantRefused)
 	}
 }

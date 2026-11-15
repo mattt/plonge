@@ -20,10 +20,10 @@ func TestDefault(t *testing.T) {
 	if !slices.Equal(r.Beside["build"], []string{"pyproject.toml", "setup.py"}) {
 		t.Errorf("beside build = %q", r.Beside["build"])
 	}
-	if !slices.Equal(r.Beside["_build"], []string{"mix.exs", "rebar.config"}) {
+	if !slices.Equal(r.Beside["_build"], []string{"mix.exs"}) {
 		t.Errorf("beside _build = %q", r.Beside["_build"])
 	}
-	if !slices.Equal(r.RefuseInside["_build"], []string{"*/rel"}) {
+	if !slices.Equal(r.RefuseInside["_build"], []string{"*/rel", "*/lib/*/src"}) {
 		t.Errorf("refuse_inside _build = %q", r.RefuseInside["_build"])
 	}
 	// deps can hold edited dependency sources, so no default rule names it.
