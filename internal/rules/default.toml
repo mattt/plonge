@@ -101,3 +101,23 @@ tool = "brew"
 path = "brew --cache"
 clean = "brew cleanup --prune=all"
 kind = "clear"
+
+# NuGet prints "global-packages: <path>"; the examples in Microsoft's
+# documentation also show "info : " before it, so path_label selects the path.
+# Clearing removes every package, including ones that projects use;
+# dotnet restore downloads them again.
+[[global]]
+id = "nuget-packages"
+tool = "dotnet"
+path = "dotnet nuget locals global-packages --list"
+path_label = "global-packages"
+clean = "dotnet nuget locals global-packages --clear"
+kind = "clear"
+
+[[global]]
+id = "nuget-http-cache"
+tool = "dotnet"
+path = "dotnet nuget locals http-cache --list"
+path_label = "http-cache"
+clean = "dotnet nuget locals http-cache --clear"
+kind = "clear"

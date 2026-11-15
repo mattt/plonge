@@ -268,6 +268,12 @@ func TestDefaultRulesRunOnlyFakes(t *testing.T) {
 	bin := fakeTools(t)
 	cache := cacheDir(t, 10)
 	addTool(t, bin, "pip", fmt.Sprintf(`[ "$*" = "cache dir" ] && echo %q`, cache))
+	packages, http := cacheDir(t, 10), cacheDir(t, 10)
+	addTool(t, bin, "dotnet", fmt.Sprintf(`case "$*" in
+"nuget locals global-packages --list") echo "info : global-packages: %s/" ;;
+"nuget locals http-cache --list") echo "info : http-cache: %s" ;;
+*) exit 9 ;;
+esac`, packages, http))
 	r := runner(t)
 	got := map[string]Entry{}
 	for _, e := range r.List(context.Background(), rules.Default().Global) {
@@ -275,6 +281,14 @@ func TestDefaultRulesRunOnlyFakes(t *testing.T) {
 	}
 	if e := got["pip"]; e.Skipped != "" || e.Path != cache || e.Command != "pip cache purge" || e.Kind != "clear" {
 		t.Errorf("pip = %+v", e)
+	}
+	if e := got["nuget-packages"]; e.Skipped != "" || e.Path != packages ||
+		e.Command != "dotnet nuget locals global-packages --clear" || e.Kind != "clear" {
+		t.Errorf("nuget-packages = %+v", e)
+	}
+	if e := got["nuget-http-cache"]; e.Skipped != "" || e.Path != http ||
+		e.Command != "dotnet nuget locals http-cache --clear" || e.Kind != "clear" {
+		t.Errorf("nuget-http-cache = %+v", e)
 	}
 	if e := got["uv"]; e.Skipped != "tool not found" {
 		t.Errorf("uv = %+v", e)

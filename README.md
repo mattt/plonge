@@ -199,6 +199,8 @@ Neither kind guarantees that the whole reported size will be freed.
 | `yarn` | clear | `yarn cache clean` (Yarn 1) |
 | `pip` | clear | `pip cache purge` |
 | `homebrew` | clear | `brew cleanup --prune=all` |
+| `nuget-packages` | clear | `dotnet nuget locals global-packages --clear` |
+| `nuget-http-cache` | clear | `dotnet nuget locals http-cache --clear` |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
 
 Plonge runs a tool through `mise exec --`
