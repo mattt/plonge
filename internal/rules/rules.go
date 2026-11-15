@@ -85,6 +85,10 @@ type Global struct {
 	// DeleteContents makes plonge delete what is in Path, in place of Clean.
 	// It is for caches that have no cleanup command, and needs kind clear.
 	DeleteContents bool `toml:"delete_contents"`
+	// RefuseNames are file or directory names that hold data a download
+	// cannot restore. Plonge skips a delete_contents rule when its path
+	// holds an entry with one of these names at any depth.
+	RefuseNames []string `toml:"refuse_names"`
 
 	// Check is a command that must succeed before the rule runs.
 	// It must not change anything.
@@ -202,6 +206,14 @@ func (g Global) validate() error {
 	}
 	if err := g.validatePathEnv(); err != nil {
 		return err
+	}
+	if len(g.RefuseNames) > 0 && !g.DeleteContents {
+		return fmt.Errorf("global rule %q: refuse_names needs delete_contents", g.ID)
+	}
+	for _, n := range g.RefuseNames {
+		if !validName(n) {
+			return fmt.Errorf("global rule %q: refuse_names: invalid name %q", g.ID, n)
+		}
 	}
 	if g.DeleteContents {
 		if err := g.validateDelete(); err != nil {

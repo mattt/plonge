@@ -516,9 +516,23 @@ and keep the Hex configuration and the `rebar3` that `rebar3 local install` make
 A package cache moved by `HEX_HOME`, `MIX_XDG`, or `REBAR_CACHE_DIR`
 is not covered; replace the rule with that `path` to use it.
 Plonge makes read-only entries writable first and does not follow symlinks.
+A `delete_contents` rule can list `refuse_names`,
+names of files or directories that hold data a download cannot restore:
+
+```toml
+refuse_names = ["keep.xml"]
+```
+
+Plonge skips the rule when its path holds an entry with one of these names
+at any depth, and names the first one that it finds.
+It also skips the rule when it cannot read a directory in the path,
+which could hide one.
+It checks when it lists the rule and again right before it deletes.
+
 A `delete_contents` rule must have kind `clear`,
 so it runs only with `clean --global --include-clear --apply`.
 It cannot have `clean` or `targets`; it can have a `check`.
+`refuse_names` is allowed only on a `delete_contents` rule.
 The action reads `delete contents of <path> (built in)`.
 Plonge skips the rule, and reports why, when the path is not absolute;
 is `/`, the home directory, or a directory that contains the home directory,

@@ -383,6 +383,9 @@ or contains the home directory; is or resolves through a symlink;
 is in a Git repository; or does not exist.
 The default `zig-global-cache`, `hex-packages`, and `rebar3-hex` rules,
 the Deno rules, and the Cargo rules use `delete_contents`.
+A `delete_contents` rule can also list `refuse_names`:
+Plonge skips the rule when its path holds an entry with one of those names
+at any depth, or a directory that it cannot read.
 See the [README](../README.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`

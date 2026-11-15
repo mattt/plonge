@@ -320,3 +320,28 @@ func TestDeleteContentsMiseToolsKeepsItsPath(t *testing.T) {
 		t.Errorf("the installs directory changed: %v", err)
 	}
 }
+
+// TestDeleteContentsRefuseNames skips a rule whose path holds an entry
+// that refuse_names lists, at any depth, and deletes nothing.
+func TestDeleteContentsRefuseNames(t *testing.T) {
+	r, _, cache, _ := deleteSetup(t)
+	rule := deleteRule(cache)
+	rule.RefuseNames = []string{"keep.xml"}
+	ctx := context.Background()
+	if e := r.List(ctx, []rules.Global{rule})[0]; e.Skipped != "" {
+		t.Fatalf("without keep.xml: %+v", e)
+	}
+	addFile(t, filepath.Join(cache, "a", "b", "keep.xml"))
+	entries := r.List(ctx, []rules.Global{rule})
+	want := `contains a/b/keep.xml, which refuse_names "keep.xml" protects`
+	if e := entries[0]; e.Skipped != want || e.Command != "" {
+		t.Fatalf("entry = %+v", e)
+	}
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	if o := res.Outcomes[0]; o.Status != Skipped {
+		t.Errorf("outcome = %+v", o)
+	}
+	if _, err := os.Stat(filepath.Join(cache, "blob")); err != nil {
+		t.Error(err)
+	}
+}

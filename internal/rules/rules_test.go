@@ -491,3 +491,28 @@ func TestCargoRulesKeepCargoHomeState(t *testing.T) {
 		t.Errorf("missing rules: %v", want)
 	}
 }
+
+func TestGlobalRefuseNamesValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\nkind = \"clear\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"delete_contents = true\nrefuse_names = [\"keep.xml\", \".keep\"]\n", ""},
+		{"clean = \"t gc\"\nrefuse_names = [\"keep.xml\"]\n", "refuse_names needs delete_contents"},
+		{"delete_contents = true\nrefuse_names = [\"a/b\"]\n", `invalid name "a/b"`},
+		{"delete_contents = true\nrefuse_names = [\"..\"]\n", `invalid name ".."`},
+		{"delete_contents = true\nrefuse_names = [\"\"]\n", `invalid name ""`},
+	}
+	for _, c := range cases {
+		f, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil || !slices.Equal(f.Global[0].RefuseNames, []string{"keep.xml", ".keep"}) {
+				t.Errorf("%q: %+v, %v", c.extra, f.Global, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
+		}
+	}
+}

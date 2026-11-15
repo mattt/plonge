@@ -7,6 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/mattt/plonge/internal/clean"
 	"github.com/mattt/plonge/internal/scan"
@@ -78,9 +81,37 @@ func (r Runner) refuseDelete(ctx context.Context, path string) string {
 	return ""
 }
 
+// refuseNames walks dir without following symlinks and returns why plonge
+// must not delete its contents: the first entry with one of names,
+// or a directory that it cannot read, which could hide one.
+// It returns "" when names is empty or dir holds none of them.
+func refuseNames(dir string, names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	var reason string
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			reason = "cannot check for " + strings.Join(names, ", ") + ": " + err.Error()
+			return fs.SkipAll
+		}
+		if path != dir && slices.Contains(names, d.Name()) {
+			rel, _ := filepath.Rel(dir, path)
+			reason = "contains " + filepath.ToSlash(rel) + ", which refuse_names " + strconv.Quote(d.Name()) + " protects"
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return reason
+}
+
 // applyDelete checks the path again and deletes its contents.
 func (r Runner) applyDelete(ctx context.Context, o *Outcome) {
-	if reason := r.refuseDelete(ctx, o.Path); reason != "" {
+	reason := r.refuseDelete(ctx, o.Path)
+	if reason == "" {
+		reason = refuseNames(o.Path, o.refuseNames)
+	}
+	if reason != "" {
 		o.Status, o.Reason = Skipped, reason
 		return
 	}
