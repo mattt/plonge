@@ -526,6 +526,56 @@ func TestCargoRulesFollowCargoHome(t *testing.T) {
 	}
 }
 
+// TestDefaultBEAMPackageRules deletes the contents of the Hex and Rebar3
+// package caches without running the tools, and keeps the folders beside them.
+func TestDefaultBEAMPackageRules(t *testing.T) {
+	for _, tc := range []struct {
+		id, tool, cache, kept string
+	}{
+		{"hex-packages", "mix", ".hex/packages", ".hex/hex.config"},
+		{"rebar3-hex", "rebar3", ".cache/rebar3/hex", ".cache/rebar3/bin/rebar3"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			r, _, _, log := deleteSetup(t)
+			bin := filepath.SplitList(os.Getenv("PATH"))[0]
+			addTool(t, bin, tc.tool, fmt.Sprintf(`echo "$*" >> %q`, log))
+			cache := filepath.Join(r.Home, tc.cache)
+			addFile(t, filepath.Join(cache, "hexpm", "pkg-1.0.0.tar"))
+			kept := filepath.Join(r.Home, tc.kept)
+			addFile(t, kept)
+			var rule rules.Global
+			for _, g := range rules.Default().Global {
+				if g.ID == tc.id {
+					rule = g
+				}
+			}
+			ctx := context.Background()
+			entries := r.List(ctx, []rules.Global{rule})
+			e := entries[0]
+			if e.Skipped != "" || e.Path != cache || e.Kind != rules.KindClear ||
+				e.Command != "delete contents of ~/"+tc.cache+" (built in)" {
+				t.Fatalf("entry = %+v", e)
+			}
+			if res := r.Clean(ctx, entries, Options{Apply: true}); res.Outcomes[0].Status != Skipped {
+				t.Errorf("without --include-clear: %+v", res)
+			}
+			res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+			if o := res.Outcomes[0]; o.Status != Ran {
+				t.Errorf("outcome = %+v", o)
+			}
+			if ents, err := os.ReadDir(cache); err != nil || len(ents) != 0 {
+				t.Errorf("cache entries = %v, err = %v", ents, err)
+			}
+			if _, err := os.Stat(kept); err != nil {
+				t.Errorf("%s: %v", tc.kept, err)
+			}
+			if _, err := os.Stat(log); err == nil {
+				t.Errorf("%s ran", tc.tool)
+			}
+		})
+	}
+}
+
 // TestPathEnvMustBeAbsolute skips a rule whose variable holds a relative path,
 // because the tool would resolve it from a working directory that plonge cannot know.
 func TestPathEnvMustBeAbsolute(t *testing.T) {

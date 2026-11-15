@@ -4,13 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 24 || r.QuietHours != 24 {
+	if len(r.Names) != 25 || r.QuietHours != 24 {
 		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
@@ -18,6 +19,16 @@ func TestDefault(t *testing.T) {
 	}
 	if !slices.Equal(r.Beside["build"], []string{"pyproject.toml", "setup.py"}) {
 		t.Errorf("beside build = %q", r.Beside["build"])
+	}
+	if !slices.Equal(r.Beside["_build"], []string{"mix.exs"}) {
+		t.Errorf("beside _build = %q", r.Beside["_build"])
+	}
+	if !slices.Equal(r.RefuseInside["_build"], []string{"*/rel", "*/lib/*/src"}) {
+		t.Errorf("refuse_inside _build = %q", r.RefuseInside["_build"])
+	}
+	// deps can hold edited dependency sources, so no default rule names it.
+	if slices.Contains(r.Names, "deps") {
+		t.Error("default names include deps")
 	}
 }
 
@@ -172,6 +183,38 @@ func TestBesidePatterns(t *testing.T) {
 	_, err = Load(writeRules(t, "[beside]\nout = [\"[a\"]\n"))
 	if err == nil || !strings.Contains(err.Error(), "invalid project file pattern") {
 		t.Errorf("bad pattern: err = %v", err)
+	}
+}
+
+func TestRefuseInside(t *testing.T) {
+	r, err := Load(writeRules(t, "names = [\"out\"]\n[refuse_inside]\nout = [\"*/rel\", \"keep\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.RefuseInside["out"], []string{"*/rel", "keep"}) {
+		t.Errorf("refuse_inside out = %q", r.RefuseInside["out"])
+	}
+	// A user entry replaces the default entry for that name.
+	r, err = Load(writeRules(t, "[refuse_inside]\n_build = [\"*/rel\", \"*/keep\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.RefuseInside["_build"], []string{"*/rel", "*/keep"}) {
+		t.Errorf("refuse_inside _build = %q", r.RefuseInside["_build"])
+	}
+	for _, p := range []string{"rel", "*/rel", "a/b/c", "[ab]*/x"} {
+		if !ValidInsidePath(p) {
+			t.Errorf("ValidInsidePath(%q) = false", p)
+		}
+	}
+	for _, p := range []string{"", "/rel", "rel/", "a//b", "./rel", "../rel", "a/../b", "[a/rel", `a\b`} {
+		if ValidInsidePath(p) {
+			t.Errorf("ValidInsidePath(%q) = true", p)
+		}
+		body := "[refuse_inside]\nout = [" + strconv.Quote(p) + "]\n"
+		if _, err := Load(writeRules(t, body)); err == nil || !strings.Contains(err.Error(), "refuse_inside out: invalid path") {
+			t.Errorf("Load(%q): err = %v", p, err)
+		}
 	}
 }
 
