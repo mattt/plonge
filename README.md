@@ -238,7 +238,8 @@ Global caches are stored outside projects.
 Plonge uses cleanup commands from their tools,
 plus a built-in rule for Xcode build data on macOS.
 A rule for a cache without a cleanup command
-can delete the contents of its path instead.
+can delete the contents of its path instead,
+as `zig-global-cache` does for Zig.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -279,6 +280,7 @@ Neither kind guarantees that the whole reported size will be freed.
 | `nuget-packages` | clear | `dotnet nuget locals global-packages --clear` |
 | `nuget-http-cache` | clear | `dotnet nuget locals http-cache --clear` |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
+| `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
 
 Plonge runs a tool through `mise exec --`
 when `mise which` finds it from your home directory,
@@ -357,6 +359,23 @@ Shell quoting, pipes, and variable expansion are not supported.
 `os` limits a rule to one operating system,
 by its Go name, such as `darwin` or `linux`.
 
+When the `path` command prints a ZON struct, as `zig env` does,
+`path_zon_field` names the top-level field that holds the path:
+
+```toml
+path = "zig env"
+path_zon_field = "global_cache_dir"
+```
+
+A relative path in that field is relative to the home directory,
+where Plonge runs the command.
+Plonge reads the whole struct before it uses the path.
+It skips the rule when the output is not one complete ZON struct,
+has text other than whitespace and comments after it,
+has a field twice, has no such field,
+or has a value that is not a nonempty string.
+A rule can have `path_label` or `path_zon_field`, not both.
+
 A rule can name a `check`, a command that must not change anything:
 
 ```toml
@@ -409,6 +428,12 @@ kind = "clear"
 ```
 
 Plonge then deletes what is in `path` and keeps the directory itself.
+The default `zig-global-cache` rule gets its path from `zig env`.
+Zig has no command that cleans this cache.
+It holds build output and the packages that `zig fetch` and `zig build` download,
+so later builds can be slower and must download packages again.
+Before Zig 0.15, `zig env` printed JSON, so Plonge skips this rule;
+replace it with a fixed `path` to use it with those versions.
 It makes read-only entries writable first and does not follow symlinks.
 The rule must have kind `clear`,
 so it runs only with `clean --global --include-clear --apply`.
@@ -509,8 +534,8 @@ Plonge has these default rules:
 ```toml
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
-         ".turbo", ".venv", "DerivedData", "__pycache__", "bin", "build", "dist",
-         "node_modules", "obj", "target", "venv"]
+         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "bin",
+         "build", "dist", "node_modules", "obj", "target", "venv", "zig-cache"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -519,12 +544,14 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # Match these names only when a listed project file is in the same directory.
 # A project file can be a pattern, such as "*.csproj".
 [beside]
+".zig-cache" = ["build.zig"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 build = ["pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
+zig-cache = ["build.zig"]
 ```
 
 To add rules, write them to `$XDG_CONFIG_HOME/plonge/rules.toml`
