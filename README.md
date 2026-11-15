@@ -142,9 +142,33 @@ With `--json`, `home_volume` has `free_before`, `free_after`, and `gained_bytes`
 or an `error` when Plonge cannot read free space.
 Dry runs do not have these values.
 
+A size is the space that deleting the cache would free,
+as well as Plonge can measure it.
 On Unix, sizes use allocated blocks and count a hard-linked file once per cache.
 On other platforms, sizes use file lengths.
-Files linked elsewhere, filesystem snapshots, and changes during cleanup
+
+On macOS, a file can be a clone that shares its blocks with other files,
+as when uv clones files from its cache into a virtual environment,
+or when a snapshot, such as a Time Machine local snapshot, keeps them.
+Deleting such a file frees only the blocks that no other file
+or snapshot uses.
+So on macOS, Plonge counts a file's private size,
+which APFS reports through `getattrlist` (`ATTR_CMNEXT_PRIVATESIZE`),
+in place of its allocated blocks.
+When a file and all of its full clones are in the same cache,
+Plonge also counts the blocks that they share, once,
+because deleting the cache frees them.
+That count includes blocks that a snapshot also keeps,
+and blocks that the family shares with a clone that was changed after it was made,
+which APFS no longer counts as a full clone.
+Deleting the cache does not free those blocks,
+so its size can be larger than the space that it frees.
+This count is never larger than the allocated blocks.
+A compressed file, and a file on a volume that does not report a private size,
+use allocated blocks.
+For these reasons, a size on macOS can be smaller than what `du` reports.
+
+Files linked elsewhere, snapshots on other systems, and changes during cleanup
 can affect how much space becomes available.
 Global size totals can also overlap.
 Use `plonge disk` to check free space on your home directory's volume.
