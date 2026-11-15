@@ -241,6 +241,7 @@ Neither kind guarantees that the whole reported size will be freed.
 | `bun` | clear | `bun pm cache prune` (Bun 1.4.4 or later) |
 | `deno-remote`, `deno-npm`, `deno-gen` | clear | Built-in deletion of the contents of Deno's module, npm, and TypeScript caches |
 | `yarn` | clear | `yarn cache clean` (Yarn 1) |
+| `yarn-berry` | clear | `yarn cache clean` (Yarn 2 and later) |
 | `pip` | clear | `pip cache purge` |
 | `homebrew` | clear | `brew cleanup --prune=all` |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |

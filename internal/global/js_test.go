@@ -140,3 +140,85 @@ printf '{\n  "version": 1,\n  "denoDir": "%%s",\n  "modulesCache": "%%s/remote",
 		t.Errorf("log = %q", data)
 	}
 }
+
+// fakeYarn prints version and answers both Yarn rules' path commands with dir,
+// so only the checks keep the two rules apart.
+func fakeYarn(version, dir, log string) string {
+	return fmt.Sprintf(`echo "$*" >> %q
+case "$*" in
+--version) printf '%%b\n' %q ;;
+"cache dir"|"config get cacheFolder") echo %q ;;
+"cache clean") /bin/rm -f %q/blob ;;
+*) exit 9 ;;
+esac`, log, version, dir, dir)
+}
+
+func TestOnlyOneYarnRuleRuns(t *testing.T) {
+	cases := []struct {
+		version string
+		want    string // the rule that can run, or empty
+	}{
+		{"1.22.22", "yarn"},
+		{"4.18.1", "yarn-berry"},
+		{"2.4.3", "yarn-berry"},
+		{"10.0.0", "yarn-berry"},
+		{"0.27.5", ""},
+		{"warning: something\n1.22.22", "yarn"},
+		{"! Corepack is about to download yarn\n4.18.1", "yarn-berry"},
+		{"yarn 4.18.1", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		bin := fakeTools(t)
+		cache := cacheDir(t, 10)
+		log := filepath.Join(t.TempDir(), "log")
+		addTool(t, bin, "yarn", fakeYarn(c.version, cache, log))
+		r := runner(t)
+		ctx := context.Background()
+		entries := r.List(ctx, []rules.Global{defaultRule(t, "yarn"), defaultRule(t, "yarn-berry")})
+		var runnable []string
+		for _, e := range entries {
+			if e.Skipped == "" {
+				runnable = append(runnable, e.ID)
+			} else if !strings.Contains(e.Skipped, "yarn --version printed no line that matches") {
+				t.Errorf("%q: %s: %s", c.version, e.ID, e.Skipped)
+			}
+		}
+		if c.want == "" && len(runnable) != 0 || c.want != "" && (len(runnable) != 1 || runnable[0] != c.want) {
+			t.Errorf("%q: runnable = %v, want %q", c.version, runnable, c.want)
+		}
+		res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+		data, _ := os.ReadFile(log)
+		if n := strings.Count(string(data), "cache clean"); c.want == "" && n != 0 || c.want != "" && n != 1 {
+			t.Errorf("%q: ran cache clean %d times; result = %+v", c.version, n, res)
+		}
+	}
+}
+
+func TestYarnBerryUsesCacheFolder(t *testing.T) {
+	bin := fakeTools(t)
+	cache := cacheDir(t, 30_000)
+	log := filepath.Join(t.TempDir(), "log")
+	addTool(t, bin, "yarn", fakeYarn("4.18.1", cache, log))
+	r := runner(t)
+	ctx := context.Background()
+	entries := r.List(ctx, []rules.Global{defaultRule(t, "yarn-berry")})
+	e := entries[0]
+	if e.Skipped != "" || e.Path != cache || e.Command != "yarn cache clean" || e.Kind != rules.KindClear || e.Bytes < 30_000 {
+		t.Fatalf("entry = %+v", e)
+	}
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	if o := res.Outcomes[0]; o.Status != Ran || o.FreedBytes < 30_000 {
+		t.Errorf("outcome = %+v", o)
+	}
+	data, _ := os.ReadFile(log)
+	if want := "config get cacheFolder\n--version\n--version\ncache clean\n"; string(data) != want {
+		t.Errorf("log = %q, want %q", data, want)
+	}
+
+	// Outside a project with enableGlobalCache off, Yarn prints no path.
+	addTool(t, bin, "yarn", `case "$*" in --version) echo 4.18.1 ;; *) echo undefined ;; esac`)
+	if e := r.List(ctx, []rules.Global{defaultRule(t, "yarn-berry")})[0]; !strings.Contains(e.Skipped, "not an absolute path") {
+		t.Errorf("entry = %+v", e)
+	}
+}

@@ -28,8 +28,9 @@ Backend cache locations were checked against
 [mise's source at v2026.10.14][mise-source].
 No cleanup command was applied to build this inventory.
 
-The Bun and Deno rules were checked against the documentation and source
-of [Bun 1.4.4][bun-pm] and [Deno 2.9.8][deno-clean],
+The Bun, Deno, and Yarn 2+ rules were checked against the documentation
+and source of [Bun 1.4.4][bun-pm], [Deno 2.9.8][deno-clean],
+and [Yarn 4.18.1][yarn-clean],
 the current stable releases when the rules were added.
 
 ## How to read the tables
@@ -104,7 +105,7 @@ The global-cache column lists additional rules relevant to that tool.
 | `erlang` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Erlang cache rule. `clean --global` selects mise rules; `--include-clear` adds no Erlang rule. | Rebar3 `_build` and global package cache. |
 | `go` | Guarded `mise-tools` | none yet | `go-modules`: `go clean -modcache` (clear); `go-build`: `go clean -cache` (clear) | `scan` and `clean` have no Go project rule. `clean --global` selects mise rules; `--include-clear` adds both Go rules. | Project binaries, `vendor`, and caches at paths other than those returned by Go from the home directory. |
 | `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); Gradle project `build` output. |
-| `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and `yarn`. | Yarn 2+ caches such as `.yarn/cache`; separate pnpm stores not resolved from the home directory; generic `build` output. |
+| `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1); `yarn-berry`: `yarn cache clean` (clear, Yarn 2 and later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and the one Yarn rule that matches the version of `yarn` in the home directory. | Project `.yarn/cache` folders; the Yarn 2+ global cache when `yarn` in the home directory is Yarn 1 or `enableGlobalCache` is off; separate pnpm stores not resolved from the home directory; generic `build` output. |
 | `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | `.tox`, `.nox`, Python `build` output, and `dist` without `package.json`; uv-managed Python installations outside mise; caches at other configured paths. |
 | `ruby` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Ruby cache rule. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/bundle` and `vendor/cache`; RubyGems' gem cache; application `tmp/cache`. |
 | `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Rust rule. | Cargo's registry and Git caches (`~/.cargo/registry`, `~/.cargo/git`); sccache; toolchains managed outside mise. |
@@ -169,7 +170,8 @@ Global rules require their command to be available, except for the Xcode rule.
 | pnpm | `node_modules` | `pnpm` | `pnpm store prune` | prune; eligible with `clean --global`; requires `--apply` to run |
 | Bun | `node_modules` | `bun` | `bun pm cache prune` | clear; requires `clean --global --include-clear --apply` to run. Bun 1.4.4 or later. |
 | Deno | `node_modules` | `deno-remote`, `deno-npm`, `deno-gen` | `delete_contents` of the paths that `deno info --json` prints | clear; requires `clean --global --include-clear --apply` to run. |
-| Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Yarn 2+ has no matching global rule. |
+| Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Only when `yarn --version` reports 1.x. |
+| Yarn 2 and later | `node_modules` | `yarn-berry` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Only when `yarn --version` reports 2.x or later. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
 | Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. |
 
@@ -211,6 +213,8 @@ until each one runs `bun install` again.
 Bun added `prune` in 1.4.4,
 so the rule's check runs `bun --version`
 and skips the rule for an earlier version.
+Bun 1.3 prints its cache path only inside a project with a `package.json`,
+so for Bun 1.3 the rule is skipped earlier, because its path command fails.
 `prune` takes its directory from `BUN_INSTALL_CACHE_DIR`, `BUN_INSTALL`,
 or `~/.bunfig.toml`, and ignores a directory named in another
 `bunfig.toml`, `.npmrc`, or `.env` file.
@@ -233,6 +237,35 @@ The other folders and files in `DENO_DIR` stay.
 See Deno's [clean][deno-clean], [info][deno-info],
 and [`DENO_DIR` layout][deno-dir] code.
 
+### Yarn
+
+The `yarn` and `yarn-berry` rules run the same `yarn`,
+resolved from the home directory.
+Each rule's check runs `yarn --version`,
+and each rule's `require` pattern accepts only its own versions:
+1.x for `yarn`, and 2.x or later for `yarn-berry`.
+A version line cannot match both patterns,
+so at most one Yarn rule acts on an installation.
+If no line of the output is a version, both rules are skipped.
+
+For Yarn 2 and later, `yarn-berry` asks `yarn config get cacheFolder`
+for the path and runs `yarn cache clean`, which deletes that folder.
+With `enableGlobalCache`, which is on by default in Yarn 4.18.1,
+`cacheFolder` is the `cache` folder in `globalFolder`:
+by default `~/.yarn/berry/cache`,
+or `$XDG_DATA_HOME/yarn/berry/cache` when `XDG_DATA_HOME` is set.
+With `enableGlobalCache` off, `cacheFolder` is relative to a project,
+so outside one Yarn prints no path and the rule is skipped.
+If `enableCacheClean` is off, `yarn cache clean` fails,
+and Plonge reports the failure.
+The command runs from the home directory,
+so it does not reach a project's local `.yarn/cache`.
+`yarn` in the home directory can be Yarn 1
+even when projects choose a later version, for example in `packageManager`.
+Then only the `yarn` rule applies, and the Yarn 2+ global cache stays.
+See Yarn's [cache clean command][yarn-clean] and
+[configuration][yarn-config] code.
+
 [mise-source]: https://github.com/jdx/mise/tree/v2026.10.14/src/backend
 [mise-prune]: https://github.com/jdx/mise/blob/v2026.10.14/src/cli/prune.rs
 [mise-backend]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/mod.rs
@@ -251,3 +284,5 @@ and [`DENO_DIR` layout][deno-dir] code.
 [deno-clean]: https://github.com/denoland/deno/blob/v2.9.8/cli/tools/clean.rs
 [deno-info]: https://github.com/denoland/deno/blob/v2.9.8/cli/tools/info.rs
 [deno-dir]: https://github.com/denoland/deno/blob/v2.9.8/libs/resolver/cache/deno_dir.rs
+[yarn-clean]: https://github.com/yarnpkg/berry/blob/%40yarnpkg/cli/4.18.1/packages/plugin-essentials/sources/commands/cache/clean.ts
+[yarn-config]: https://github.com/yarnpkg/berry/blob/%40yarnpkg/cli/4.18.1/packages/yarnpkg-core/sources/Configuration.ts
