@@ -24,6 +24,7 @@ type Rules struct {
 	Names []string
 	// Beside maps a name to project files; the name counts only
 	// when one of them is in the same parent directory.
+	// A project file can be a pattern, such as "*.csproj"; see IsPattern.
 	Beside map[string][]string
 	// QuietHours is how long a project must be inactive to be quiet.
 	QuietHours float64
@@ -43,15 +44,24 @@ const (
 // XcodeRuleID names the built-in rule for stale Xcode DerivedData folders.
 const XcodeRuleID = "xcode-derived-data"
 
+// MiseToolsRuleID names the rule for mise's installed tool versions.
+// When its tool is mise and it runs a clean command, plonge asks mise
+// for the installs directory and uses the rule's path only when mise cannot report it.
+// A delete_contents rule always uses its own path.
+const MiseToolsRuleID = "mise-tools"
+
 // Global describes a cache that a tool's own command cleans,
 // or whose contents plonge deletes.
 type Global struct {
-	ID    string `toml:"id"`
-	Tool  string `toml:"tool"`  // the command that must be available
-	Path  string `toml:"path"`  // a command that prints the path, or a fixed path
-	Clean string `toml:"clean"` // the command that cleans the cache
-	Kind  string `toml:"kind"`
-	OS    string `toml:"os"` // when set, the rule applies only on this GOOS
+	ID   string `toml:"id"`
+	Tool string `toml:"tool"` // the command that must be available
+	Path string `toml:"path"` // a command that prints the path, or a fixed path
+	// PathLabel, when set, selects the last line of the path command's output
+	// that contains the label followed by ": ", and takes the path after it.
+	PathLabel string `toml:"path_label"`
+	Clean     string `toml:"clean"` // the command that cleans the cache
+	Kind      string `toml:"kind"`
+	OS        string `toml:"os"` // when set, the rule applies only on this GOOS
 
 	// PathField names the string field that holds the path
 	// when the path command prints a JSON object.
@@ -116,6 +126,13 @@ func parse(data, name string) (file, error) {
 			return f, fmt.Errorf("%s: %q holds version control data and cannot be a cache", name, n)
 		}
 	}
+	for n, markers := range f.Beside {
+		for _, m := range markers {
+			if _, err := filepath.Match(m, ""); err != nil {
+				return f, fmt.Errorf("%s: beside %s: invalid project file pattern %q", name, n, m)
+			}
+		}
+	}
 	for _, n := range f.Skip {
 		if !validName(n) {
 			return f, fmt.Errorf("%s: invalid skip name %q", name, n)
@@ -155,6 +172,9 @@ func (g Global) validate() error {
 	}
 	if g.PathField != "" && g.fixedPath() {
 		return fmt.Errorf("global rule %q: path_field needs a path command", g.ID)
+	}
+	if g.PathLabel != "" && (g.fixedPath() || strings.ContainsAny(g.PathLabel, "\r\n")) {
+		return fmt.Errorf("global rule %q: path_label must be one line and needs a path command", g.ID)
 	}
 	if g.DeleteContents {
 		if err := g.validateDelete(); err != nil {
@@ -299,8 +319,16 @@ func Load(path string) (Rules, error) {
 	return merge(r, f), nil
 }
 
+// IsPattern reports whether a project file in Beside is a pattern
+// in the syntax of [filepath.Match], such as "*.csproj",
+// and not a literal file name.
+func IsPattern(marker string) bool {
+	return strings.ContainsAny(marker, `*?[\`)
+}
+
 // Match returns the rule that a directory named name matches,
-// given the names of the entries in its parent directory.
+// given a function that says whether its parent directory holds an entry
+// with a listed project file name, or one that matches a pattern.
 // The result is empty when nothing matches.
 func (r Rules) Match(name string, siblings func(string) bool) string {
 	if !slices.Contains(r.Names, name) {

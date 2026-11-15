@@ -254,3 +254,69 @@ func TestDeleteContentsIgnoresInheritedGitCeiling(t *testing.T) {
 		t.Errorf("reason = %q", got)
 	}
 }
+
+// TestDeleteContentsWithPathLabel checks that a labeled path goes through
+// the same deletion checks as any other path.
+func TestDeleteContentsWithPathLabel(t *testing.T) {
+	r, _, cache, log := deleteSetup(t)
+	mytool, err := exec.LookPath("mytool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Dir(mytool)
+	addTool(t, bin, "labeled", `case "$1" in
+cache) echo "info : cache: `+cache+`/" ;;
+home) echo "cache: `+r.Home+`" ;;
+esac`)
+	rule := func(id, arg string) rules.Global {
+		return rules.Global{ID: id, Tool: "labeled", Path: "labeled " + arg, PathLabel: "cache",
+			Kind: rules.KindClear, DeleteContents: true}
+	}
+	ctx := context.Background()
+	entries := r.List(ctx, []rules.Global{rule("cache", "cache"), rule("home", "home")})
+	if e := entries[0]; e.Skipped != "" || e.Path != cache || e.Bytes < 100_000 {
+		t.Fatalf("cache = %+v", e)
+	}
+	if e := entries[1]; e.Skipped != "path is the home directory" {
+		t.Errorf("home = %+v", e)
+	}
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	if o := res.Outcomes[0]; o.Status != Ran {
+		t.Errorf("outcome = %+v", o)
+	}
+	if _, err := os.Stat(filepath.Join(cache, "blob")); !os.IsNotExist(err) {
+		t.Errorf("blob remains: %v", err)
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		t.Errorf("a tool command ran: %v", err)
+	}
+}
+
+// A mise-tools override that deletes contents must keep to its own path,
+// not the installs directory that mise reports.
+func TestDeleteContentsMiseToolsKeepsItsPath(t *testing.T) {
+	r, tmp, cache, _ := deleteSetup(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	addTool(t, bin, "mise", "exit 0")
+	installs := filepath.Join(tmp, "installs")
+	addFile(t, filepath.Join(installs, "go", "1.26.0", "bin", "go"))
+	t.Setenv("MISE_INSTALLS_DIR", installs)
+	t.Setenv("MISE_DATA_DIR", "")
+	rule := rules.Global{ID: rules.MiseToolsRuleID, Tool: "mise", Path: cache, Kind: rules.KindClear, DeleteContents: true}
+	ctx := context.Background()
+
+	entries := r.List(ctx, []rules.Global{rule})
+	if e := entries[0]; e.Skipped != "" || e.Path != cache {
+		t.Fatalf("entry = %+v", e)
+	}
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	if o := res.Outcomes[0]; o.Status != Ran {
+		t.Fatalf("outcome = %+v", o)
+	}
+	if ents, _ := os.ReadDir(cache); len(ents) != 0 {
+		t.Errorf("cache entries = %v", ents)
+	}
+	if _, err := os.Stat(filepath.Join(installs, "go", "1.26.0", "bin", "go")); err != nil {
+		t.Errorf("the installs directory changed: %v", err)
+	}
+}

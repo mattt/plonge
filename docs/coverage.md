@@ -33,6 +33,24 @@ and source of [Bun 1.4.4][bun-pm], [Deno 2.9.8][deno-clean],
 and [Yarn 4.18.1][yarn-clean],
 the current stable releases when the rules were added.
 
+The .NET project rules follow the default output folders in Microsoft's
+[`dotnet build` reference][dotnet-build] (`./bin/<configuration>/<framework>/`)
+and [MSBuild common properties][msbuild-props] (`BaseIntermediateOutputPath`, `obj\`),
+as published for .NET SDK 11.0.100.
+The NuGet rules use the folder names and the `--list` and `--clear` options in
+[`dotnet nuget locals`][dotnet-nuget-locals]
+and [Managing the global packages and cache folders][nuget-folders].
+In [NuGet.Client 8.2.0.14][nuget-locals-source], `--list` prints
+each folder as `<name>: <path>`.
+The macOS and Linux examples in the `dotnet nuget locals` reference
+also show `info : ` before that text.
+The rules set `path_label`, so Plonge reads the path in either form.
+`--clear` deletes the folder's contents and does not check whether a project
+uses them, so both rules are `clear`.
+The default folders are `~/.nuget/packages` and `~/.local/share/NuGet/v3-cache`
+on macOS and Linux;
+`NUGET_PACKAGES`, `globalPackagesFolder`, and `NUGET_HTTP_CACHE_PATH` change them.
+
 ## How to read the tables
 
 The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
@@ -55,6 +73,7 @@ Project cache names are exact directory names.
 Every match must be inside a scanned root, ignored by Git,
 and contain no tracked files.
 A listed project file must be in the cache directory's parent directory.
+A project file written as a pattern, such as `*.csproj`, matches any name of that form.
 No project file is required unless the table names one.
 The scan does not enter `.cache`, `.git`, `.hg`, `.jj`, or `.svn`,
 or a directory that already matches a cache rule.
@@ -81,11 +100,12 @@ See [mise's prune command][mise-prune] for how versions are selected,
 including tracked configs, tool stubs, and running processes.
 
 If the version list cannot be read, Plonge reports the size of
-`~/.local/share/mise/installs` and adds a note.
-That fixed path is also used to estimate freed space.
-Override `mise-tools` in `rules.toml` if your installs directory differs;
-copy its `check`, `check_env`, `refuse`, `refuse_reason`, and `targets` too.
-The command itself follows mise's environment and settings.
+mise's installs directory and adds a note.
+That directory is also used to estimate freed space.
+It is `$MISE_INSTALLS_DIR`, or `installs` in the data directory
+that `mise doctor --json` reports.
+If mise cannot report it, Plonge uses `~/.local/share/mise/installs`
+and adds a note.
 Neither `scan` nor project `clean` selects installed versions by default.
 
 In the core table, "mise rules" means these two rules, with this guard.
@@ -99,8 +119,8 @@ The global-cache column lists additional rules relevant to that tool.
 | --- | --- | --- | --- | --- | --- |
 | `bun` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | `bun`: `bun pm cache prune` (clear; Bun 1.4.4 or later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `bun`, which removes package folders in Bun's cache more than 30 days old. | Packages newer than 30 days; the global store (`links/`), Git dependency clones, and package manifests, which `prune` keeps; Bun before 1.4.4, which the rule skips; a cache directory that only a `bunfig.toml`, `.npmrc`, or `.env` file names, which `prune` ignores. |
 | `deno` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | `deno-remote`, `deno-npm`, `deno-gen`: `delete_contents` of the `modulesCache`, `npmCache`, and `typescriptCache` paths from `deno info --json` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds the three Deno rules. | `deno clean`, which also deletes user state; `location_data` (localStorage and Cache API data) and REPL history, which hold user state; the `registries` and `dl` folders and the analysis, check, and code caches in `DENO_DIR`. |
-| `dotnet` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no .NET cache rule. `clean --global` selects mise rules; `--include-clear` adds no .NET rule. | Project `bin` and `obj`; NuGet global packages and HTTP cache. |
-| `dotnet-core` (alias of `dotnet`) | Guarded `mise-tools`; same tool as `dotnet` | none yet | none yet | Same as `dotnet`: no project rule; global mise rules only; no additional clear rule. | Same .NET and NuGet gaps as `dotnet`. |
+| `dotnet` | Guarded `mise-tools` | `bin` and `obj` beside `*.csproj`, `*.fsproj`, or `*.vbproj` | `nuget-packages`: `dotnet nuget locals global-packages --clear` (clear); `nuget-http-cache`: `dotnet nuget locals http-cache --clear` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds both NuGet rules. | Output moved by `BaseOutputPath`, `BaseIntermediateOutputPath`, or `--output`; the [`artifacts` layout][dotnet-artifacts] (`UseArtifactsOutput`); `bin` and `obj` beside other project types; NuGet's `temp` and `plugins-cache` folders; `packages.config` folders set by `repositoryPath`; NuGet folders set only in a project's `nuget.config`. |
+| `dotnet-core` (alias of `dotnet`) | Guarded `mise-tools`; same tool as `dotnet` | Same as `dotnet` | Same as `dotnet` | Same as `dotnet`. | Same as `dotnet`. |
 | `elixir` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Elixir cache rule. `clean --global` selects mise rules; `--include-clear` adds no Elixir rule. | Mix `_build` and `deps`; Hex package cache. |
 | `erlang` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Erlang cache rule. `clean --global` selects mise rules; `--include-clear` adds no Erlang rule. | Rebar3 `_build` and global package cache. |
 | `go` | Guarded `mise-tools` | none yet | `go-modules`: `go clean -modcache` (clear); `go-build`: `go clean -cache` (clear) | `scan` and `clean` have no Go project rule. `clean --global` selects mise rules; `--include-clear` adds both Go rules. | Project binaries, `vendor`, and caches at paths other than those returned by Go from the home directory. |
@@ -115,7 +135,7 @@ The global-cache column lists additional rules relevant to that tool.
 "None yet" means there is no dedicated rule for that cache.
 An unrelated directory name can still match a generic project rule.
 Outside the shared mise rules, the core tools with no cache rule are
-`dotnet` (also named `dotnet-core`), `elixir`, `erlang`, `ruby`, and `zig`.
+`elixir`, `erlang`, `ruby`, and `zig`.
 
 ## Backends
 
@@ -141,7 +161,7 @@ See mise's [install and uninstall code][mise-backend].
 | `npm` | Embedded installer cache and store under mise's cache directory, or external npm/pnpm/Bun caches when configured | `mise-cache` reaches the embedded cache; `npm` clears npm's cache; `pnpm` prunes its resolved store; `bun` prunes Bun's cache | Stores not resolved by the rules ([source][mise-npm]) |
 | `pypi` | Per-tool environments and uv cache, or pip cache when installing through pipx | `mise-tools` removes selected environments; `uv` prunes and `pip` clears their resolved caches | Other pipx state and environments outside mise; caches at other configured paths ([backend][pypi]) |
 | `gem` | Per-tool gems and gem archives under each install; separate RubyGems and Bundler caches | `mise-tools` removes selected installs as a whole | No rule to prune archives within retained installs or separate gem/Bundler caches ([source][mise-gem]) |
-| `dotnet` | .NET tool installs and NuGet package/HTTP caches | `mise-tools` removes selected installs | NuGet caches have no rule ([source][mise-dotnet]) |
+| `dotnet` | .NET tool installs and NuGet package/HTTP caches | `mise-tools` removes selected installs; `nuget-packages` and `nuget-http-cache` clear the folders that `dotnet nuget locals` lists from the home directory | NuGet folders set for a single project; NuGet's `temp` and `plugins-cache` folders ([source][mise-dotnet]) |
 | `conda` | Channel metadata under mise's cache directory; shared archives in its data directory under `conda-packages` | `mise-cache` reaches channel metadata; `mise-tools` removes selected environments | Shared `conda-packages` archives have no rule; external conda package caches have no rule ([source][mise-conda]) |
 | `spinel` | Source checkout and compiler output in mise's download directory when retained | Shared mise rules reach version metadata and selected installs | Retained source/build downloads outside the prune selection; external compiler caches ([source][mise-spinel]) |
 | `spm` | Shared package cache under mise's cache directory at `spm`; build output in the install; temporary source or artifact data if interrupted | `mise-cache` reaches the shared package cache; `mise-tools` removes selected installs | Swift Package Manager caches outside mise's cache directory have no rule ([source][mise-spm]) |
@@ -286,3 +306,9 @@ See Yarn's [cache clean command][yarn-clean] and
 [deno-dir]: https://github.com/denoland/deno/blob/v2.9.8/libs/resolver/cache/deno_dir.rs
 [yarn-clean]: https://github.com/yarnpkg/berry/blob/%40yarnpkg/cli/4.18.1/packages/plugin-essentials/sources/commands/cache/clean.ts
 [yarn-config]: https://github.com/yarnpkg/berry/blob/%40yarnpkg/cli/4.18.1/packages/yarnpkg-core/sources/Configuration.ts
+[dotnet-build]: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-build
+[msbuild-props]: https://learn.microsoft.com/en-us/visualstudio/msbuild/common-msbuild-project-properties
+[dotnet-artifacts]: https://learn.microsoft.com/en-us/dotnet/core/sdk/artifacts-output
+[dotnet-nuget-locals]: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-nuget-locals
+[nuget-folders]: https://learn.microsoft.com/en-us/nuget/consume-packages/managing-the-global-packages-and-cache-folders
+[nuget-locals-source]: https://github.com/NuGet/NuGet.Client/blob/8.2.0.14/src/NuGet.Core/NuGet.Commands/CommandRunners/LocalsCommandRunner.cs#L109-L117

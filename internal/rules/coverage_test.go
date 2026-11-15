@@ -35,6 +35,13 @@ func TestCoverageTableIncludesDefaultRules(t *testing.T) {
 			t.Errorf("coverage table is missing default cache name %q", name)
 		}
 	}
+	for name, markers := range r.Beside {
+		for _, m := range markers {
+			if !listed[m] {
+				t.Errorf("coverage table is missing project file %q for %q", m, name)
+			}
+		}
+	}
 	for _, rule := range r.Global {
 		if !listed[rule.ID] {
 			t.Errorf("coverage table is missing default global rule ID %q", rule.ID)
