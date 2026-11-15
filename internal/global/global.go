@@ -155,7 +155,8 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 	return filepath.Clean(path), nil
 }
 
-// jsonField returns the string field name of the JSON object in out.
+// jsonField returns the value of the string field name
+// in the JSON object that out holds.
 func jsonField(out, name string) (string, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(out), &fields); err != nil {

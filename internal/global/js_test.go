@@ -68,6 +68,8 @@ func TestBunBefore144IsSkipped(t *testing.T) {
 		"1.4.3":              false,
 		"1.4.3-canary.1+abc": false,
 		"0.8.1":              false,
+		"":                   false,
+		"bun":                false,
 		"1.4.4":              true,
 		"1.4.10":             true,
 		"1.10.0":             true,
@@ -87,7 +89,7 @@ func TestBunBefore144IsSkipped(t *testing.T) {
 			}
 			continue
 		}
-		if !strings.Contains(e.Skipped, "before 1.4.4") || e.Command != "" {
+		if !strings.Contains(e.Skipped, "before 1.4.4") && !strings.Contains(e.Skipped, "no line that matches") || e.Command != "" {
 			t.Errorf("%s: entry = %+v", version, e)
 		}
 		r.Clean(context.Background(), entries, Options{Apply: true, IncludeClear: true})

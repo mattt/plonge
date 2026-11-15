@@ -387,7 +387,7 @@ It checks the path when it lists the rule and again right before it deletes.
 `tool` must still be available, and a `path` command must still start with it.
 
 When your rule has the same `id` as a default, it replaces all of the default,
-so copy the default's `check` and `targets` to keep them.
+so copy the default's `check`, `require`, `refuse`, and `targets` to keep them.
 
 ## Disk
 

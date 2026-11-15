@@ -212,7 +212,7 @@ until each one runs `bun install` again.
 
 Bun added `prune` in 1.4.4,
 so the rule's check runs `bun --version`
-and skips the rule for an earlier version.
+and skips the rule for an earlier version or when it prints no version.
 Bun 1.3 prints its cache path only inside a project with a `package.json`,
 so for Bun 1.3 the rule is skipped earlier, because its path command fails.
 `prune` takes its directory from `BUN_INSTALL_CACHE_DIR`, `BUN_INSTALL`,
