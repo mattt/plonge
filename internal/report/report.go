@@ -53,6 +53,8 @@ type Report struct {
 	SkippedRoots []SkippedRoot `json:"skipped_roots"`
 	BrokenLinks  int           `json:"broken_links"`
 	Errors       []string      `json:"errors"`
+	// Refused lists the caches that are or hold a Git repository.
+	Refused []scan.Refusal `json:"refused"`
 	// ActivitySources reports each source of agent activity.
 	ActivitySources []scan.Source `json:"activity_sources"`
 	// Global lists the global caches; it is nil unless they were requested.
@@ -70,6 +72,7 @@ func Build(roots []scan.Root, sizes [][]int64, quietHours float64, brokenLinks i
 		SkippedRoots: []SkippedRoot{},
 		BrokenLinks:  brokenLinks,
 		Errors:       []string{},
+		Refused:      []scan.Refusal{},
 
 		ActivitySources: []scan.Source{},
 	}
@@ -79,6 +82,7 @@ func Build(roots []scan.Root, sizes [][]int64, quietHours float64, brokenLinks i
 			continue
 		}
 		r.Errors = append(r.Errors, root.Errors...)
+		r.Refused = append(r.Refused, root.Refused...)
 		var last *time.Time
 		if !root.LastActivity.IsZero() {
 			t := root.LastActivity
@@ -166,6 +170,7 @@ func WriteTable(w io.Writer, r Report, home string) error {
 	if len(r.Errors) > 0 {
 		fmt.Fprintf(w, "Git errors: %d (caches in those repositories are not listed)\n", len(r.Errors))
 	}
+	WriteRefusals(w, r.Refused, home)
 	writeSources(w, r.ActivitySources)
 	if r.Global != nil {
 		if err := writeGlobal(w, r.Global, home); err != nil {
@@ -187,6 +192,14 @@ func writeSources(w io.Writer, sources []scan.Source) {
 			fmt.Fprintf(w, "Activity source failed: %s (%s)\n", s.Name, s.Reason)
 			fmt.Fprintf(w, "Every project counts as busy. Fix %s, or remove it from PATH for this run.\n", s.Name)
 		}
+	}
+}
+
+// WriteRefusals lists the caches that plonge does not report or delete
+// because they are or hold a Git repository.
+func WriteRefusals(w io.Writer, refused []scan.Refusal, home string) {
+	for _, r := range refused {
+		fmt.Fprintf(w, "Refused %s: %s\n", Tilde(r.Path, home), r.Reason)
 	}
 }
 
@@ -306,6 +319,7 @@ func WriteClean(w io.Writer, r clean.Result, home string) error {
 	if r.Failed > 0 {
 		fmt.Fprintf(w, "Failed: %d\n", r.Failed)
 	}
+	WriteRefusals(w, r.Refused, home)
 	writeSources(w, r.ActivitySources)
 	var err error
 	if r.Applied {

@@ -7,7 +7,8 @@ mise en place is the preparation, and the plonge is where the dishes get done.
 
 `plonge scan` and `plonge clean` without `--apply` delete nothing.
 `plonge clean --apply` deletes selected project cache directories
-only if Git ignores them and they contain no tracked files.
+only if Git ignores them, they contain no tracked files,
+and they are not and do not hold a Git repository.
 It excludes active and busy projects by default.
 `plonge clean --global --apply` instead runs global cleanup actions,
 which do not use those project checks.
@@ -72,6 +73,8 @@ plonge scan --no-mise --root .
 A cache is a directory whose name matches a rule,
 such as `node_modules` or `.venv`.
 Plonge reports it only if Git ignores it and it contains no tracked files.
+It refuses a cache that is or holds a Git repository,
+as [described below](#caches-that-hold-a-git-repository).
 A rule defines a cache name, any required project file,
 or a global cleanup action.
 
@@ -106,7 +109,8 @@ You can repeat `--root`; `--no-mise` requires at least one root.
 
 Before each deletion, Plonge checks that the path is still a directory,
 is not a symlink, is inside its root,
-is ignored by Git, and contains no tracked files.
+is ignored by Git, contains no tracked files,
+and is not and does not hold a Git repository.
 It asks Paseo again once per project, before the first deletion there,
 and skips the project's caches if Paseo now reports an agent there
 or if Plonge cannot read Paseo's status.
@@ -121,6 +125,38 @@ Files linked elsewhere, filesystem snapshots, and changes during cleanup
 can affect how much space becomes available.
 Global size totals can also overlap.
 Use `plonge disk` to check free space on your home directory's volume.
+
+### Caches that hold a Git repository
+
+A cache can hold a separate Git repository,
+such as a dependency checked out from Git or a clone in a `build` directory.
+The enclosing repository ignores the cache and does not see that repository's files,
+so its ignore and tracked-file checks cannot protect its commits or uncommitted work.
+Plonge refuses a cache that has a `.git` entry of any type
+(a directory, a worktree-style file, or a symlink) at any depth,
+or a Git directory (`HEAD` beside `objects` and `refs`), such as a bare clone.
+It also refuses a cache with a directory that it cannot read,
+because that directory could hide a repository.
+Plonge stops at the first repository that it finds,
+does not follow symlinks, and checks while it measures the cache's size.
+It checks again right before deletion.
+
+`scan` and `clean` list each refused cache and the reason,
+and do not count it in the totals:
+
+```console
+Refused ~/code/app/node_modules: contains a Git repository at some-dep
+```
+
+With `--json`, the `refused` list has the `path`, `project`, `rule`, and `reason`
+of each one.
+
+npm, pnpm, and Yarn 1 do not keep `.git` when they install a package from Git,
+so such a `node_modules` is not refused for that reason.
+Swift Package Manager keeps Git checkouts and bare clones in `.build`,
+so Plonge refuses a `.build` directory for a package with remote dependencies.
+`swift package reset` removes it;
+`swift package clean` removes only the build output and keeps the checkouts.
 
 ## Project discovery and activity
 

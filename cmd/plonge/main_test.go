@@ -185,6 +185,43 @@ func TestClean(t *testing.T) {
 	}
 }
 
+func TestCleanRefusesNestedRepository(t *testing.T) {
+	home := setup(t)
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	project := filepath.Join(home, "code", "app")
+	quietRepo(t, project)
+	dep := filepath.Join(project, "node_modules", "dep")
+	gitInit(t, dep)
+
+	args := []string{"--no-mise", "--root", project}
+	var stdout, stderr bytes.Buffer
+	if code := run(append([]string{"scan"}, args...), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	want := "Refused ~/code/app/node_modules: contains a Git repository at dep"
+	if out := stdout.String(); !strings.Contains(out, want) || !strings.Contains(out, "Total: 0 B in 0 caches") {
+		t.Errorf("scan output lacks %q:\n%s", want, out)
+	}
+
+	stdout.Reset()
+	if code := run(append([]string{"clean", "--apply", "--json"}, args...), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	var got struct {
+		Items   []struct{ Path string }
+		Refused []struct{ Path, Project, Rule, Reason string }
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("%v\n%s", err, stdout.String())
+	}
+	if len(got.Items) != 0 || len(got.Refused) != 1 || got.Refused[0].Rule != "node_modules" {
+		t.Errorf("result %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(dep, ".git")); err != nil {
+		t.Errorf("the nested repository is gone: %v", err)
+	}
+}
+
 func TestCleanActiveAndJSON(t *testing.T) {
 	home := setup(t)
 	t.Setenv("GIT_CEILING_DIRECTORIES", home)
