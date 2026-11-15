@@ -63,7 +63,11 @@ whose `build` command uses `build` in the project directory
 as its `build_base` by default.
 A [strict editable install][setuptools-editable] also puts its link tree
 in that directory.
-Setuptools has no command that removes `build`,
+Setuptools has a [`clean --all`][setuptools-clean] command,
+but it runs through the project's `setup.py`,
+and it leaves the editable link tree and the `build` directory
+when that tree is present.
+Plonge's project rules delete directories and do not run project code,
 so Plonge deletes the directory.
 The next build writes it again; a strict editable install stops working
 until it is installed again.
@@ -221,7 +225,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | mypy, pytest, Ruff | `.mypy_cache`, `.pytest_cache`, `.ruff_cache` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. |
 | tox, nox | `.tox`, `.nox` | none | Delete matching project directories; neither tool has a cleanup command | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Environments moved by `--workdir`, `work_dir`, or `--envdir` are not matched. |
 | Maven, Gradle | `target` beside `pom.xml`; `.gradle` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Global repositories and caches remain. |
-| setuptools | `build` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; setuptools has no cleanup command | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `build_base` setting that moves the directory is not followed. |
+| setuptools | `build` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; Plonge does not run `setup.py clean --all` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `build_base` setting that moves the directory is not followed. |
 | build, `uv build` | `dist` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; neither tool has a command that removes `dist` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Output moved by `--outdir` or `--out-dir` is not matched. |
 | uv | `.venv`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py` | `uv` | `uv cache prune` | prune; eligible with `clean --global`; requires `--apply` to run |
 | pip | The same Python environment names | `pip` | `pip cache purge` | clear; requires `clean --global --include-clear --apply` to run |
@@ -275,6 +279,7 @@ without checking Xcode workspace metadata.
 [setuptools-editable]: https://github.com/pypa/setuptools/blob/v84.2.1/setuptools/command/editable_wheel.py#L373-L379
 [pypa-build-outdir]: https://github.com/pypa/build/blob/1.6.1/src/build/__main__.py#L742-L747
 [uv-build-outdir]: https://github.com/astral-sh/uv/blob/0.13.8/crates/uv-build-commands/src/lib.rs#L402-L413
+[setuptools-clean]: https://github.com/pypa/setuptools/blob/v84.2.1/setuptools/_distutils/command/clean.py#L56-L78
 [setuptools-dist]: https://github.com/pypa/setuptools/blob/v84.2.1/setuptools/_distutils/command/sdist.py#L174
 [uv-publish]: https://github.com/astral-sh/uv/blob/0.13.8/crates/uv-cli/src/lib.rs#L7433-L7438
 [nuget-locals-source]: https://github.com/NuGet/NuGet.Client/blob/8.2.0.14/src/NuGet.Core/NuGet.Commands/CommandRunners/LocalsCommandRunner.cs#L109-L117
