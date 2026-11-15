@@ -17,7 +17,8 @@ import (
 
 // A rule with delete_contents has no cleanup command,
 // so plonge deletes what is in the rule's path itself.
-// It keeps the directory and refuses a path that could hold more than a cache.
+// It keeps the directory and refuses a path that could hold more than a cache,
+// including a path that is or holds a Git repository at any depth.
 
 // deleteAction is the Command of a rule that deletes the contents of path.
 func (r Runner) deleteAction(path string) string {
@@ -113,6 +114,11 @@ func (r Runner) applyDelete(ctx context.Context, o *Outcome) {
 	reason := r.refuseDelete(ctx, o.Path)
 	if reason == "" {
 		reason = refuseNames(o.Path, o.refuseNames)
+	}
+	if reason == "" {
+		// Git checked only the path and its parents; a repository below the path
+		// is not part of their work tree, so walk the path for one.
+		reason = scan.GitRefusal(o.Path)
 	}
 	if reason != "" {
 		o.Status, o.Reason = Skipped, reason

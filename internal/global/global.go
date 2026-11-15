@@ -302,8 +302,13 @@ func usage(path string) int64 {
 	return scan.DiskUsage(path)
 }
 
+// measure sizes each entry that is not skipped.
+// The walk of a delete_contents path also looks for a Git repository
+// below it, and skips the entry when it finds one,
+// because the deletion would lose that repository's commits and changes.
 func measure(entries []Entry) {
 	var dirs []string
+	var guard []bool
 	var index []int
 	for i, e := range entries {
 		switch {
@@ -313,18 +318,26 @@ func measure(entries []Entry) {
 				// A link removes only itself, so its target does not count.
 				if info, err := os.Lstat(p); err == nil && info.IsDir() {
 					dirs = append(dirs, p)
+					guard = append(guard, false)
 					index = append(index, i)
 				}
 			}
 		default:
 			if p, err := filepath.EvalSymlinks(e.Path); err == nil {
 				dirs = append(dirs, p)
+				guard = append(guard, e.deleteContents)
 				index = append(index, i)
 			}
 		}
 	}
-	for k, n := range scan.Sizes(dirs) {
-		entries[index[k]].Bytes += n
+	sizes, reasons := scan.GuardedSizes(dirs, guard)
+	for k, n := range sizes {
+		e := &entries[index[k]]
+		if reasons[k] != "" {
+			e.Skipped, e.Command, e.Bytes = reasons[k], "", 0
+			continue
+		}
+		e.Bytes += n
 	}
 }
 
