@@ -16,26 +16,36 @@ import (
 //	    .env = .{ .ZIG_GLOBAL_CACHE_DIR = null },
 //	}
 //
-// It reads only what it needs: field names, string literals,
-// and enough of other values to skip them.
+// It reads the whole struct before it returns the value,
+// so output that is cut short, has a field twice,
+// or has more than whitespace and comments after the struct is an error.
+// It decodes field names and string literals,
+// and checks only enough of other values to skip them.
 func zonField(src, name string) (string, error) {
 	p := &zonParser{s: src}
 	p.space()
 	if !p.take(".{") {
 		return "", errors.New("output is not a ZON struct")
 	}
+	var value string
+	found := false
+	seen := map[string]bool{}
 	for {
 		p.space()
 		if p.take("}") {
-			return "", fmt.Errorf("output has no %s field", name)
+			break
 		}
 		if !p.take(".") {
-			return "", p.errorf("expected a field")
+			return "", p.errorf("expected a field or }")
 		}
 		field, err := p.ident()
 		if err != nil {
 			return "", err
 		}
+		if seen[field] {
+			return "", fmt.Errorf("output has field %s twice", field)
+		}
+		seen[field] = true
 		p.space()
 		if !p.take("=") {
 			return "", p.errorf("expected = after .%s", field)
@@ -45,14 +55,29 @@ func zonField(src, name string) (string, error) {
 			if !strings.HasPrefix(p.s[p.i:], `"`) {
 				return "", fmt.Errorf("field %s is not a string", name)
 			}
-			return p.str()
-		}
-		if err := p.skipValue(); err != nil {
+			if value, err = p.str(); err != nil {
+				return "", err
+			}
+			found = true
+		} else if err := p.skipValue(); err != nil {
 			return "", err
 		}
 		p.space()
-		p.take(",")
+		if p.take("}") {
+			break
+		}
+		if !p.take(",") {
+			return "", p.errorf("expected , or } after .%s", field)
+		}
 	}
+	p.space()
+	if p.i < len(p.s) {
+		return "", p.errorf("output has more text after the struct")
+	}
+	if !found {
+		return "", fmt.Errorf("output has no %s field", name)
+	}
+	return value, nil
 }
 
 type zonParser struct {
@@ -185,25 +210,33 @@ func (p *zonParser) escape(b *strings.Builder) error {
 	return nil
 }
 
-// skipValue skips a value up to the comma or brace that ends it.
+// skipValue skips one value, such as 1, null, .enum_literal, or .{ ... },
+// and stops before the space, comma, or brace that follows it.
+// Inside braces it skips everything except strings, character literals,
+// and comments, which can hold braces.
+// A multiline string with more than one line is not supported.
 func (p *zonParser) skipValue() error {
+	start := p.i
 	depth := 0
 	for p.i < len(p.s) {
-		switch c := p.s[p.i]; {
+		c := p.s[p.i]
+		if depth == 0 && (strings.ContainsRune(" \t\r\n,}", rune(c)) || strings.HasPrefix(p.s[p.i:], "//")) {
+			if p.i == start {
+				return p.errorf("expected a value")
+			}
+			return nil
+		}
+		switch {
 		case c == '"':
 			if _, err := p.str(); err != nil {
 				return err
 			}
 			continue
 		case c == '\'':
-			// A character literal, such as '}' or '\''.
-			p.i++
-			for p.i < len(p.s) && p.s[p.i] != '\'' {
-				if p.s[p.i] == '\\' {
-					p.i++
-				}
-				p.i++
+			if err := p.char(); err != nil {
+				return err
 			}
+			continue
 		case p.take(`\\`), p.take("//"):
 			// A multiline string line or a comment runs to the end of the line.
 			p.line()
@@ -211,14 +244,30 @@ func (p *zonParser) skipValue() error {
 		case c == '{':
 			depth++
 		case c == '}':
-			if depth == 0 {
-				return nil
-			}
 			depth--
-		case c == ',' && depth == 0:
-			return nil
 		}
 		p.i++
 	}
-	return p.errorf("struct is not closed")
+	if depth > 0 {
+		return p.errorf("struct is not closed")
+	}
+	return p.errorf("output ends after a value")
+}
+
+// char skips a character literal, such as '}' or an escaped quote.
+func (p *zonParser) char() error {
+	p.i++ // the opening quote
+	for p.i < len(p.s) {
+		switch p.s[p.i] {
+		case '\'':
+			p.i++
+			return nil
+		case '\n':
+			return p.errorf("character literal has a line break")
+		case '\\':
+			p.i++
+		}
+		p.i++
+	}
+	return p.errorf("character literal is not closed")
 }

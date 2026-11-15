@@ -37,6 +37,8 @@ func TestZONField(t *testing.T) {
 		{zigEnv(".cache/zig"), ".cache/zig"},
 		{zigEnv(`/a \"b\"\\c\x41\u{e9}\td`), "/a \"b\"\\cA\u00e9\td"},
 		{`.{.global_cache_dir="/x"}`, "/x"},
+		{`.{ .global_cache_dir = "/x", }` + "\n// done\n\n", "/x"},
+		{`.{ .a = .enum_literal, .b = -1.5, .c = .{ 1, "}", '\'' }, .global_cache_dir = "/x" }`, "/x"},
 		// A nested field of the same name and odd values before it do not count.
 		{`.{ .a = .{ .global_cache_dir = "/nested" }, .b = '}', .c = 1, // comment }
 		.@"q d" = "}", .global_cache_dir = "/top" }`, "/top"},
@@ -59,7 +61,20 @@ func TestZONFieldErrors(t *testing.T) {
 		`.{ .global_cache_dir = "/x`:                "not closed",
 		`.{ .global_cache_dir = "/x\q" }`:           `unknown escape`,
 		`.{ .global_cache_dir = "/x\xZZ" }`:         `two hex digits`,
-		`.{ .a = .{ .b = 1 }`:                       "not closed",
+		`.{ .a = .{ .b = 1 }`:                       "output ends after a value",
+		`.{ .a = .{ .b = 1`:                         "struct is not closed",
+		`.{ .a = 1`:                                 "output ends after a value",
+		`.{ .a = , .global_cache_dir = "/x" }`:      "expected a value",
+		`.{ .a = 'x, .global_cache_dir = "/x" }`:    "character literal",
+		// The selected value does not count until the struct is complete.
+		`.{ .global_cache_dir = "/some/directory"`:                    "expected , or } after .global_cache_dir",
+		`.{ .global_cache_dir = "/some/directory",`:                   "expected a field or }",
+		`.{ .global_cache_dir = "/a", .global_cache_dir = "/b" }`:     "field global_cache_dir twice",
+		`.{ .global_cache_dir = "/a" .version = "0.17.1" }`:           "expected , or } after .global_cache_dir",
+		`.{ .version = 1 2, .global_cache_dir = "/a" }`:               "expected , or } after .version",
+		`.{ .global_cache_dir = "/a" } .{ .global_cache_dir = "/b" }`: "more text after the struct",
+		`.{ .global_cache_dir = "/a" } trailing`:                      "more text after the struct",
+		`.{ .global_cache_dir = "/a", , }`:                            "expected a field or }",
 	}
 	for src, want := range cases {
 		_, err := zonField(src, "global_cache_dir")
@@ -108,5 +123,54 @@ func TestPathFromZONField(t *testing.T) {
 	}
 	if e := entries[3]; !strings.Contains(e.Skipped, "path command failed: output is not a ZON struct") {
 		t.Errorf("JSON: %+v", e)
+	}
+}
+
+// TestBadZONOutputDeletesNothing runs cleanup with --apply and --include-clear
+// for zig env output that names a real directory but is not one complete,
+// valid struct. Each rule must be skipped, and the directory must keep its files.
+func TestBadZONOutputDeletesNothing(t *testing.T) {
+	r, tmp, cache, _ := deleteSetup(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	other := filepath.Join(tmp, "other")
+	addFile(t, filepath.Join(other, "keep"))
+	outputs := map[string]string{
+		"cut-short":  `.{ .global_cache_dir = "` + cache + `"`,
+		"cut-comma":  `.{ .global_cache_dir = "` + cache + `",`,
+		"duplicate":  `.{ .global_cache_dir = "` + cache + `", .global_cache_dir = "` + other + `" }`,
+		"no-comma":   `.{ .global_cache_dir = "` + cache + `" .version = "0.17.1" }`,
+		"trailing":   `.{ .global_cache_dir = "` + cache + `" } rm -rf`,
+		"two-struct": `.{ .global_cache_dir = "` + cache + `" } .{ .global_cache_dir = "` + other + `" }`,
+		"good":       `.{ .global_cache_dir = "` + other + `" }`,
+	}
+	var rs []rules.Global
+	for name, out := range outputs {
+		file := filepath.Join(tmp, name+".zon")
+		if err := os.WriteFile(file, []byte(out+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		addTool(t, bin, name, fmt.Sprintf(`[ "$*" = env ] && /bin/cat %q`, file))
+		rs = append(rs, rules.Global{ID: name, Tool: name, Path: name + " env", PathZONField: "global_cache_dir",
+			Kind: rules.KindClear, DeleteContents: true})
+	}
+	ctx := context.Background()
+	res := r.Clean(ctx, r.List(ctx, rs), Options{Apply: true, IncludeClear: true})
+	for _, o := range res.Outcomes {
+		if o.ID == "good" {
+			// The control case shows that a valid output would delete.
+			if o.Status != Ran {
+				t.Errorf("good: %+v", o)
+			}
+			continue
+		}
+		if o.Status != Skipped || !strings.HasPrefix(o.Reason, "path command failed: ") {
+			t.Errorf("%s: status %q, reason %q", o.ID, o.Status, o.Reason)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cache, "blob")); err != nil {
+		t.Errorf("the cache lost its file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(other, "keep")); err == nil {
+		t.Error("the good output did not delete its contents")
 	}
 }
