@@ -471,10 +471,10 @@ so the agent sees the warning and can offer to run the skill.
 Plonge has these default rules:
 
 ```toml
-names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
-         ".pytest_cache", ".ruff_cache", ".svelte-kit", ".turbo", ".venv",
-         "DerivedData", "__pycache__", "bin", "dist", "node_modules", "obj",
-         "target", "venv"]
+names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
+         ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
+         ".turbo", ".venv", "DerivedData", "__pycache__", "bin", "build", "dist",
+         "node_modules", "obj", "target", "venv"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -484,7 +484,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # A project file can be a pattern, such as "*.csproj".
 [beside]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
-dist = ["package.json"]
+build = ["pyproject.toml", "setup.py"]
+dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
@@ -498,14 +499,16 @@ and a `quiet_hours` value replaces the default.
 For example:
 
 ```toml
-names = [".cache", "build"]
+names = [".cache"]
 quiet_hours = 72
 skip = ["third_party"]
 
 [beside]
-build = ["build.gradle", "build.gradle.kts"]
-dist = ["package.json", "pyproject.toml"]
+build = ["build.gradle", "build.gradle.kts", "pyproject.toml", "setup.py"]
 ```
+
+This `build` entry adds Gradle projects.
+It replaces the default entry, so it lists the default project files too.
 
 A `beside` project file can be a pattern, such as `*.csproj`,
 in the syntax of Go's [`filepath.Match`](https://pkg.go.dev/path/filepath#Match).
