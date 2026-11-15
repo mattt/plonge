@@ -147,18 +147,24 @@ Plonge uses the newest activity it can find from these sources:
   This can also match a sibling such as `app-two` for a root named `app`,
   which can only make the root appear more active.
 - `paseo`: `paseo ls --json --global --background`.
+  Plonge expands a leading `~` in an agent's working directory
+  to the home directory.
   A busy project gets the scan time as its last activity time.
 
 If Claude Code's projects directory is missing or unreadable,
 Plonge reports the `claude` source as skipped and continues.
-If `paseo` is not on PATH, Plonge reports the `paseo` source as skipped,
-because no Paseo agent can run, and no project is busy.
+If `paseo` is not on PATH, Plonge cannot ask Paseo,
+so it does not know of any running Paseo agent.
+It reports the `paseo` source as skipped, and no project is busy.
 
 ### Paseo failures
 
 If `paseo` is on PATH but `paseo ls` fails, does not finish in 15 seconds,
-or prints output that Plonge cannot read,
+or prints output that Plonge cannot use,
 Plonge cannot tell where Paseo agents work.
+Output that Plonge cannot use includes output that is not a JSON array,
+and a running or initializing agent whose working directory is empty
+or is not an absolute path after `~` expansion.
 It reports the `paseo` source as failed, with the reason,
 and treats every project as busy.
 `scan` shows every project as busy,
