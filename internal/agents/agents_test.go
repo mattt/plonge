@@ -60,11 +60,13 @@ func TestPaseoBusy(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Paseo writes paths inside the home directory with a leading ~/.
+	// An idle agent's directory is not used, so it need not be absolute.
 	fakePaseo(t, `[ "$*" = "ls --json --global --background" ] || exit 9
 /bin/cat <<'EOF'
 [{"cwd":"~/running/pkg","status":"running"},
  {"cwd":"~/link","status":"initializing"},
- {"cwd":"~/idle","status":"idle"}]
+ {"cwd":"~/idle","status":"idle"},
+ {"cwd":"","status":"idle"}]
 EOF`)
 	now := time.Now()
 	old := now.Add(-72 * time.Hour)
@@ -120,6 +122,12 @@ func TestPaseoFailed(t *testing.T) {
 	}{
 		{"fails", `echo "no daemon" >&2; exit 1`, "no daemon"},
 		{"bad output", `echo not json`, "cannot read"},
+		{"null", `echo null`, "not a JSON array"},
+		{"object", `echo '{"cwd":"/","status":"running"}'`, "cannot read"},
+		{"empty cwd", `echo '[{"cwd":"","status":"running"}]'`, "no absolute working directory"},
+		{"missing cwd", `echo '[{"status":"initializing"}]'`, "no absolute working directory"},
+		{"relative cwd", `echo '[{"cwd":"code/app","status":"running"}]'`, "no absolute working directory"},
+		{"other user", `echo '[{"cwd":"~other/app","status":"running"}]'`, "no absolute working directory"},
 		// exec makes the timeout kill the sleep itself.
 		{"times out", `exec /bin/sleep 5`, "did not finish"},
 	}

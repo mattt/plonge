@@ -76,6 +76,9 @@ func failed(name, reason string) scan.Source {
 }
 
 // busyDirs returns the working directories of Paseo agents that are running or starting.
+// The source fails when the output is not a JSON array,
+// or when such an agent has no absolute working directory after ~ expansion,
+// because Plonge then cannot tell which projects the agents work in.
 func busyDirs(ctx context.Context, home string) ([]string, scan.Source) {
 	if _, err := exec.LookPath("paseo"); err != nil {
 		return nil, skipped(SourcePaseo, "paseo is not on PATH")
@@ -105,11 +108,20 @@ func busyDirs(ctx context.Context, home string) ([]string, scan.Source) {
 	if err := json.Unmarshal(out, &list); err != nil {
 		return nil, failed(SourcePaseo, fmt.Sprintf("cannot read paseo ls output: %v", err))
 	}
+	// JSON null decodes without an error but leaves list nil.
+	if list == nil {
+		return nil, failed(SourcePaseo, "cannot read paseo ls output: not a JSON array")
+	}
 	var cwds []string
 	for _, a := range list {
-		if a.Cwd != "" && (a.Status == "running" || a.Status == "initializing") {
-			cwds = append(cwds, real(expandHome(a.Cwd, home)))
+		if a.Status != "running" && a.Status != "initializing" {
+			continue
 		}
+		cwd := expandHome(a.Cwd, home)
+		if !filepath.IsAbs(cwd) {
+			return nil, failed(SourcePaseo, fmt.Sprintf("a %s Paseo agent has no absolute working directory: %q", a.Status, a.Cwd))
+		}
+		cwds = append(cwds, real(cwd))
 	}
 	return cwds, scan.Source{Name: SourcePaseo, Status: scan.SourceUsed}
 }
