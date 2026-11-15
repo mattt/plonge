@@ -134,6 +134,35 @@ path_label = "http-cache"
 clean = "dotnet nuget locals http-cache --clear"
 kind = "clear"
 
+# Swift Package Manager keeps one shared cache per user, in the user's caches
+# directory, and prints no command for its path. --cache-path is the only
+# setting that moves it, so these rules use the default for each system
+# and pass it as --cache-path, so the command cleans the cache that plonge measures.
+# On Linux, Foundation puts SwiftPM's own default in $XDG_CACHE_HOME when set;
+# that cache is not covered.
+# purge-cache removes the cached Git repositories, registry downloads, and
+# manifest cache, including ones that projects use, so the rules are clear.
+# It keeps the artifacts and prebuilts folders, which plonge still measures.
+# Run outside a package, purge-cache writes CACHEDIR.TAG and a build-system
+# file to <working directory>/.build. Plonge runs it from the home directory,
+# so --scratch-path, relative to home, puts them in the cache directory
+# instead of making ~/.build.
+[[global]]
+id = "swiftpm-macos"
+tool = "swift"
+path = "~/Library/Caches/org.swift.swiftpm"
+clean = "swift package purge-cache --cache-path Library/Caches/org.swift.swiftpm --scratch-path Library/Caches/org.swift.swiftpm"
+kind = "clear"
+os = "darwin"
+
+[[global]]
+id = "swiftpm-linux"
+tool = "swift"
+path = "~/.cache/org.swift.swiftpm"
+clean = "swift package purge-cache --cache-path .cache/org.swift.swiftpm --scratch-path .cache/org.swift.swiftpm"
+kind = "clear"
+os = "linux"
+
 # Zig has no command that cleans its global cache, so plonge deletes its
 # contents. The cache holds build output and the packages that zig fetch and
 # zig build download; a later build downloads a package again.

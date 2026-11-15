@@ -350,3 +350,82 @@ func TestDefaultZigRule(t *testing.T) {
 		t.Errorf("zig calls = %q, err = %v", data, err)
 	}
 }
+
+// TestSwiftPMRules checks that each system gets its own SwiftPM rule,
+// and that purge-cache runs from the home directory with a scratch path
+// that resolves to the cache directory, so that it does not make ~/.build.
+func TestSwiftPMRules(t *testing.T) {
+	for _, tc := range []struct {
+		goos, id, other, cache string
+	}{
+		{"darwin", "swiftpm-macos", "swiftpm-linux", "Library/Caches/org.swift.swiftpm"},
+		{"linux", "swiftpm-linux", "swiftpm-macos", ".cache/org.swift.swiftpm"},
+	} {
+		t.Run(tc.goos, func(t *testing.T) {
+			bin := fakeTools(t)
+			r := runner(t)
+			r.GOOS = tc.goos
+			cache := filepath.Join(r.Home, tc.cache)
+			if err := os.MkdirAll(cache, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cache, "blob"), make([]byte, 50_000), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			log := filepath.Join(t.TempDir(), "log")
+			// The fake follows SwiftPM: --cache-path, or else the XDG cache on Linux.
+			xdg := t.TempDir()
+			t.Setenv("XDG_CACHE_HOME", xdg)
+			addFile(t, filepath.Join(xdg, "org.swift.swiftpm", "blob"))
+			addTool(t, bin, "swift", fmt.Sprintf(`echo "$PWD $*" >> %q
+cache=""
+while [ $# -gt 0 ]; do
+  [ "$1" = --cache-path ] && cache=$2
+  shift
+done
+[ -n "$cache" ] || cache="$XDG_CACHE_HOME/org.swift.swiftpm"
+/bin/rm -f "$cache/blob"`, log))
+			ctx := context.Background()
+			got := map[string]Entry{}
+			var picked []Entry
+			for _, e := range r.List(ctx, rules.Default().Global) {
+				got[e.ID] = e
+				if e.ID == tc.id {
+					picked = append(picked, e)
+				}
+			}
+			want := "swift package purge-cache --cache-path " + tc.cache + " --scratch-path " + tc.cache
+			e := got[tc.id]
+			if e.Skipped != "" || e.Path != cache || e.Command != want || e.Kind != rules.KindClear || e.Bytes < 50_000 {
+				t.Errorf("%s = %+v", tc.id, e)
+			}
+			if _, ok := got[tc.other]; ok {
+				t.Errorf("%s listed on %s", tc.other, tc.goos)
+			}
+			res := r.Clean(ctx, picked, Options{Apply: true})
+			if res.Outcomes[0].Status != Skipped {
+				t.Errorf("without --include-clear: %+v", res)
+			}
+			if _, err := os.Stat(log); err == nil {
+				t.Error("swift ran without --include-clear")
+			}
+			res = r.Clean(ctx, picked, Options{Apply: true, IncludeClear: true})
+			if res.Outcomes[0].Status != Ran || res.FreedBytes < 50_000 {
+				t.Errorf("result = %+v", res)
+			}
+			data, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if line := strings.TrimSpace(string(data)); line != r.Home+" package purge-cache --cache-path "+tc.cache+" --scratch-path "+tc.cache {
+				t.Errorf("swift ran as %q", line)
+			}
+			if _, err := os.Stat(filepath.Join(r.Home, ".build")); err == nil {
+				t.Error("~/.build exists")
+			}
+			if _, err := os.Stat(filepath.Join(xdg, "org.swift.swiftpm", "blob")); err != nil {
+				t.Errorf("the XDG cache changed: %v", err)
+			}
+		})
+	}
+}
