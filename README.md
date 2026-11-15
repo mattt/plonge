@@ -124,10 +124,53 @@ If a path check does not pass, Plonge skips the path or reports an error.
 Plonge can make read-only files and directories writable to remove them.
 It continues after deletion errors and exits with a nonzero status.
 
-The report estimates the space freed; it does not measure volume free space.
+### Disk space
+
+After `--apply`, the report gives two numbers:
+
+```console
+Estimated freed: 29.5 GiB (from cache sizes)
+Free space on ~ grew by 14.0 GiB, from 80.1 GiB to 94.1 GiB; other processes and snapshots can change it
+```
+
+The estimate adds up the sizes of the caches that Plonge deleted or cleaned,
+measured as described below.
+The second line is the change in free space on your home directory's volume,
+which Plonge reads before the first deletion and after the last one.
+It is what became available on that volume, but other processes
+write and delete files at the same time,
+and caches on another volume do not change it.
+With `--json`, `home_volume` has `free_before`, `free_after`, and `gained_bytes`,
+or an `error` when Plonge cannot read free space.
+Dry runs do not have these values.
+
+A size is the space that deleting the cache would free,
+as well as Plonge can measure it.
 On Unix, sizes use allocated blocks and count a hard-linked file once per cache.
 On other platforms, sizes use file lengths.
-Files linked elsewhere, filesystem snapshots, and changes during cleanup
+
+On macOS, a file can be a clone that shares its blocks with other files,
+as when uv clones files from its cache into a virtual environment,
+or when a snapshot, such as a Time Machine local snapshot, keeps them.
+Deleting such a file frees only the blocks that no other file
+or snapshot uses.
+So on macOS, Plonge counts a file's private size,
+which APFS reports through `getattrlist` (`ATTR_CMNEXT_PRIVATESIZE`),
+in place of its allocated blocks.
+When a file and all of its full clones are in the same cache,
+Plonge also counts the blocks that they share, once,
+because deleting the cache frees them.
+That count includes blocks that a snapshot also keeps,
+and blocks that the family shares with a clone that was changed after it was made,
+which APFS no longer counts as a full clone.
+Deleting the cache does not free those blocks,
+so its size can be larger than the space that it frees.
+This count is never larger than the allocated blocks.
+A compressed file, and a file on a volume that does not report a private size,
+use allocated blocks.
+For these reasons, a size on macOS can be smaller than what `du` reports.
+
+Files linked elsewhere, snapshots on other systems, and changes during cleanup
 can affect how much space becomes available.
 Global size totals can also overlap.
 Use `plonge disk` to check free space on your home directory's volume.
@@ -324,7 +367,9 @@ plonge clean --global --apply --include-clear
 
 `plonge clean --global` works only on global caches and leaves your projects alone.
 By default it lists the commands as a dry run.
-`--apply` runs eligible actions and estimates the space freed.
+`--apply` runs eligible actions, estimates the space freed,
+and reports the change in free space on your home directory's volume,
+as [described above](#disk-space).
 Global cleanup does not use the project activity or Git checks,
 except that a `delete_contents` rule refuses a path
 that is in or holds a Git repository.
@@ -338,6 +383,16 @@ A `clear` rule can remove cached data still in use
 and requires `--include-clear`.
 Later commands may need to download dependencies or rebuild files.
 Neither kind guarantees that the whole reported size will be freed.
+
+For most prune rules, the size is the size of the whole cache,
+and the tool's policy selects which part of it to remove,
+so the space that a prune frees can be much smaller.
+`scan --global` and `clean --global` mark such a size `(whole cache)`,
+and with `--json`, the rule has `"whole_cache": true`.
+A prune rule that lists what it removes, as `mise-tools` does,
+and `xcode-derived-data` report the size of what they would remove instead,
+without the mark.
+A clear rule's size is the size of its cache, without the mark.
 
 | ID | Kind | Action |
 | --- | --- | --- |
@@ -671,6 +726,8 @@ A `delete_contents` rule always uses its own `path`, or its `path_env`.
 ## Disk
 
 `plonge disk` prints the free space on your home directory's volume.
+`plonge clean --apply` also reports how much this free space changed,
+as described in [Disk space](#disk-space).
 
 ```console
 plonge disk

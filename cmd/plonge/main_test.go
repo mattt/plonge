@@ -166,6 +166,9 @@ func TestClean(t *testing.T) {
 			t.Errorf("dry run lacks %q:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "Free space on ~") {
+		t.Errorf("the dry run reports a change in free space:\n%s", out)
+	}
 	if _, err := os.Stat(cache); err != nil {
 		t.Fatalf("the dry run touched the cache: %v", err)
 	}
@@ -174,8 +177,8 @@ func TestClean(t *testing.T) {
 	if code := run(append(args, "--apply"), &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Estimated freed: ") {
-		t.Errorf("output:\n%s", stdout.String())
+	if out := stdout.String(); !strings.Contains(out, "Estimated freed: ") || !strings.Contains(out, "Free space on ~") {
+		t.Errorf("output:\n%s", out)
 	}
 	if _, err := os.Stat(cache); !os.IsNotExist(err) {
 		t.Errorf("the cache is still there: %v", err)
@@ -505,8 +508,36 @@ func TestCleanGlobal(t *testing.T) {
 	if _, err := os.Stat(blob); !os.IsNotExist(err) {
 		t.Errorf("the blob is still there: %v", err)
 	}
-	if out := stdout.String(); !strings.Contains(out, "Estimated freed: ") || strings.Contains(out, "Estimated freed: 0 B") {
+	if out := stdout.String(); !strings.Contains(out, "Estimated freed: ") || strings.Contains(out, "Estimated freed: 0 B") ||
+		!strings.Contains(out, "Free space on ~") {
 		t.Errorf("output:\n%s", out)
+	}
+
+	// The JSON has the free space before and after; a dry run has none.
+	for _, apply := range []bool{false, true} {
+		args := []string{"clean", "--global", "--json"}
+		if apply {
+			args = append(args, "--apply")
+		}
+		stdout.Reset()
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr.String())
+		}
+		var got struct {
+			HomeVolume *struct {
+				FreeBefore int64  `json:"free_before"`
+				FreeAfter  int64  `json:"free_after"`
+				Error      string `json:"error"`
+			} `json:"home_volume"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+			t.Fatalf("%v\n%s", err, stdout.String())
+		}
+		if apply != (got.HomeVolume != nil) {
+			t.Errorf("apply %v: home_volume = %+v", apply, got.HomeVolume)
+		} else if apply && got.HomeVolume.Error == "" && got.HomeVolume.FreeBefore <= 0 {
+			t.Errorf("home_volume = %+v", got.HomeVolume)
+		}
 	}
 }
 

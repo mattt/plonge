@@ -78,6 +78,10 @@ func TestListAndCleanFromPath(t *testing.T) {
 	if e.Skipped != "" || e.Path != cache || e.Bytes < 100_000 || e.Command != "uv cache prune" || e.Kind != "prune" {
 		t.Fatalf("entry = %+v", e)
 	}
+	// uv's policy removes only part of the cache, so Bytes is not space to free.
+	if !e.WholeCache {
+		t.Errorf("a prune rule's cache size is not labeled: %+v", e)
+	}
 
 	dry := r.Clean(ctx, entries, Options{})
 	if dry.Applied || dry.Outcomes[0].Status != WouldRun || dry.FreedBytes != 0 {
@@ -184,6 +188,9 @@ esac`, cache, log, cache))
 	r := runner(t)
 	ctx := context.Background()
 	entries := r.List(ctx, []rules.Global{rule})
+	if entries[0].WholeCache {
+		t.Errorf("a clear rule's size is labeled as a prune rule's cache: %+v", entries[0])
+	}
 
 	res := r.Clean(ctx, entries, Options{Apply: true})
 	if o := res.Outcomes[0]; o.Status != Skipped || !strings.Contains(o.Reason, "--include-clear") {

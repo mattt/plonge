@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/rules"
 	"github.com/mattt/plonge/internal/scan"
 )
@@ -38,6 +39,11 @@ type Entry struct {
 	// Note says why Path is a fallback, or why Bytes is the size of Path
 	// although the rule has targets.
 	Note string `json:"note,omitempty"`
+	// WholeCache is true when Bytes is the size of the whole cache
+	// of a prune rule, whose tool removes only the part that its policy selects.
+	// It is false for a clear rule, for a rule whose targets give Bytes,
+	// and for the Xcode rule, whose Bytes is the size of the folders that it deletes.
+	WholeCache bool `json:"whole_cache,omitempty"`
 
 	argv   []string
 	guards []*guard
@@ -288,6 +294,10 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 		entries = append(entries, e)
 	}
 	measure(entries)
+	for i := range entries {
+		e := &entries[i]
+		e.WholeCache = e.Skipped == "" && e.Kind == rules.KindPrune && !e.targeted
+	}
 	if e, ok := r.xcodeEntry(); ok {
 		entries = append(entries, e)
 	}
@@ -369,6 +379,9 @@ type Result struct {
 	Outcomes   []Outcome `json:"outcomes"`
 	FreedBytes int64     `json:"freed_bytes"`
 	Failed     int       `json:"failed"`
+	// HomeVolume is the free space on the home directory's volume
+	// before and after the actions ran; it is nil without Apply.
+	HomeVolume *disk.Change `json:"home_volume,omitempty"`
 }
 
 // Clean runs the clean action of each entry, or only lists it without Apply.

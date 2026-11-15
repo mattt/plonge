@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattt/plonge/internal/clean"
+	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/global"
 	"github.com/mattt/plonge/internal/scan"
 )
@@ -189,6 +191,85 @@ func TestWriteGlobalRefusedAndTargets(t *testing.T) {
 	} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, buf.String())
+		}
+	}
+}
+
+func TestWholeCacheLabel(t *testing.T) {
+	entries := []global.Entry{
+		{ID: "uv", Kind: "prune", Bytes: 3 << 30, Command: "uv cache prune", WholeCache: true},
+		{ID: "pip", Kind: "clear", Bytes: 1 << 30, Command: "pip cache purge"},
+	}
+	var buf bytes.Buffer
+	if err := writeGlobal(&buf, entries, "/home"); err != nil {
+		t.Fatal(err)
+	}
+	scanOut := buf.String()
+	buf.Reset()
+	res := global.Result{Outcomes: []global.Outcome{
+		{Entry: entries[0], Status: global.WouldRun},
+		{Entry: entries[1], Status: global.WouldRun},
+	}}
+	if err := WriteGlobalClean(&buf, res, "/home"); err != nil {
+		t.Fatal(err)
+	}
+	for name, out := range map[string]string{"scan": scanOut, "clean": buf.String()} {
+		if !strings.Contains(out, "3.0 GiB (whole cache)") || strings.Contains(out, "1.0 GiB (whole cache)") {
+			t.Errorf("%s: sizes are not labeled by kind:\n%s", name, out)
+		}
+		if !strings.Contains(out, "A size marked (whole cache)") {
+			t.Errorf("%s: no note explains the label:\n%s", name, out)
+		}
+	}
+
+	buf.Reset()
+	if err := writeGlobal(&buf, entries[1:], "/home"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "whole cache") {
+		t.Errorf("a clear rule alone gets the note:\n%s", buf.String())
+	}
+
+	buf.Reset()
+	if err := WriteJSON(&buf, res); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Outcomes []map[string]any `json:"outcomes"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Outcomes[0]["whole_cache"] != true || got.Outcomes[1]["whole_cache"] != nil {
+		t.Errorf("JSON outcomes = %v", got.Outcomes)
+	}
+}
+
+func TestWriteFreedReportsHomeVolume(t *testing.T) {
+	tests := []struct {
+		vol  *disk.Change
+		want string
+	}{
+		{&disk.Change{FreeBefore: 80 << 30, FreeAfter: 94 << 30, GainedBytes: 14 << 30},
+			"Free space on ~ grew by 14.0 GiB, from 80.0 GiB to 94.0 GiB; other processes and snapshots can change it\n"},
+		{&disk.Change{FreeBefore: 2 << 30, FreeAfter: 1 << 30, GainedBytes: -1 << 30}, "Free space on ~ fell by 1.0 GiB"},
+		{&disk.Change{FreeBefore: 5, FreeAfter: 5}, "Free space on ~ did not change"},
+		{&disk.Change{Error: "no volume"}, "Free space on ~: cannot measure the change (no volume)\n"},
+	}
+	for _, tt := range tests {
+		var buf bytes.Buffer
+		if err := WriteClean(&buf, clean.Result{Applied: true, FreedBytes: 29 << 30, HomeVolume: tt.vol}, "/home"); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(buf.String(), "Estimated freed: 29.0 GiB") || !strings.Contains(buf.String(), tt.want) {
+			t.Errorf("clean output lacks %q:\n%s", tt.want, buf.String())
+		}
+		buf.Reset()
+		if err := WriteGlobalClean(&buf, global.Result{Applied: true, FreedBytes: 29 << 30, HomeVolume: tt.vol}, "/home"); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(buf.String(), "Estimated freed: 29.0 GiB") || !strings.Contains(buf.String(), tt.want) {
+			t.Errorf("global output lacks %q:\n%s", tt.want, buf.String())
 		}
 	}
 }
