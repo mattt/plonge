@@ -8,7 +8,8 @@ mise en place is the preparation, and the plonge is where the dishes get done.
 `plonge scan` and `plonge clean` without `--apply` delete nothing.
 `plonge clean --apply` deletes selected project cache directories
 only if Git ignores them, they contain no tracked files,
-and they are not and do not hold a Git repository.
+they are not and do not hold a Git repository,
+and they hold nothing that their rule protects.
 It excludes active and busy projects by default.
 `plonge clean --global --apply` instead runs global cleanup actions,
 which do not use those project checks.
@@ -74,7 +75,9 @@ A cache is a directory whose name matches a rule,
 such as `node_modules` or `.venv`.
 Plonge reports it only if Git ignores it and it contains no tracked files.
 It refuses a cache that is or holds a Git repository,
-as [described below](#caches-that-hold-a-git-repository).
+as [described below](#caches-that-hold-a-git-repository),
+and a cache that holds an entry that its rule protects,
+such as a release or dependency sources in a Mix `_build` directory.
 A rule defines a cache name, any required project file,
 or a global cleanup action.
 
@@ -110,7 +113,8 @@ You can repeat `--root`; `--no-mise` requires at least one root.
 Before each deletion, Plonge checks that the path is still a directory,
 is not a symlink, is inside its root,
 is ignored by Git, contains no tracked files,
-and is not and does not hold a Git repository.
+is not and does not hold a Git repository,
+and holds no entry that its rule protects.
 It asks Paseo again once per project, before the first deletion there,
 and skips the project's caches if Paseo now reports an agent there
 or if Plonge cannot read Paseo's status.
@@ -241,7 +245,7 @@ A rule for a cache without a cleanup command,
 or whose command also removes user state,
 can delete the contents of its path instead,
 as `zig-global-cache` does for Zig, `rubygems-cache` does for RubyGems,
-and the Deno rules do.
+and as the Deno, Cargo, `hex-packages`, and `rebar3-hex` rules do.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -275,6 +279,7 @@ Neither kind guarantees that the whole reported size will be freed.
 | `pnpm` | prune | `pnpm store prune` |
 | `go-modules` | clear | `go clean -modcache` |
 | `go-build` | clear | `go clean -cache` |
+| `cargo-registry` | clear | Built-in deletion of the contents of `registry` in the Cargo home |
 | `npm` | clear | `npm cache clean --force` |
 | `bun` | clear | `bun pm cache prune` (Bun 1.4.4 or later) |
 | `deno-remote`, `deno-npm`, `deno-gen` | clear | Built-in deletion of the contents of Deno's module, npm, and TypeScript caches |
@@ -288,6 +293,8 @@ Neither kind guarantees that the whole reported size will be freed.
 | `swiftpm-linux` | clear | `swift package purge-cache` (Linux) |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
 | `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
+| `hex-packages` | clear | Built-in deletion of the contents of `~/.hex/packages` |
+| `rebar3-hex` | clear | Built-in deletion of the contents of `~/.cache/rebar3/hex` |
 | `rubygems-cache` | clear | Built-in deletion of the contents of RubyGems' gem cache |
 
 Plonge runs a tool through `mise exec --`
@@ -403,6 +410,32 @@ Plonge joins the two after it reads the printed path.
 `path_subdir` needs a `path` command,
 and it must be a relative path of directory names, without `.` or `..`.
 
+A fixed `path` can give way to an environment variable
+that holds the tool's directory.
+`path_env` names the variable,
+and `path_env_subdir` is a relative path inside the directory it names:
+
+```toml
+path = "~/.cargo/registry"
+path_env = "CARGO_HOME"
+path_env_subdir = "registry"
+```
+
+When the variable is set and not empty, Plonge uses its value
+joined with `path_env_subdir`, here `$CARGO_HOME/registry`;
+otherwise it uses `path`.
+Plonge reads the variable from its own environment,
+not from the environment that `mise exec` gives the tool.
+It skips the rule when the value is not an absolute path.
+`path_env_subdir` cannot start with `/` or leave the directory with `..`.
+
+Cargo's command that cleans its global cache, `cargo clean gc`, is unstable,
+so the `cargo-registry` rule deletes the contents
+of `registry` in the Cargo home: `$CARGO_HOME`, or `~/.cargo`.
+It keeps `git`, whose checkouts are working trees that a user can edit,
+and `bin`, `config.toml`, `credentials.toml`, and the records of `cargo install`.
+Cargo 1.88 and later also delete unused files in these folders on their own.
+
 A rule can name a `check`, a command that must not change anything:
 
 ```toml
@@ -489,8 +522,14 @@ It holds build output and the packages that `zig fetch` and `zig build` download
 so later builds can be slower and must download packages again.
 Before Zig 0.15, `zig env` printed JSON, so Plonge skips this rule;
 replace it with a fixed `path` to use it with those versions.
-It makes read-only entries writable first and does not follow symlinks.
-The rule must have kind `clear`,
+The default `hex-packages` and `rebar3-hex` rules use fixed paths,
+because neither Hex nor Rebar3 has a command that prints them.
+They delete only the package folders,
+and keep the Hex configuration and the `rebar3` that `rebar3 local install` makes.
+A package cache moved by `HEX_HOME`, `MIX_XDG`, or `REBAR_CACHE_DIR`
+is not covered; replace the rule with that `path` to use it.
+Plonge makes read-only entries writable first and does not follow symlinks.
+A `delete_contents` rule must have kind `clear`,
 so it runs only with `clean --global --include-clear --apply`.
 It cannot have `clean` or `targets`; it can have a `check`.
 The action reads `delete contents of <path> (built in)`.
@@ -521,7 +560,7 @@ so copy the default's `check`, `require`, `refuse`, `checks`, and `targets`
 to keep them.
 For `mise-tools` with `tool = "mise"` and a `clean` command,
 `path` is used only when mise cannot report its installs directory.
-A `delete_contents` rule always uses its own `path`.
+A `delete_contents` rule always uses its own `path`, or its `path_env`.
 
 ## Disk
 
@@ -602,8 +641,8 @@ Plonge has these default rules:
 ```toml
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
-         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "bin",
-         "build", "dist", "node_modules", "obj", "target", "tmp/cache",
+         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "_build",
+         "bin", "build", "dist", "node_modules", "obj", "target", "tmp/cache",
          "vendor/bundle", "venv", "zig-cache"]
 quiet_hours = 24
 
@@ -616,6 +655,7 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # the first name in the path.
 [beside]
 ".zig-cache" = ["build.zig"]
+_build = ["mix.exs"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 build = ["pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
@@ -625,6 +665,10 @@ target = ["Cargo.toml", "pom.xml"]
 "vendor/bundle" = ["Gemfile", "gems.rb"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 zig-cache = ["build.zig"]
+
+# Refuse a match that has an entry at one of these paths, relative to it.
+[refuse_inside]
+_build = ["*/rel", "*/lib/*/src"]
 ```
 
 To add rules, write them to `$XDG_CONFIG_HOME/plonge/rules.toml`
@@ -645,6 +689,34 @@ build = ["build.gradle", "build.gradle.kts", "pyproject.toml", "setup.py"]
 
 This `build` entry adds Gradle projects.
 It replaces the default entry, so it lists the default project files too.
+
+A `refuse_inside` entry lists paths, relative to a matching directory,
+that hold data a rebuild cannot restore.
+The default entry protects a release that Mix or Rebar3 builds
+in `_build/<env or profile>/rel`,
+which can hold a generated Erlang cookie and earlier release versions,
+and the dependency sources that Rebar3 keeps in `_build/<profile>/lib`,
+where an edit has no Git data that Plonge can check:
+
+```toml
+[refuse_inside]
+_build = ["*/rel", "*/lib/*/src"]
+```
+
+Plonge refuses a match that has an entry, a file or a directory,
+at one of these paths, and lists it with the path that it found:
+
+```console
+Refused ~/code/app/_build: contains prod/rel, which refuse_inside "*/rel" protects
+```
+
+Plonge checks when it measures the cache and again right before deletion.
+Separate the elements of a path with `/`.
+Each element is a name or a [`filepath.Match`](https://pkg.go.dev/path/filepath#Match) pattern,
+and cannot be empty, `.`, or `..`, or contain `\`.
+Plonge does not follow a symlink to a directory on the way to a path,
+and it refuses the match when it cannot read a directory on the way.
+A `refuse_inside` entry in your file replaces the default entry for that name.
 
 A `beside` project file can be a pattern, such as `*.csproj`,
 in the syntax of Go's [`filepath.Match`](https://pkg.go.dev/path/filepath#Match).

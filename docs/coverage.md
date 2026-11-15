@@ -212,6 +212,77 @@ under `configuration` ([source][spm-local-config]),
 and Xcode keeps the package's schemes and user data under `xcode`.
 No part of it is a regenerable cache that a directory-name rule can match.
 
+The Mix and Rebar3 rules follow Elixir **1.20.5** and Rebar3 **3.28.0**,
+the current stable releases.
+Mix puts build output in `_build/<env>` beside `mix.exs` by default;
+`MIX_BUILD_ROOT`, `MIX_BUILD_PATH`, and the `:build_path` option change it
+([source][mix-build-path]).
+An umbrella app's `mix.exs` sets `build_path` to the umbrella's `_build`
+([source][mix-umbrella]), so the match is beside the umbrella's `mix.exs`.
+Mix's `_build/<env>/lib/<app>` holds compiled output and symlinks
+to each app's `include` and `priv` ([source][mix-build-structure]).
+Plonge deletes those symlinks and not what they point to.
+`mix clean --deps` removes the build output,
+but it loads the project's `mix.exs` ([source][mix-clean]),
+so Plonge deletes the directory, as it does for setuptools.
+Rebar3 puts build output in `_build/<profile>` beside `rebar.config`,
+and the sources of dependencies in `_build/<profile>/lib`
+([source][rebar3-dirs], [defaults][rebar3-hrl]).
+Rebar3 fetches a Git dependency with `git clone`, which keeps its `.git` directory
+([source][rebar3-git]), so Plonge refuses a `_build` with a Git dependency.
+An edit to a Hex dependency in `_build/<profile>/lib` has no such protection,
+so Plonge does not match `_build` beside `rebar.config`,
+and it refuses any `_build` that holds `*/lib/*/src`,
+such as a Mix project that Rebar3 also built.
+Rebar3 builds the dependencies in `_checkouts` in place of
+fetched ones for local edits ([source][rebar3-checkouts]),
+and Plonge does not match `_checkouts`.
+
+Both tools build a release in `_build/<env or profile>/rel`
+([Mix][mix-release-path], [Rebar3][rebar3-rel]).
+When a Mix release has no `:cookie` option, Mix writes a random Erlang cookie
+to its `releases/COOKIE` file and keeps it in later builds
+([source][mix-cookie]); a new build writes a different one.
+A Rebar3 release can also hold the earlier versions that `relup` needs.
+So the `_build` rule has a `refuse_inside` path, `*/rel`,
+and Plonge refuses a `_build` that holds a release.
+
+Plonge does not match Mix's `deps` directory.
+`deps` holds only dependency sources ([option][mix-deps-path]).
+Mix keeps a Git dependency's `.git` directory ([source][mix-git]),
+which Plonge refuses,
+but Hex unpacks a package into `deps/<name>` with only a `.hex` manifest
+([source][hex-unpack]).
+An edit to such a package is not tracked by Git and has no `.git` entry,
+so Plonge's checks cannot see it and a deletion would lose it.
+`mix deps.clean --all` removes `deps` and its build output
+([source][mix-deps-clean]), but Plonge does not run it.
+
+Hex and Rebar3 have no command that cleans their package caches,
+so `hex-packages` and `rebar3-hex` use the built-in deletion described below.
+Hex 2.7.0 keeps package tarballs in `packages/<repo>` in its cache home
+([source][hex-cache-path]).
+The cache home is `HEX_HOME`, `$XDG_CACHE_HOME/hex` when `MIX_XDG` is set,
+or `~/.hex` ([source][hex-home], [docs][hex-home-docs]).
+`mix hex.config` does not print the packages folder,
+so the rule uses the default, `~/.hex/packages`,
+and a cache moved by `HEX_HOME` or `MIX_XDG` is not covered.
+`~/.hex` also holds `hex.config`, with the user's Hex API key
+([source][hex-config-path]), and the registry cache,
+so the rule deletes only the contents of `packages`.
+The next `mix deps.get` downloads a deleted tarball again;
+`HEX_OFFLINE` uses only cached tarballs ([source][hex-offline]).
+Rebar3 3.28.0 keeps the package index and tarballs in `hex`
+in its global cache ([source][rebar3-hex-dir]),
+which is `REBAR_CACHE_DIR` or `~/.cache/rebar3`
+([source][rebar3-cache-dir], [override][rebar3-cache-env]).
+Rebar3 has no command that prints it, so the rule uses `~/.cache/rebar3/hex`.
+The global cache also holds global plugins
+([source][rebar3-plugins]) and the `rebar3` that `rebar3 local install` writes
+to `bin` and `vsns` ([source][rebar3-local-install]),
+so the rule deletes only the contents of `hex`.
+Both rules are `clear`, because they also delete packages that projects use.
+
 ## How to read the tables
 
 The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
@@ -236,7 +307,8 @@ or exact paths of directory names such as `vendor/bundle`.
 Every match must be inside a scanned root, ignored by Git,
 and contain no tracked files.
 Plonge refuses a match that is or holds a Git repository at any depth,
-as the [README](../README.md#caches-that-hold-a-git-repository) describes.
+as the [README](../README.md#caches-that-hold-a-git-repository) describes,
+and a match that holds an entry at one of its rule's `refuse_inside` paths.
 A listed project file must be in the cache directory's parent directory,
 or for a path, in the directory that holds the path's first name.
 A project file written as a pattern, such as `*.csproj`, matches any name of that form.
@@ -287,21 +359,20 @@ The global-cache column lists additional rules relevant to that tool.
 | `deno` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | `deno-remote`, `deno-npm`, `deno-gen`: `delete_contents` of the `modulesCache`, `npmCache`, and `typescriptCache` paths from `deno info --json` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds the three Deno rules. | `deno clean`, which also deletes user state; `location_data` (localStorage and Cache API data) and REPL history, which hold user state; the `registries` and `dl` folders and the analysis, check, and code caches in `DENO_DIR`. |
 | `dotnet` | Guarded `mise-tools` | `bin` and `obj` beside `*.csproj`, `*.fsproj`, or `*.vbproj` | `nuget-packages`: `dotnet nuget locals global-packages --clear` (clear); `nuget-http-cache`: `dotnet nuget locals http-cache --clear` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds both NuGet rules. | Output moved by `BaseOutputPath`, `BaseIntermediateOutputPath`, or `--output`; the [`artifacts` layout][dotnet-artifacts] (`UseArtifactsOutput`); `bin` and `obj` beside other project types; NuGet's `temp` and `plugins-cache` folders; `packages.config` folders set by `repositoryPath`; NuGet folders set only in a project's `nuget.config`. |
 | `dotnet-core` (alias of `dotnet`) | Guarded `mise-tools`; same tool as `dotnet` | Same as `dotnet` | Same as `dotnet` | Same as `dotnet`. | Same as `dotnet`. |
-| `elixir` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Elixir cache rule. `clean --global` selects mise rules; `--include-clear` adds no Elixir rule. | Mix `_build` and `deps`; Hex package cache. |
-| `erlang` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Erlang cache rule. `clean --global` selects mise rules; `--include-clear` adds no Erlang rule. | Rebar3 `_build` and global package cache. |
+| `elixir` | Guarded `mise-tools` | `_build` beside `mix.exs`, refused when it holds `*/rel` | `hex-packages`: `delete_contents` of `~/.hex/packages` (clear) | `scan` reports project matches; `clean` selects quiet ones. A `_build` that holds a release is refused. `clean --global` selects mise rules; `--include-clear` adds `hex-packages`. | Mix `deps`, which can hold edited dependency sources; `_build` moved by `MIX_BUILD_ROOT`, `MIX_BUILD_PATH`, or `:build_path`; `_build` with a release; a Hex cache moved by `HEX_HOME` or `MIX_XDG`; Hex's registry cache and docs. |
+| `erlang` | Guarded `mise-tools` | none yet; `_build` beside `rebar.config` is left out because it holds dependency sources | `rebar3-hex`: `delete_contents` of `~/.cache/rebar3/hex` (clear) | `scan` and `clean` have no Rebar3 project rule. `clean --global` selects mise rules; `--include-clear` adds `rebar3-hex`. | Rebar3 `_build`, which holds dependency sources that a user can edit; `_checkouts`; a Rebar3 cache moved by `REBAR_CACHE_DIR`; Rebar3's global plugins and its `local install` copy. |
 | `go` | Guarded `mise-tools` | none yet | `go-modules`: `go clean -modcache` (clear); `go-build`: `go clean -cache` (clear) | `scan` and `clean` have no Go project rule. `clean --global` selects mise rules; `--include-clear` adds both Go rules. | Project binaries, `vendor`, and caches at paths other than those returned by Go from the home directory. |
 | `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); Gradle project `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
 | `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1); `yarn-berry`: `yarn cache clean` (clear, Yarn 2 and later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and the one Yarn rule that matches the version of `yarn` in the home directory. | Project `.yarn/cache` folders; the Yarn 2+ global cache when `yarn` in the home directory is Yarn 1 or `enableGlobalCache` is off; separate pnpm stores not resolved from the home directory; `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
 | `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py`; `build` and `dist` beside `pyproject.toml` or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | tox and nox environments moved by `--workdir`, `work_dir`, or `--envdir`; build output moved by setuptools' `build_base`; `*.egg-info`; `dist` moved by `--outdir` or `--out-dir`; uv-managed Python installations outside mise; caches at other configured paths. |
 | `ruby` | Guarded `mise-tools` | `vendor/bundle` beside `Gemfile` or `gems.rb`; `tmp/cache` beside `config.ru` | `rubygems-cache`: `delete_contents` of `cache` in the directory that `gem env gemdir` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `rubygems-cache`. | Bundler's `vendor/cache`, which `bundle cache` fills on purpose; gems installed at a `path` other than `vendor/bundle`; a `vendor/bundle` that holds a gem from a Git source; the rest of a Rails app's `tmp`; caches moved by `cache_store` or `BOOTSNAP_CACHE_DIR`; gem caches of other Ruby versions and of `--user-install` gems; old gem versions, which `gem cleanup` uninstalls; Bundler's user cache (`~/.bundle/cache`); RubyGems' spec cache. |
-| `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Rust rule. | Cargo's registry and Git caches (`~/.cargo/registry`, `~/.cargo/git`); sccache; toolchains managed outside mise. |
+| `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | `cargo-registry`: `delete_contents` of `registry` in the Cargo home (clear); the Cargo home is `$CARGO_HOME`, or `~/.cargo` | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `cargo-registry`. Cargo 1.88 and later also delete global cache files that they have not used for 1 or 3 months. | Cargo's Git cache (`git` in the Cargo home), whose checkouts are working trees that a user can edit; `cargo clean gc`, which is unstable; a relative `CARGO_HOME`, which the rules skip; a `CARGO_HOME` that only the environment of `mise exec` sets; `bin`, `config.toml`, `credentials.toml`, `.crates.toml`, and `.crates2.json`, which hold installed programs and user state; sccache, which has no cleanup command; toolchains managed outside mise. |
 | `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `swiftpm-macos` (macOS): `swift package purge-cache --cache-path Library/Caches/org.swift.swiftpm --scratch-path Library/Caches/org.swift.swiftpm` (clear); `swiftpm-linux` (Linux): `swift package purge-cache --cache-path .cache/org.swift.swiftpm --scratch-path .cache/org.swift.swiftpm` (clear); `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. A `.build` directory for a package with remote dependencies is refused, because it holds Git checkouts and bare clones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds the SwiftPM rule for the system. | `.build` directories with remote dependencies; SwiftPM's `artifacts` and `prebuilts` caches; a shared cache moved by `--cache-path` or `XDG_CACHE_HOME`; `.swiftpm`, which holds package configuration and Xcode schemes; Xcode build data for existing workspaces, archives, device support, and simulators. |
 | `zig` | Guarded `mise-tools` | `.zig-cache` and `zig-cache` (before Zig 0.13) beside `build.zig` | `zig-global-cache`: `delete_contents` (built-in deletion) of the `global_cache_dir` that `zig env` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `zig-global-cache`. | `zig-out` install output, which can hold programs and libraries that a user runs; local caches moved with `--cache-dir` or `ZIG_LOCAL_CACHE_DIR`; the global cache when `zig env` prints JSON, as before Zig 0.15 (override the rule with a fixed path). |
 
 "None yet" means there is no dedicated rule for that cache.
 An unrelated directory name can still match a generic project rule.
-Outside the shared mise rules, the core tools with no cache rule are
-`elixir` and `erlang`.
+Outside the shared mise rules, every core tool has a cache rule.
 
 ## Backends
 
@@ -322,7 +393,7 @@ See mise's [install and uninstall code][mise-backend].
 | `http` | Retained downloads and, with shared extraction enabled, extracted archives in mise's data directory under `http-tarballs` | Shared mise rules reach version caches and selected installs | Shared `http-tarballs` extractions have no rule; they are outside `mise-cache`'s scope ([source][mise-http]) |
 | `s3` | Retained S3 downloads and extracted installs | Shared mise rules | Retained downloads outside the prune selection; caches created later by installed tools ([source][mise-s3]) |
 | `asdf`, `vfox` | Plugin metadata, retained downloads, and any caches a plugin's install code creates | `mise-cache` reaches mise's cache directory; `mise-tools` delegates uninstall to the backend | Plugin directories and caches outside mise's cache directory have no general rule; plugin behavior varies |
-| `cargo` | Cargo registry and Git downloads after source builds; optional compiler caches; prebuilt binaries when available | `mise-tools` removes selected installs; project `target` applies only in scanned roots beside `Cargo.toml` | Cargo registry, Git cache, and sccache have no global rule ([backend][cargo]) |
+| `cargo` | Cargo registry and Git downloads after source builds; optional compiler caches; prebuilt binaries when available | `mise-tools` removes selected installs; `cargo-registry` clears the Cargo home's registry cache; project `target` applies only in scanned roots beside `Cargo.toml` | Cargo's Git cache and sccache have no global rule ([backend][cargo]) |
 | `go` | Go module downloads and build cache | `go-modules` and `go-build` clear the paths returned by `go env GOMODCACHE` and `go env GOCACHE` from the home directory | Caches at other configured paths |
 | `npm` | Embedded installer cache and store under mise's cache directory, or external npm/pnpm/Bun caches when configured | `mise-cache` reaches the embedded cache; `npm` clears npm's cache; `pnpm` prunes its resolved store; `bun` prunes Bun's cache | Stores not resolved by the rules ([source][mise-npm]) |
 | `pypi` | Per-tool environments and uv cache, or pip cache when installing through pipx | `mise-tools` removes selected environments; `uv` prunes and `pip` clears their resolved caches | Other pipx state and environments outside mise; caches at other configured paths ([backend][pypi]) |
@@ -349,6 +420,8 @@ Global rules require their command to be available, except for the Xcode rule.
 | --- | --- | --- | --- | --- |
 | Astro, Next.js, Parcel, SvelteKit, Turborepo | `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo`; `dist` beside `package.json` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. No dedicated global action. |
 | mypy, pytest, Ruff | `.mypy_cache`, `.pytest_cache`, `.ruff_cache` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. |
+| Mix, Rebar3 | `_build` beside `mix.exs` | none | Delete matching project directories; Plonge does not run `mix clean` or `rebar3 clean` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `_build` that holds a release (`*/rel`) or dependency sources (`*/lib/*/src`) is refused. Rebar3 `_build` beside `rebar.config` and Mix `deps` are not matched. |
+| Hex, Rebar3 | none | `hex-packages`, `rebar3-hex` | `delete_contents` of `~/.hex/packages` and `~/.cache/rebar3/hex`; neither tool has a cleanup command | clear; requires `clean --global --include-clear --apply` to run. Caches moved by `HEX_HOME`, `MIX_XDG`, or `REBAR_CACHE_DIR` are not covered. |
 | tox, nox | `.tox`, `.nox` | none | Delete matching project directories; neither tool has a cleanup command | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Environments moved by `--workdir`, `work_dir`, or `--envdir` are not matched. |
 | Maven, Gradle | `target` beside `pom.xml`; `.gradle` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Global repositories and caches remain. |
 | setuptools | `build` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; Plonge does not run `setup.py clean --all` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `build_base` setting that moves the directory is not followed. |
@@ -363,6 +436,8 @@ Global rules require their command to be available, except for the Xcode rule.
 | Deno | `node_modules` | `deno-remote`, `deno-npm`, `deno-gen` | `delete_contents` of the paths that `deno info --json` prints | clear; requires `clean --global --include-clear --apply` to run. |
 | Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Only when `yarn --version` reports 1.x. |
 | Yarn 2 and later | `node_modules` | `yarn-berry` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Only when `yarn --version` reports 2.x or later. |
+| Cargo | `target` beside `Cargo.toml` | `cargo-registry` | `delete_contents` of `registry` in `$CARGO_HOME`, or `~/.cargo` | clear; requires `clean --global --include-clear --apply` to run. `git`, `bin`, configuration, and credentials remain. |
+| sccache | none | none | none; sccache 0.19.0 has no command that clears or prunes its cache | Not covered. |
 | RubyGems | none | `rubygems-cache` | `delete_contents` of `cache` in the directory that `gem env gemdir` prints; Plonge does not run `gem cleanup`, which uninstalls old gem versions | clear; requires `clean --global --include-clear --apply` to run. Installed gems stay; only the copies of their `.gem` files are deleted. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
 | Swift Package Manager | `.build` | `swiftpm-macos`, `swiftpm-linux` | `swift package purge-cache`, with `--cache-path` and `--scratch-path` set to the measured cache directory | clear; requires `clean --global --include-clear --apply` to run. Each rule applies only on its system. `artifacts` and `prebuilts` remain. |
@@ -376,8 +451,8 @@ Such a rule must be a clear rule, so it runs only with
 Plonge skips it when the path is not absolute; is `/`, the home directory,
 or contains the home directory; is or resolves through a symlink;
 is in a Git repository; or does not exist.
-The default `zig-global-cache` and `rubygems-cache` rules and the Deno rules
-use `delete_contents`.
+The default `zig-global-cache`, `rubygems-cache`, `hex-packages`, and `rebar3-hex` rules,
+the Deno rules, and the Cargo rules use `delete_contents`.
 See the [README](../README.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
@@ -386,6 +461,61 @@ It keeps directories with missing or unreadable workspace metadata
 and workspaces on unmounted volumes under `/Volumes`.
 The project `DerivedData` rule is different: it uses the project checks,
 without checking Xcode workspace metadata.
+
+### Cargo
+
+The Cargo rules were checked against the source of Cargo in Rust **1.100.0**,
+the current stable release
+([Cargo commit 3acc79c][cargo-1.100]).
+Cargo 1.88 and later clean the global cache automatically,
+at most once a day by default (`cache.auto-clean-frequency`),
+during commands such as `cargo build` and not when Cargo runs offline.
+They delete downloaded files that they have not used for 3 months,
+and extracted sources that they have not used for 1 month
+([source][cargo-gc]).
+The command that cleans the cache on request, `cargo clean gc`,
+is still unstable:
+it fails on the stable channel unless `-Z gc` enables it
+([source][cargo-clean-gc]).
+Plonge does not use unstable flags,
+so `cargo-registry` deletes the contents
+of the `registry` folder in the Cargo home.
+It holds the crate index and downloaded `.crate` files and their sources
+([Cargo home][cargo-home-doc]).
+The next build downloads what it needs again,
+so the rule is `clear`.
+The `git` folder holds Git dependencies as bare repositories and checkouts;
+a checkout is a working tree that a user can edit, so Plonge leaves `git` out.
+The other files in the Cargo home stay:
+`bin` holds programs that `cargo install` and rustup installed,
+`config.toml` and `credentials.toml` hold settings and login tokens,
+and `.crates.toml` and `.crates2.json` record installed crates.
+
+Cargo has no stable command that prints the Cargo home.
+Cargo uses `CARGO_HOME` when it is set and not empty,
+and otherwise `.cargo` in the home directory
+([source][cargo-home-env]).
+The rule follows the same order with `path_env = "CARGO_HOME"`.
+Cargo resolves a relative `CARGO_HOME` from its working directory,
+which Plonge cannot know for every command, so Plonge skips the rule
+when `CARGO_HOME` is not an absolute path.
+Plonge reads `CARGO_HOME` from its own environment.
+If `CARGO_HOME` is set only in the environment that `mise exec` gives `cargo`,
+Plonge uses `~/.cargo`.
+Deletion keeps the `registry` folder itself,
+and its contents get the same checks as other `delete_contents` rules;
+the `git` folder is not touched.
+A Cargo build that runs at the same time can fail,
+because Cargo can read a file that Plonge then deletes.
+
+sccache keeps its local cache in `SCCACHE_DIR`,
+or by default in `~/Library/Caches/Mozilla.sccache` on macOS
+and `~/.cache/sccache` on Linux ([sccache 0.19.0][sccache-local]).
+Its options in sccache 0.19.0 start and stop the server and show
+or reset statistics; none clears or prunes the cache
+([source][sccache-cmdline]).
+sccache limits the cache to 10 gigabytes by default.
+Plonge has no sccache rule.
 
 ### Bun
 
@@ -466,6 +596,31 @@ Then only the `yarn` rule applies, and the Yarn 2+ global cache stays.
 See Yarn's [cache clean command][yarn-clean] and
 [configuration][yarn-config] code.
 
+[mix-build-path]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/project.ex#L782-L786
+[mix-umbrella]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/project.ex#L140-L148
+[mix-build-structure]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/project.ex#L937-L961
+[mix-clean]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/tasks/clean.ex#L31-L40
+[mix-deps-path]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/project.ex#L68-L69
+[mix-git]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/scm/git.ex#L105-L111
+[mix-deps-clean]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/tasks/deps.clean.ex#L8-L20
+[mix-release-path]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/release.ex#L128-L132
+[mix-cookie]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/release.ex#L570-L586
+[hex-unpack]: https://github.com/hexpm/hex/blob/v2.7.0/lib/hex/scm.ex#L178-L211
+[hex-cache-path]: https://github.com/hexpm/hex/blob/v2.7.0/lib/hex/scm.ex#L449-L453
+[hex-home]: https://github.com/hexpm/hex/blob/v2.7.0/lib/hex/config.ex#L163-L174
+[hex-home-docs]: https://github.com/hexpm/hex/blob/v2.7.0/lib/mix/tasks/hex.config.ex#L123-L129
+[hex-config-path]: https://github.com/hexpm/hex/blob/v2.7.0/lib/mix/tasks/hex.config.ex#L281-L285
+[hex-offline]: https://github.com/hexpm/hex/blob/v2.7.0/lib/hex/scm.ex#L455-L469
+[rebar3-hex-dir]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_packages.erl#L158-L175
+[rebar3-cache-dir]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_dir.erl#L168-L172
+[rebar3-cache-env]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar3.erl#L175-L180
+[rebar3-plugins]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_prv_plugins.erl#L39
+[rebar3-local-install]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_prv_local_install.erl#L82-L94
+[rebar3-dirs]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_dir.erl#L40-L79
+[rebar3-hrl]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar.hrl#L15-L25
+[rebar3-git]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_git_resource.erl#L191-L196
+[rebar3-checkouts]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_prv_install_deps.erl#L330-L336
+[rebar3-rel]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_relx.erl#L36
 [mise-source]: https://github.com/jdx/mise/tree/v2026.10.14/src/backend
 [mise-prune]: https://github.com/jdx/mise/blob/v2026.10.14/src/cli/prune.rs
 [mise-backend]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/mod.rs
@@ -480,6 +635,13 @@ See Yarn's [cache clean command][yarn-clean] and
 [bun-pm]: https://github.com/oven-sh/bun/blob/bun-v1.4.4/docs/pm/cli/pm.mdx#cache
 [bun-prune]: https://github.com/oven-sh/bun/blob/bun-v1.4.4/src/runtime/cli/pm_cache_prune_command.rs
 [cargo]: https://mise.jdx.dev/dev-tools/backends/cargo.html
+[cargo-1.100]: https://github.com/rust-lang/rust/tree/1.100.0/src/tools
+[cargo-gc]: https://github.com/rust-lang/cargo/blob/3acc79c0c841844675bc53a605922dbfc441e750/src/workspace/gc.rs#L31-L38
+[cargo-clean-gc]: https://github.com/rust-lang/cargo/blob/3acc79c0c841844675bc53a605922dbfc441e750/src/bin/cargo/commands/clean.rs#L176-L183
+[cargo-home-doc]: https://github.com/rust-lang/cargo/blob/3acc79c0c841844675bc53a605922dbfc441e750/doc/book/src/guide/cargo-home.md
+[cargo-home-env]: https://github.com/rust-lang/cargo/blob/3acc79c0c841844675bc53a605922dbfc441e750/crates/home/src/env.rs#L67-L81
+[sccache-local]: https://github.com/mozilla/sccache/blob/v0.19.0/docs/Local.md
+[sccache-cmdline]: https://github.com/mozilla/sccache/blob/v0.19.0/src/cmdline.rs#L129-L160
 [pypi]: https://mise.jdx.dev/dev-tools/backends/pypi.html
 [deno-clean]: https://github.com/denoland/deno/blob/v2.9.8/cli/tools/clean.rs
 [deno-info]: https://github.com/denoland/deno/blob/v2.9.8/cli/tools/info.rs

@@ -29,6 +29,10 @@ type Rules struct {
 	// For a path such as "vendor/bundle", that is the directory that holds vendor.
 	// A project file can be a pattern, such as "*.csproj"; see IsPattern.
 	Beside map[string][]string
+	// RefuseInside maps a name to paths relative to a matching directory.
+	// Plonge refuses a match that holds an entry at one of them.
+	// Each element of a path can be a pattern; see ValidInsidePath.
+	RefuseInside map[string][]string
 	// QuietHours is how long a project must be inactive to be quiet.
 	QuietHours float64
 	// Skip are directory names that the walk never enters.
@@ -59,6 +63,12 @@ type Global struct {
 	ID   string `toml:"id"`
 	Tool string `toml:"tool"` // the command that must be available
 	Path string `toml:"path"` // a command that prints the path, or a fixed path
+	// PathEnv names an environment variable that holds a tool's directory,
+	// such as CARGO_HOME. When it is set and not empty, plonge uses its value,
+	// joined with PathEnvSubdir, in place of the fixed Path.
+	PathEnv string `toml:"path_env"`
+	// PathEnvSubdir is a relative path inside the directory that PathEnv gives.
+	PathEnvSubdir string `toml:"path_env_subdir"`
 	// PathLabel, when set, selects the last line of the path command's output
 	// that contains the label followed by ": ", and takes the path after it.
 	PathLabel string `toml:"path_label"`
@@ -109,8 +119,10 @@ type file struct {
 	Names      []string            `toml:"names"`
 	QuietHours *float64            `toml:"quiet_hours"`
 	Beside     map[string][]string `toml:"beside"`
-	Skip       []string            `toml:"skip"`
-	Global     []Global            `toml:"global"`
+	// RefuseInside is refuse_inside; see Rules.RefuseInside.
+	RefuseInside map[string][]string `toml:"refuse_inside"`
+	Skip         []string            `toml:"skip"`
+	Global       []Global            `toml:"global"`
 }
 
 // versionControlDirs hold a project's history, so no rule may name them as caches.
@@ -158,6 +170,13 @@ func parse(data, name string) (file, error) {
 			}
 		}
 	}
+	for n, paths := range f.RefuseInside {
+		for _, p := range paths {
+			if !ValidInsidePath(p) {
+				return f, fmt.Errorf("%s: refuse_inside %s: invalid path %q", name, n, p)
+			}
+		}
+	}
 	for _, n := range f.Skip {
 		if !validName(n) {
 			return f, fmt.Errorf("%s: invalid skip name %q", name, n)
@@ -196,6 +215,9 @@ func (g Global) validate() error {
 		return fmt.Errorf("global rule %q: path must be an absolute path, a ~/ path, or a %s command", g.ID, g.Tool)
 	}
 	if err := g.validatePathKeys(); err != nil {
+		return err
+	}
+	if err := g.validatePathEnv(); err != nil {
 		return err
 	}
 	if g.PathSubdir != "" && (g.fixedPath() || !validCacheName(g.PathSubdir)) {
@@ -245,6 +267,39 @@ func (g Global) validatePathKeys() error {
 		return fmt.Errorf("global rule %q: path_zon_field %q is not a field name", g.ID, g.PathZONField)
 	}
 	return nil
+}
+
+// validatePathEnv checks path_env and path_env_subdir.
+// The variable replaces a fixed path, which stays as the default,
+// and the subdirectory must stay inside the directory that the variable gives.
+func (g Global) validatePathEnv() error {
+	switch {
+	case g.PathEnv == "" && g.PathEnvSubdir != "":
+		return fmt.Errorf("global rule %q: path_env_subdir needs path_env", g.ID)
+	case g.PathEnv == "":
+		return nil
+	case !validEnvName(g.PathEnv):
+		return fmt.Errorf("global rule %q: path_env %q is not an environment variable name", g.ID, g.PathEnv)
+	case !g.fixedPath():
+		return fmt.Errorf("global rule %q: path_env needs a fixed path as its default", g.ID)
+	case g.PathEnvSubdir != "" && (!filepath.IsLocal(g.PathEnvSubdir) || filepath.Clean(g.PathEnvSubdir) == "."):
+		return fmt.Errorf("global rule %q: path_env_subdir %q must be a relative path inside the directory", g.ID, g.PathEnvSubdir)
+	}
+	return nil
+}
+
+// validEnvName reports whether name is a portable environment variable name:
+// letters, digits, and underscores, not starting with a digit.
+func validEnvName(name string) bool {
+	for i, c := range name {
+		switch {
+		case c == '_', 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z':
+		case '0' <= c && c <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return name != ""
 }
 
 // validateDelete checks a rule whose contents plonge deletes.
@@ -341,28 +396,53 @@ func (g Global) startsWithTool(cmd string) bool {
 	return len(words) > 0 && words[0] == g.Tool
 }
 
+// ValidInsidePath reports whether p can be a refuse_inside path:
+// one or more elements separated by "/", none of them empty, ".", or "..",
+// where each element is a name or a pattern in the syntax of [filepath.Match].
+func ValidInsidePath(p string) bool {
+	if p == "" || strings.ContainsRune(p, '\\') {
+		return false
+	}
+	for elem := range strings.SplitSeq(p, "/") {
+		if !validName(elem) {
+			return false
+		}
+		if _, err := filepath.Match(elem, ""); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // Default returns the built-in rules.
 func Default() Rules {
 	f, err := parse(defaultTOML, "default rules")
 	if err != nil {
 		panic(err)
 	}
-	return merge(Rules{Beside: map[string][]string{}}, f)
+	return merge(Rules{Beside: map[string][]string{}, RefuseInside: map[string][]string{}}, f)
 }
 
-// merge adds the names and skip names in f to r, replaces each beside entry
-// and each global rule with the same id, adds new global rules,
+// merge adds the names and skip names in f to r,
+// replaces each beside entry, each refuse_inside entry, and each global rule with the same id, adds new global rules,
 // and sets the quiet period when f has one.
 func merge(r Rules, f file) Rules {
 	out := Rules{
-		Names:      slices.Clone(r.Names),
-		Beside:     make(map[string][]string, len(r.Beside)+len(f.Beside)),
-		QuietHours: r.QuietHours,
-		Skip:       slices.Clone(r.Skip),
-		Global:     slices.Clone(r.Global),
+		Names:        slices.Clone(r.Names),
+		Beside:       make(map[string][]string, len(r.Beside)+len(f.Beside)),
+		RefuseInside: make(map[string][]string, len(r.RefuseInside)+len(f.RefuseInside)),
+		QuietHours:   r.QuietHours,
+		Skip:         slices.Clone(r.Skip),
+		Global:       slices.Clone(r.Global),
 	}
 	for k, v := range r.Beside {
 		out.Beside[k] = v
+	}
+	for k, v := range r.RefuseInside {
+		out.RefuseInside[k] = v
+	}
+	for k, v := range f.RefuseInside {
+		out.RefuseInside[k] = v
 	}
 	for _, n := range f.Names {
 		if !slices.Contains(out.Names, n) {

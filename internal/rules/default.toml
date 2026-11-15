@@ -1,7 +1,7 @@
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
-         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "bin",
-         "build", "dist", "node_modules", "obj", "target", "tmp/cache",
+         ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "_build",
+         "bin", "build", "dist", "node_modules", "obj", "target", "tmp/cache",
          "vendor/bundle", "venv", "zig-cache"]
 quiet_hours = 24
 
@@ -15,6 +15,11 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # Zig 0.13 renamed the local cache from zig-cache to .zig-cache.
 # zig-out is left out: it is install output, not a cache, and can hold
 # programs and libraries that a user runs or links from.
+# Mix puts build output in _build. Mix keeps dependency sources in deps,
+# which is left out because an edited Hex package there has no Git data
+# that plonge can check. Rebar3 also uses _build, but it puts dependency
+# sources in _build/<profile>/lib, so _build beside rebar.config is left out,
+# and a _build that holds dependency sources is refused.
 # Bundler installs gems in vendor/bundle beside the Gemfile (or gems.rb)
 # when path is vendor/bundle or deployment is set; bundle install restores them.
 # vendor/cache is left out: bundle cache puts gems there on purpose,
@@ -25,6 +30,7 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # pid files, sockets, and in development the local secret key base.
 [beside]
 ".zig-cache" = ["build.zig"]
+_build = ["mix.exs"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 build = ["pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
@@ -34,6 +40,15 @@ target = ["Cargo.toml", "pom.xml"]
 "vendor/bundle" = ["Gemfile", "gems.rb"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 zig-cache = ["build.zig"]
+
+# Refuse a match that has an entry at one of these paths, relative to it.
+# A release that Mix or Rebar3 builds goes in _build/<env or profile>/rel.
+# It can hold a generated Erlang cookie and the earlier versions that an
+# upgrade needs, which a new build does not restore.
+# A Rebar3 build puts dependency sources in _build/<profile>/lib/<dep>/src,
+# where an edit has no Git data that plonge can check.
+[refuse_inside]
+_build = ["*/rel", "*/lib/*/src"]
 
 # Global caches. Each command starts with the tool and runs without a shell.
 # prune uses the tool's policy to select unused or stale data.
@@ -89,6 +104,25 @@ id = "go-build"
 tool = "go"
 path = "go env GOCACHE"
 clean = "go clean -cache"
+kind = "clear"
+
+# Cargo 1.88 and later delete global cache files that they have not used
+# for 1 to 3 months, as cache.auto-clean-frequency sets. The cargo clean gc
+# command that cleans on request is unstable, so plonge deletes the contents
+# of registry in the Cargo home: $CARGO_HOME, or ~/.cargo when it is
+# not set. Cargo has no stable command that prints the Cargo home.
+# registry holds the crate index, downloaded .crate files, and their sources,
+# which a later build downloads again.
+# git is left out: its checkouts are working trees, and an edit there is lost.
+# The rule leaves out bin, config.toml, credentials.toml, and the records of
+# cargo install in the Cargo home.
+[[global]]
+id = "cargo-registry"
+tool = "cargo"
+path = "~/.cargo/registry"
+path_env = "CARGO_HOME"
+path_env_subdir = "registry"
+delete_contents = true
 kind = "clear"
 
 [[global]]
@@ -259,6 +293,32 @@ id = "zig-global-cache"
 tool = "zig"
 path = "zig env"
 path_zon_field = "global_cache_dir"
+delete_contents = true
+kind = "clear"
+
+# Hex has no command that cleans its package cache, and it prints no path
+# for the packages folder, so this rule uses Hex's default, ~/.hex/packages.
+# HEX_HOME and MIX_XDG move it; that cache is not covered.
+# ~/.hex also holds hex.config, with the user's Hex API key, and the
+# registry cache, so the rule deletes only the contents of packages.
+# The folder holds package tarballs; a later mix deps.get downloads them again,
+# and HEX_OFFLINE cannot use the ones that were deleted.
+[[global]]
+id = "hex-packages"
+tool = "mix"
+path = "~/.hex/packages"
+delete_contents = true
+kind = "clear"
+
+# Rebar3 has no command that cleans its package cache or prints its path.
+# The hex folder of its global cache holds the package index and tarballs.
+# REBAR_CACHE_DIR moves the global cache; that cache is not covered.
+# The global cache also holds the rebar3 that "rebar3 local install" makes,
+# under bin and vsns, and global plugins, so the rule deletes only hex.
+[[global]]
+id = "rebar3-hex"
+tool = "rebar3"
+path = "~/.cache/rebar3/hex"
 delete_contents = true
 kind = "clear"
 

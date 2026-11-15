@@ -515,3 +515,165 @@ done
 		})
 	}
 }
+
+// TestCargoRulesFollowCargoHome resolves the Cargo rules from CARGO_HOME,
+// or from ~/.cargo when it is not set, and deletes only the caches' contents.
+func TestCargoRulesFollowCargoHome(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  func(r Runner, tmp string) (cargoHome, value string)
+	}{
+		{"default", func(r Runner, _ string) (string, string) { return filepath.Join(r.Home, ".cargo"), "" }},
+		{"CARGO_HOME", func(_ Runner, tmp string) (string, string) {
+			dir := filepath.Join(tmp, "cargo-home")
+			return dir, dir
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, tmp, _, _ := deleteSetup(t)
+			bin := filepath.SplitList(os.Getenv("PATH"))[0]
+			log := filepath.Join(tmp, "cargo.log")
+			addTool(t, bin, "cargo", fmt.Sprintf(`echo "$*" >> %q`, log))
+			cargoHome, value := tc.env(r, tmp)
+			t.Setenv("CARGO_HOME", value)
+			// A default Cargo home elsewhere must not be touched.
+			other := filepath.Join(r.Home, ".cargo", "registry", "cache", "x.crate")
+			if value != "" {
+				addFile(t, other)
+			}
+			kept := []string{
+				filepath.Join(cargoHome, "git", "checkouts", "dep-1", "abc", "Cargo.toml"),
+				filepath.Join(cargoHome, "git", "db", "dep-1", "HEAD"),
+				filepath.Join(cargoHome, "bin", "cargo-tool"),
+				filepath.Join(cargoHome, "config.toml"),
+				filepath.Join(cargoHome, ".crates.toml"),
+			}
+			for _, p := range kept {
+				addFile(t, p)
+			}
+			addFile(t, filepath.Join(cargoHome, "registry", "cache", "index.crates.io-1", "serde-1.0.0.crate"))
+			addFile(t, filepath.Join(cargoHome, "registry", "src", "index.crates.io-1", "serde-1.0.0", "lib.rs"))
+			ctx := context.Background()
+			entries := r.List(ctx, []rules.Global{defaultRule(t, "cargo-registry")})
+			for i, sub := range []string{"registry"} {
+				e := entries[i]
+				path := filepath.Join(cargoHome, sub)
+				if e.Skipped != "" || e.Path != path || e.Command != r.deleteAction(path) {
+					t.Fatalf("%s = %+v", sub, e)
+				}
+			}
+			res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+			for _, o := range res.Outcomes {
+				if o.Status != Ran {
+					t.Errorf("outcome = %+v", o)
+				}
+			}
+			for _, sub := range []string{"registry"} {
+				if ents, err := os.ReadDir(filepath.Join(cargoHome, sub)); err != nil || len(ents) != 0 {
+					t.Errorf("%s entries = %v, err = %v", sub, ents, err)
+				}
+			}
+			for _, p := range append(kept, other) {
+				if value == "" && p == other {
+					continue
+				}
+				if _, err := os.Stat(p); err != nil {
+					t.Errorf("%s: %v", p, err)
+				}
+			}
+			if _, err := os.Stat(log); err == nil {
+				t.Error("cargo ran")
+			}
+		})
+	}
+}
+
+// TestDefaultBEAMPackageRules deletes the contents of the Hex and Rebar3
+// package caches without running the tools, and keeps the folders beside them.
+func TestDefaultBEAMPackageRules(t *testing.T) {
+	for _, tc := range []struct {
+		id, tool, cache, kept string
+	}{
+		{"hex-packages", "mix", ".hex/packages", ".hex/hex.config"},
+		{"rebar3-hex", "rebar3", ".cache/rebar3/hex", ".cache/rebar3/bin/rebar3"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			r, _, _, log := deleteSetup(t)
+			bin := filepath.SplitList(os.Getenv("PATH"))[0]
+			addTool(t, bin, tc.tool, fmt.Sprintf(`echo "$*" >> %q`, log))
+			cache := filepath.Join(r.Home, tc.cache)
+			addFile(t, filepath.Join(cache, "hexpm", "pkg-1.0.0.tar"))
+			kept := filepath.Join(r.Home, tc.kept)
+			addFile(t, kept)
+			var rule rules.Global
+			for _, g := range rules.Default().Global {
+				if g.ID == tc.id {
+					rule = g
+				}
+			}
+			ctx := context.Background()
+			entries := r.List(ctx, []rules.Global{rule})
+			e := entries[0]
+			if e.Skipped != "" || e.Path != cache || e.Kind != rules.KindClear ||
+				e.Command != "delete contents of ~/"+tc.cache+" (built in)" {
+				t.Fatalf("entry = %+v", e)
+			}
+			if res := r.Clean(ctx, entries, Options{Apply: true}); res.Outcomes[0].Status != Skipped {
+				t.Errorf("without --include-clear: %+v", res)
+			}
+			res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+			if o := res.Outcomes[0]; o.Status != Ran {
+				t.Errorf("outcome = %+v", o)
+			}
+			if ents, err := os.ReadDir(cache); err != nil || len(ents) != 0 {
+				t.Errorf("cache entries = %v, err = %v", ents, err)
+			}
+			if _, err := os.Stat(kept); err != nil {
+				t.Errorf("%s: %v", tc.kept, err)
+			}
+			if _, err := os.Stat(log); err == nil {
+				t.Errorf("%s ran", tc.tool)
+			}
+		})
+	}
+}
+
+// TestPathEnvMustBeAbsolute skips a rule whose variable holds a relative path,
+// because the tool would resolve it from a working directory that plonge cannot know.
+func TestPathEnvMustBeAbsolute(t *testing.T) {
+	bin := fakeTools(t)
+	addTool(t, bin, "mytool", "exit 9")
+	t.Setenv("MYTOOL_HOME", "relative/home")
+	r := runner(t)
+	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool/cache", PathEnv: "MYTOOL_HOME",
+		PathEnvSubdir: "cache", Kind: rules.KindClear, DeleteContents: true}
+	entries := r.List(context.Background(), []rules.Global{rule})
+	e := entries[0]
+	if e.Skipped != `MYTOOL_HOME is "relative/home", which is not an absolute path` || e.Command != "" {
+		t.Errorf("entry = %+v", e)
+	}
+	res := r.Clean(context.Background(), entries, Options{Apply: true, IncludeClear: true})
+	if o := res.Outcomes[0]; o.Status != Skipped {
+		t.Errorf("outcome = %+v", o)
+	}
+}
+
+// TestPathEnvReplacesFixedPath uses the variable when it is set and not empty,
+// and the fixed path otherwise.
+func TestPathEnvReplacesFixedPath(t *testing.T) {
+	bin := fakeTools(t)
+	addTool(t, bin, "mytool", "exit 9")
+	r := runner(t)
+	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool/cache", PathEnv: "MYTOOL_HOME",
+		PathEnvSubdir: "cache", Clean: "mytool gc", Kind: rules.KindClear}
+	dir := t.TempDir()
+	for value, want := range map[string]string{
+		"":  filepath.Join(r.Home, ".mytool", "cache"),
+		dir: filepath.Join(dir, "cache"),
+	} {
+		t.Setenv("MYTOOL_HOME", value)
+		if e := r.List(context.Background(), []rules.Global{rule})[0]; e.Path != want || e.Skipped != "" {
+			t.Errorf("MYTOOL_HOME=%q: %+v", value, e)
+		}
+	}
+}

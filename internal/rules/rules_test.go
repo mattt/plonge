@@ -4,13 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 26 || r.QuietHours != 24 {
+	if len(r.Names) != 27 || r.QuietHours != 24 {
 		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
@@ -18,6 +19,16 @@ func TestDefault(t *testing.T) {
 	}
 	if !slices.Equal(r.Beside["build"], []string{"pyproject.toml", "setup.py"}) {
 		t.Errorf("beside build = %q", r.Beside["build"])
+	}
+	if !slices.Equal(r.Beside["_build"], []string{"mix.exs"}) {
+		t.Errorf("beside _build = %q", r.Beside["_build"])
+	}
+	if !slices.Equal(r.RefuseInside["_build"], []string{"*/rel", "*/lib/*/src"}) {
+		t.Errorf("refuse_inside _build = %q", r.RefuseInside["_build"])
+	}
+	// deps can hold edited dependency sources, so no default rule names it.
+	if slices.Contains(r.Names, "deps") {
+		t.Error("default names include deps")
 	}
 }
 
@@ -220,6 +231,38 @@ func TestBesidePatterns(t *testing.T) {
 	_, err = Load(writeRules(t, "[beside]\nout = [\"[a\"]\n"))
 	if err == nil || !strings.Contains(err.Error(), "invalid project file pattern") {
 		t.Errorf("bad pattern: err = %v", err)
+	}
+}
+
+func TestRefuseInside(t *testing.T) {
+	r, err := Load(writeRules(t, "names = [\"out\"]\n[refuse_inside]\nout = [\"*/rel\", \"keep\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.RefuseInside["out"], []string{"*/rel", "keep"}) {
+		t.Errorf("refuse_inside out = %q", r.RefuseInside["out"])
+	}
+	// A user entry replaces the default entry for that name.
+	r, err = Load(writeRules(t, "[refuse_inside]\n_build = [\"*/rel\", \"*/keep\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.RefuseInside["_build"], []string{"*/rel", "*/keep"}) {
+		t.Errorf("refuse_inside _build = %q", r.RefuseInside["_build"])
+	}
+	for _, p := range []string{"rel", "*/rel", "a/b/c", "[ab]*/x"} {
+		if !ValidInsidePath(p) {
+			t.Errorf("ValidInsidePath(%q) = false", p)
+		}
+	}
+	for _, p := range []string{"", "/rel", "rel/", "a//b", "./rel", "../rel", "a/../b", "[a/rel", `a\b`} {
+		if ValidInsidePath(p) {
+			t.Errorf("ValidInsidePath(%q) = true", p)
+		}
+		body := "[refuse_inside]\nout = [" + strconv.Quote(p) + "]\n"
+		if _, err := Load(writeRules(t, body)); err == nil || !strings.Contains(err.Error(), "refuse_inside out: invalid path") {
+			t.Errorf("Load(%q): err = %v", p, err)
+		}
 	}
 }
 
@@ -455,5 +498,59 @@ func TestGlobalPathKeysAreExclusive(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
 		}
+	}
+}
+
+func TestGlobalPathEnvValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\ndelete_contents = true\nkind = \"clear\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c\"\n", ""},
+		{"path = \"/t/c\"\npath_env = \"T_HOME\"\n", ""},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c/d\"\n", ""},
+		{"path = \"t where\"\npath_env = \"T_HOME\"\n", "path_env needs a fixed path"},
+		{"path = \"~/.t/c\"\npath_env_subdir = \"c\"\n", "path_env_subdir needs path_env"},
+		{"path = \"~/.t/c\"\npath_env = \"T-HOME\"\n", "is not an environment variable name"},
+		{"path = \"~/.t/c\"\npath_env = \"1HOME\"\n", "is not an environment variable name"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"../c\"\n", "must be a relative path inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"/c\"\n", "must be a relative path inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c/..\"\n", "must be a relative path inside"},
+	}
+	for _, c := range cases {
+		_, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%q: %v", c.extra, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
+		}
+	}
+}
+
+// TestCargoRulesKeepCargoHomeState checks that the Cargo rules delete only
+// the registry cache, never the Git cache or the Cargo home itself.
+func TestCargoRulesKeepCargoHomeState(t *testing.T) {
+	want := map[string]string{"cargo-registry": "registry"}
+	for _, g := range Default().Global {
+		// Cargo's Git checkouts are working trees that a user can edit.
+		if g.ID == "cargo-git" {
+			t.Errorf("default rules include cargo-git")
+		}
+		sub, ok := want[g.ID]
+		if !ok {
+			continue
+		}
+		delete(want, g.ID)
+		if g.PathEnv != "CARGO_HOME" || g.PathEnvSubdir != sub || g.Path != "~/.cargo/"+sub ||
+			!g.DeleteContents || g.Kind != KindClear || g.Tool != "cargo" {
+			t.Errorf("%s = %+v", g.ID, g)
+		}
+	}
+	if len(want) > 0 {
+		t.Errorf("missing rules: %v", want)
 	}
 }

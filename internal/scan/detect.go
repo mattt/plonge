@@ -19,6 +19,9 @@ type Candidate struct {
 	Path string // absolute path of the directory
 	Rule string // the rule that matched, such as "dist beside package.json"
 	repo string // the directory in which to run Git for this candidate
+	// refuse lists paths, relative to Path, at which an entry makes plonge
+	// refuse the candidate, from the rule's refuse_inside entry.
+	refuse []string
 }
 
 // Refusal is a candidate that plonge must not delete, and why.
@@ -36,7 +39,8 @@ type Root struct {
 	Candidates []Candidate
 	Errors     []string // Git failures; the candidates they affect are left out
 	// Refused lists the candidates that Measure left out
-	// because they are or hold a Git repository.
+	// because they are or hold a Git repository,
+	// or hold an entry at a refuse_inside path.
 	Refused []Refusal
 	// LastActivity is the newest activity that any source saw.
 	// Detect sets it to the modification time of the Git HEAD log, else of HEAD.
@@ -68,7 +72,7 @@ type Source struct {
 // Detect walks root and returns the candidates that Git ignores
 // and that hold no tracked files.
 // Call Measure on the result to size the candidates
-// and to refuse the ones that hold a Git repository.
+// and to refuse the ones that hold a Git repository or a refuse_inside path.
 // It does not follow symlinks, does not enter a directory in the skip list,
 // and does not descend into a candidate.
 func Detect(ctx context.Context, root string, r rules.Rules) Root {
@@ -139,7 +143,7 @@ func walk(root string, r rules.Rules) ([]Candidate, []string) {
 			return hasEntry(filepath.Join(root, filepath.FromSlash(dir)), marker)
 		})
 		if rule != "" {
-			found = append(found, Candidate{Path: path, Rule: rule})
+			found = append(found, Candidate{Path: path, Rule: rule, refuse: r.RefuseInside[name]})
 			return fs.SkipDir
 		}
 		if slices.Contains(r.Skip, name) {
