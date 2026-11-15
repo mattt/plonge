@@ -11,7 +11,7 @@ A folder that looks disposable can hold work that exists nowhere else,
 such as a dependency checkout with commits that were never pushed.
 Checking each folder first takes time, so the checks get skipped.
 
-Plonge does those checks for you.
+Plonge makes those checks.
 It finds the caches, reports their sizes,
 and deletes nothing until you add `--apply`.
 In projects, it deletes only directories that match its rules and pass its Git checks.
@@ -46,46 +46,44 @@ Project scans need Git on `PATH`.
 Global cleanup needs the tool named by each rule.
 The `disk` command supports macOS and Linux.
 
-## Try a safe run
+## Find caches
 
 ```console
 plonge scan
-plonge clean
 ```
 
-Both commands delete nothing.
-`scan` reports cache sizes, projects, last activity, and matched rules.
-`clean` shows which caches qualify for deletion.
-Add `--json` to either command for structured output.
-
-Plonge gets project directories from mise's record of loaded config files.
-To scan only the project in your current directory:
-
-```console
-plonge scan --no-mise --root .
-plonge clean --no-mise --root .
-```
-
-A root is a directory to scan; the report calls each root a project.
-`--root` adds a root and can be repeated.
-`--no-mise` limits the scan to the roots you give.
-A root must be inside a Git work tree.
-Plonge skips a root outside one,
-and does not search a parent folder for repositories.
-
+`scan` lists each cache with its size, project, last activity, and rule.
 A cache is a directory that matches a rule, such as `node_modules` or `.venv`.
 Some rules also require a project file:
 `target`, for example, must be beside `Cargo.toml` or `pom.xml`.
-A match must pass the Git and safety checks below before it enters the totals.
+A match enters the totals only if it passes the Git checks described below.
+
+By default, Plonge finds projects from mise's record of the config files it has loaded,
+so a project appears only after mise has loaded a config file in it.
+To scan a project that mise has not seen, name it with `--root`.
+Add `--no-mise` to leave out mise's record and scan only the roots you name:
+
+```console
+plonge scan --root ~/code/app
+plonge scan --no-mise --root .
+```
+
+`--root` can be repeated, and `clean` takes both options too.
+A root must be inside a Git work tree.
+Plonge skips a root outside one,
+and does not search a parent folder for repositories.
+The report calls each root a project.
 
 ## Delete project caches
 
-Review the dry run, then add `--apply` with the same selection options:
-
 ```console
-plonge clean --no-mise --root .
-plonge clean --no-mise --root . --apply
+plonge clean
+plonge clean --apply
 ```
+
+`clean` lists the caches that it would delete, and `--apply` deletes them.
+Use the same options for both runs.
+`scan` and `clean` both print JSON with `--json`.
 
 By default, only caches in quiet projects qualify.
 A quiet project has a known last activity time at least 24 hours old;
@@ -135,32 +133,28 @@ The rule reference describes the
 
 ## Global caches
 
-Shared package-manager caches live outside projects.
-To inspect them and preview their cleanup actions:
+Package managers keep shared caches outside projects:
 
 ```console
 plonge scan --global
 plonge clean --global
+plonge clean --global --apply
 ```
 
 `scan --global` adds global caches to the project report.
-`clean --global` selects only global actions,
+`clean --global` lists the cleanup action for each one and leaves projects alone,
 so it cannot be combined with `--root`, `--no-mise`, `--include-active`, or `--min-size`.
-Both run each tool's lookup and check commands, even in a dry run.
+All three run each tool's lookup and check commands.
 
-Global rules have two kinds.
 A `prune` rule uses the tool's policy to select unused or stale data,
 as `mise cache prune` and `uv cache prune` do.
 A `clear` rule can remove cached data that is still in use,
 so later commands may have to download dependencies or rebuild files.
-Clear rules need `--include-clear`.
 Most prune rules report a size marked `(whole cache)`,
 of which the tool removes only part.
-
-After you review the dry run, apply it with the same flags:
+Clear rules run only with `--include-clear`:
 
 ```console
-plonge clean --global --apply
 plonge clean --global --include-clear
 plonge clean --global --include-clear --apply
 ```
@@ -175,9 +169,8 @@ The `mise-tools` rule skips cleanup when mise cannot load a tracked config
 that may still exist, because mise could remove a version that the config pins.
 
 Where a tool has no safe cleanup command,
-a built-in rule deletes the contents of one specific directory.
-Those rules are clear rules.
-They refuse unsafe paths, such as the home directory, a symlink,
+a built-in clear rule deletes the contents of one directory.
+These rules refuse unsafe paths, such as the home directory, a symlink,
 or a path in or containing a Git repository,
 and they protect data that a download cannot restore.
 The Cargo rule leaves Git checkouts alone,
@@ -236,22 +229,19 @@ plonge disk --warn-below 20GiB
 
 With `--warn-below`, Plonge prints a warning only when free space is below that size.
 Size and disk errors then go to standard error with exit status 0,
-so the command is safe in a hook.
+so a hook that runs the command does not fail.
 Sizes accept `KiB`, `MiB`, `GiB`, and `TiB` (or `K`, `M`, `G`, and `T`) as powers of 1024,
 and `KB`, `MB`, `GB`, and `TB` as powers of 1000.
 
 ## MCP server
 
-`plonge mcp` serves Plonge to coding agents over standard input and output
-(stdio), with three tools:
-
-- `scan` reports caches; `global: true` adds the global caches.
-- `clean` is a dry run unless `apply: true`.
-  It takes `include_active`, `min_size`, `global`, and `include_clear`,
-  with the same rules as the command line.
-- `disk` reports free space.
-
-The tools use mise project discovery and do not accept `--root` or `--no-mise`.
+`plonge mcp` serves `scan`, `clean`, and `disk` to coding agents
+over standard input and output (stdio).
+`scan` takes `global`.
+`clean` is a dry run unless `apply: true`,
+and takes `include_active`, `min_size`, `global`, and `include_clear`
+with the same rules as the command line.
+The tools find projects through mise and do not accept roots.
 Their descriptions tell agents to show the dry run
 and get your approval before `apply`.
 The server does not enforce that approval.

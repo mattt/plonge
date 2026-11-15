@@ -298,7 +298,7 @@ Both rules are `clear`, because they also delete packages that projects use.
 
 ## How to read the tables
 
-The [README](../README.md#try-a-safe-run) explains roots, projects, and caches.
+The [README](../README.md#find-caches) explains roots, projects, and caches.
 Its [cleanup guide](../README.md#delete-project-caches) explains activity selection.
 For every row:
 
