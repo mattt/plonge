@@ -242,6 +242,8 @@ Neither kind guarantees that the whole reported size will be freed.
 | `homebrew` | clear | `brew cleanup --prune=all` |
 | `nuget-packages` | clear | `dotnet nuget locals global-packages --clear` |
 | `nuget-http-cache` | clear | `dotnet nuget locals http-cache --clear` |
+| `swiftpm-macos` | clear | `swift package purge-cache` (macOS) |
+| `swiftpm-linux` | clear | `swift package purge-cache` (Linux) |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
 
 Plonge runs a tool through `mise exec --`
@@ -249,6 +251,9 @@ when `mise which` finds it from your home directory,
 and otherwise from `PATH`, passing over mise's shims.
 It runs commands from your home directory, without a shell.
 A rule whose tool is missing is skipped and reported.
+The SwiftPM rules add `--scratch-path`, relative to the home directory,
+so that `purge-cache` writes its `.build` marker files
+in SwiftPM's cache directory and does not create `~/.build`.
 
 mise does not count a tracked config that it cannot load,
 so a prune can remove a version that such a config pins.
