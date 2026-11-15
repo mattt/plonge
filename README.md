@@ -320,9 +320,11 @@ so it runs only with `clean --global --include-clear --apply`.
 It cannot have `clean` or `targets`; it can have a `check`.
 The action reads `delete contents of <path> (built in)`.
 Plonge skips the rule, and reports why, when the path is not absolute;
-is `/`, the home directory, or a directory that contains the home directory;
+is `/`, the home directory, or a directory that contains the home directory,
+compared by file identity so that a differently cased name cannot pass;
 is a symlink or resolves through one to a different place;
-is in a Git work tree or Git directory, or Git cannot check it;
+is in a Git work tree or Git directory, or Git cannot check it,
+as when the path or a directory above it has a `.git` entry that Git cannot use;
 or does not exist or is not a directory.
 It checks the path when it lists the rule and again right before it deletes.
 `tool` must still be available, and a `path` command must still start with it.
