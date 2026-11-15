@@ -144,12 +144,13 @@ printf '{\n  "version": 1,\n  "denoDir": "%%s",\n  "modulesCache": "%%s/remote",
 }
 
 // fakeYarn prints version and answers both Yarn rules' path commands with dir,
-// so only the checks keep the two rules apart.
+// so only the checks keep the two rules apart. It reports enableGlobalCache as true.
 func fakeYarn(version, dir, log string) string {
 	return fmt.Sprintf(`echo "$*" >> %q
 case "$*" in
 --version) printf '%%b\n' %q ;;
 "cache dir"|"config get cacheFolder") echo %q ;;
+"config get enableGlobalCache") echo true ;;
 "cache clean") /bin/rm -f %q/blob ;;
 *) exit 9 ;;
 esac`, log, version, dir, dir)
@@ -169,6 +170,10 @@ func TestOnlyOneYarnRuleRuns(t *testing.T) {
 		{"! Corepack is about to download yarn\n4.18.1", "yarn-berry"},
 		{"yarn 4.18.1", ""},
 		{"", ""},
+		{"1.22.22\n4.18.1", ""},
+		{"4.18.1\n1.22.22", ""},
+		{"1.22.22\n1.22.19", ""},
+		{"4.18.1\n4.17.0", ""},
 	}
 	for _, c := range cases {
 		bin := fakeTools(t)
@@ -182,7 +187,7 @@ func TestOnlyOneYarnRuleRuns(t *testing.T) {
 		for _, e := range entries {
 			if e.Skipped == "" {
 				runnable = append(runnable, e.ID)
-			} else if !strings.Contains(e.Skipped, "yarn --version printed no line that matches") {
+			} else if !strings.HasPrefix(e.Skipped, "yarn --version") {
 				t.Errorf("%q: %s: %s", c.version, e.ID, e.Skipped)
 			}
 		}
@@ -214,13 +219,86 @@ func TestYarnBerryUsesCacheFolder(t *testing.T) {
 		t.Errorf("outcome = %+v", o)
 	}
 	data, _ := os.ReadFile(log)
-	if want := "config get cacheFolder\n--version\n--version\ncache clean\n"; string(data) != want {
+	if want := "config get cacheFolder\n--version\nconfig get enableGlobalCache\n--version\nconfig get enableGlobalCache\ncache clean\n"; string(data) != want {
 		t.Errorf("log = %q, want %q", data, want)
 	}
 
 	// Outside a project with enableGlobalCache off, Yarn prints no path.
-	addTool(t, bin, "yarn", `case "$*" in --version) echo 4.18.1 ;; *) echo undefined ;; esac`)
+	addTool(t, bin, "yarn", `case "$*" in --version) echo 4.18.1 ;; "config get enableGlobalCache") echo false ;; *) echo undefined ;; esac`)
 	if e := r.List(ctx, []rules.Global{defaultRule(t, "yarn-berry")})[0]; !strings.Contains(e.Skipped, "not an absolute path") {
 		t.Errorf("entry = %+v", e)
+	}
+}
+
+// TestYarnBerryKeepsLocalCacheOfProjectInHome checks a home directory
+// that is a Yarn project with enableGlobalCache off. Yarn then reports the
+// project's .yarn/cache, which zero-installs keeps in Git, as cacheFolder.
+func TestYarnBerryKeepsLocalCacheOfProjectInHome(t *testing.T) {
+	bin := fakeTools(t)
+	r := runner(t)
+	local := filepath.Join(r.Home, ".yarn", "cache")
+	zip := filepath.Join(local, "pkg-npm-1.0.0.zip")
+	addFile(t, zip)
+	addFile(t, filepath.Join(r.Home, "package.json"))
+	if err := os.WriteFile(filepath.Join(r.Home, ".yarnrc.yml"), []byte("enableGlobalCache: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(t.TempDir(), "log")
+	setting := filepath.Join(t.TempDir(), "setting")
+	// The fake reads the setting from a file, so the test can change it.
+	addTool(t, bin, "yarn", fmt.Sprintf(`case "$*" in
+--version) echo 4.18.1 ;;
+"config get cacheFolder") echo "$PWD/.yarn/cache" ;;
+"config get enableGlobalCache") /bin/cat %q ;;
+"cache clean") echo "cache clean" >> %q; /bin/rm -rf "$PWD/.yarn/cache" ;;
+*) exit 9 ;;
+esac`, setting, log))
+	ctx := context.Background()
+	rule := defaultRule(t, "yarn-berry")
+	apply := Options{Apply: true, IncludeClear: true}
+
+	for _, value := range []string{"false", "", "undefined", "true\ntrue"} {
+		if err := os.WriteFile(setting, []byte(value+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		entries := r.List(ctx, []rules.Global{rule})
+		e := entries[0]
+		if e.Path != local || !strings.Contains(e.Skipped, "yarn config get enableGlobalCache printed") || e.Command != "" {
+			t.Errorf("%q: entry = %+v", value, e)
+		}
+		if o := r.Clean(ctx, entries, apply).Outcomes[0]; o.Status != Skipped {
+			t.Errorf("%q: outcome = %+v", value, o)
+		}
+	}
+
+	// A setting that Yarn cannot report also skips the rule.
+	if err := os.Remove(setting); err != nil {
+		t.Fatal(err)
+	}
+	if e := r.List(ctx, []rules.Global{rule})[0]; !strings.Contains(e.Skipped, "check failed") {
+		t.Errorf("unreadable setting: %+v", e)
+	}
+
+	// The setting is checked again right before cleanup.
+	if err := os.WriteFile(setting, []byte("true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries := r.List(ctx, []rules.Global{rule})
+	if entries[0].Skipped != "" {
+		t.Fatalf("with enableGlobalCache: %+v", entries[0])
+	}
+	if err := os.WriteFile(setting, []byte("false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if o := r.Clean(ctx, entries, apply).Outcomes[0]; o.Status != Skipped || !strings.Contains(o.Reason, "enableGlobalCache") {
+		t.Errorf("recheck: outcome = %+v", o)
+	}
+
+	if _, err := os.Stat(log); err == nil {
+		data, _ := os.ReadFile(log)
+		t.Errorf("yarn cache clean ran: %q", data)
+	}
+	if _, err := os.Stat(zip); err != nil {
+		t.Errorf("the local cache changed: %v", err)
 	}
 }

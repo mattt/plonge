@@ -297,7 +297,8 @@ until each one runs `bun install` again.
 
 Bun added `prune` in 1.4.4,
 so the rule's check runs `bun --version`
-and skips the rule for an earlier version or when it prints no version.
+and skips the rule for an earlier version,
+or when it prints no version line or more than one.
 Bun 1.3 prints its cache path only inside a project with a `package.json`,
 so for Bun 1.3 the rule is skipped earlier, because its path command fails.
 `prune` takes its directory from `BUN_INSTALL_CACHE_DIR`, `BUN_INSTALL`,
@@ -326,12 +327,12 @@ and [`DENO_DIR` layout][deno-dir] code.
 
 The `yarn` and `yarn-berry` rules run the same `yarn`,
 resolved from the home directory.
-Each rule's check runs `yarn --version`,
-and each rule's `require` pattern accepts only its own versions:
-1.x for `yarn`, and 2.x or later for `yarn-berry`.
-A version line cannot match both patterns,
-so at most one Yarn rule acts on an installation.
-If no line of the output is a version, both rules are skipped.
+Each rule's check runs `yarn --version`
+and requires exactly one version line in its output.
+Each rule then refuses the versions that the other accepts:
+`yarn` runs only for 1.x, and `yarn-berry` only for 2.x or later.
+So at most one Yarn rule acts on an installation.
+If the output has no version line, or more than one, both rules are skipped.
 
 For Yarn 2 and later, `yarn-berry` asks `yarn config get cacheFolder`
 for the path and runs `yarn cache clean`, which deletes that folder.
@@ -339,12 +340,17 @@ With `enableGlobalCache`, which is on by default in Yarn 4.18.1,
 `cacheFolder` is the `cache` folder in `globalFolder`:
 by default `~/.yarn/berry/cache`,
 or `$XDG_DATA_HOME/yarn/berry/cache` when `XDG_DATA_HOME` is set.
-With `enableGlobalCache` off, `cacheFolder` is relative to a project,
-so outside one Yarn prints no path and the rule is skipped.
+With `enableGlobalCache` off, `cacheFolder` is a project's `.yarn/cache`,
+which a project with zero-installs keeps in Git.
+A command rule has no Git check, and the home directory can be,
+or be inside, a Yarn project.
+So `yarn-berry` has a second check, `yarn config get enableGlobalCache`,
+and runs only when Yarn prints exactly one line, `true`.
+Plonge runs both checks when it lists the rule
+and again right before cleanup,
+and skips the rule when the setting is off or Yarn cannot report it.
 If `enableCacheClean` is off, `yarn cache clean` fails,
 and Plonge reports the failure.
-The command runs from the home directory,
-so it does not reach a project's local `.yarn/cache`.
 `yarn` in the home directory can be Yarn 1
 even when projects choose a later version, for example in `packageManager`.
 Then only the `yarn` rule applies, and the Yarn 2+ global cache stays.
