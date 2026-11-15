@@ -8,7 +8,8 @@ mise en place is the preparation, and the plonge is where the dishes get done.
 `plonge scan` and `plonge clean` without `--apply` delete nothing.
 `plonge clean --apply` deletes selected project cache directories
 only if Git ignores them, they contain no tracked files,
-they are not and do not hold a Git repository,
+they are not and do not hold a Git repository
+other than the dependency clones that Swift Package Manager can restore,
 and they hold nothing that their rule protects.
 It excludes active and busy projects by default.
 `plonge clean --global --apply` instead runs global cleanup actions,
@@ -114,6 +115,7 @@ Before each deletion, Plonge checks that the path is still a directory,
 is not a symlink, is inside its root,
 is ignored by Git, contains no tracked files,
 is not and does not hold a Git repository,
+other than [SwiftPM's unchanged clones](#swift-package-manager-checkouts),
 and holds no entry that its rule protects.
 It asks Paseo again once per project, before the first deletion there,
 and skips the project's caches if Paseo now reports an agent there
@@ -184,6 +186,8 @@ Plonge refuses a cache that has a `.git` entry of any type
 or a Git directory (`HEAD` beside `objects` and `refs`), such as a bare clone.
 It also refuses a cache with a directory that it cannot read,
 because that directory could hide a repository.
+The only exception is the clones that Swift Package Manager manages,
+as [described below](#swift-package-manager-checkouts).
 Plonge stops at the first repository that it finds,
 does not follow symlinks, and checks while it measures the cache's size.
 It checks again right before deletion.
@@ -200,9 +204,72 @@ of each one.
 
 npm, pnpm, and Yarn 1 do not keep `.git` when they install a package from Git,
 so such a `node_modules` is not refused for that reason.
-Swift Package Manager keeps Git checkouts and bare clones in `.build`,
-so Plonge refuses a `.build` directory for a package with remote dependencies.
-`swift package reset` removes it;
+
+### Swift Package Manager checkouts
+
+Swift Package Manager keeps a clone of each remote dependency
+in `.build/checkouts/<identity>`
+and a bare clone in `.build/repositories/<name>`.
+`swift package resolve` makes both again at the commits in `Package.resolved`.
+For a `.build` directory beside `Package.swift`,
+Plonge does not refuse these repositories when SwiftPM can make them again:
+
+- A bare clone directly in `repositories` must be bare,
+  have no linked worktrees, and have one remote, `origin`,
+  set up as a mirror of a `location` that a pin in `Package.resolved` names.
+  Two URLs with a scheme or an scp-style host, such as `git@host:path`,
+  must be equal byte for byte, except for one trailing slash;
+  two absolute paths must resolve, through symlinks, to the same directory.
+  Plonge refuses a relative path in either one.
+  No commit may be held only by its reflogs.
+- A checkout directly in `checkouts` must have a `.git` directory,
+  not a `.git` file or symlink, and one remote, `origin`,
+  that is an accepted bare clone in the same cache.
+  Its `HEAD` must be the commit that `Package.resolved` pins for its identity,
+  and `git status` must show no changed, untracked, or ignored files.
+  It must have no stash, no linked worktrees,
+  no files marked assume-unchanged or skip-worktree,
+  and no reflog entry for a push to `origin`.
+  Every commit in it must be in `HEAD`, in `refs/remotes/origin`,
+  or in a tag that the bare clone holds at the same object.
+  A local branch, a tag that only the checkout has,
+  or a reflog does not count.
+
+Plonge refuses the `.build` directory for any other Git repository in it,
+including a repository inside a checkout, such as a submodule,
+and the reason names the path:
+
+```console
+Refused ~/code/app/.build: contains a Git repository at checkouts/swift-nio that has changed, untracked, or ignored files
+```
+
+Plonge reads `Package.resolved` versions 2 and 3, which key pins by package identity.
+It refuses a checkout when it cannot read the file,
+including a file in the version 1 format.
+It runs Git with the same environment as its other Git checks,
+names each repository explicitly, and sets every `git status` option
+that configuration could otherwise change.
+It checks when it measures the cache and again right before deletion.
+
+These checks run offline, so they cannot tell a commit that someone pushed
+into a bare clone from one that SwiftPM fetched.
+Plonge reads only the reflogs of the checkout's `refs/remotes/origin` refs,
+where a branch push leaves an entry.
+A tag push leaves no entry there, so a local tag pushed from the checkout
+to its bare clone is not detected, and neither is a push into the bare clone
+from a repository outside the cache.
+A SwiftPM mirror set in `.swiftpm/configuration/mirrors.json`
+clones a URL that differs from the pin's `location`, so its clone is refused.
+
+A `DerivedData` directory beside `Package.swift`,
+such as one that `xcodebuild -derivedDataPath DerivedData` makes,
+has the same layout in `SourcePackages`, and Plonge checks it the same way.
+A `DerivedData` directory beside an Xcode project or workspace
+is still refused when it holds package clones,
+because Xcode keeps those pins inside the project or workspace,
+and one folder can hold several of them.
+
+`swift package reset` removes `.build`;
 `swift package clean` removes only the build output and keeps the checkouts.
 
 ## Project discovery and activity

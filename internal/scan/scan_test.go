@@ -645,7 +645,7 @@ func TestMeasureRefusesGitRepositories(t *testing.T) {
 			tt.setup(t, root)
 
 			roots := []Root{Detect(context.Background(), root, rules.Default())}
-			sizes := Measure(roots)
+			sizes := Measure(context.Background(), roots)
 			got := roots[0]
 			if len(got.Refused) != 1 {
 				t.Fatalf("refused %+v, want one", got.Refused)
@@ -682,7 +682,7 @@ func TestMeasureRefusesUnreadableDirectory(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 
 	roots := []Root{Detect(context.Background(), root, rules.Default())}
-	Measure(roots)
+	Measure(context.Background(), roots)
 	if len(roots[0].Refused) != 1 || !strings.Contains(roots[0].Refused[0].Reason, "cannot check for Git repositories") {
 		t.Errorf("refused %+v", roots[0].Refused)
 	}
@@ -734,7 +734,7 @@ func TestMeasureRefusesInsidePaths(t *testing.T) {
 			tt.setup(t, cache)
 
 			roots := []Root{Detect(context.Background(), root, r)}
-			Measure(roots)
+			Measure(context.Background(), roots)
 			got := roots[0]
 			if tt.reason == "" {
 				if len(got.Refused) != 0 || len(got.Candidates) != 2 {
@@ -770,7 +770,7 @@ func TestMeasureRefusesUnreadableInsidePath(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 
 	roots := []Root{Detect(context.Background(), root, r)}
-	Measure(roots)
+	Measure(context.Background(), roots)
 	if len(roots[0].Refused) != 1 || !strings.Contains(roots[0].Refused[0].Reason, `cannot check for */rel`) {
 		t.Errorf("refused %+v", roots[0].Refused)
 	}
@@ -786,7 +786,7 @@ func TestVerifyRefusesInsidePath(t *testing.T) {
 	write(t, filepath.Join(root, "out", "dev", "lib", "app.beam"), "")
 
 	roots := []Root{Detect(context.Background(), root, r)}
-	Measure(roots)
+	Measure(context.Background(), roots)
 	if len(roots[0].Candidates) != 1 {
 		t.Fatalf("candidates %+v", roots[0].Candidates)
 	}
@@ -822,7 +822,7 @@ func TestMeasureRefusesInsidePathOfPathRule(t *testing.T) {
 	r, root, cache := pathRuleRepo(t)
 	write(t, filepath.Join(cache, "keep"), "x")
 	roots := []Root{Detect(context.Background(), root, r)}
-	Measure(roots)
+	Measure(context.Background(), roots)
 	got := roots[0]
 	want := `contains keep, which refuse_inside "keep" protects`
 	if len(got.Refused) != 1 || got.Refused[0].Path != cache || got.Refused[0].Reason != want ||
@@ -838,7 +838,7 @@ func TestVerifyRefusesInsidePathOfPathRule(t *testing.T) {
 	isolateGit(t)
 	r, root, cache := pathRuleRepo(t)
 	roots := []Root{Detect(context.Background(), root, r)}
-	Measure(roots)
+	Measure(context.Background(), roots)
 	if len(roots[0].Candidates) != 1 || roots[0].Candidates[0].Path != cache {
 		t.Fatalf("candidates %+v, refused %+v", roots[0].Candidates, roots[0].Refused)
 	}
@@ -875,7 +875,7 @@ func TestDetectBEAMBuild(t *testing.T) {
 	write(t, filepath.Join(root, "both", "_build", "default", "lib", "dep", "src", "dep.erl"), "edited")
 
 	roots := []Root{Detect(context.Background(), root, rules.Default())}
-	Measure(roots)
+	Measure(context.Background(), roots)
 	want := map[string]string{
 		"mix/_build": "_build beside mix.exs",
 	}

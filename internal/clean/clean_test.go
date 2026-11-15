@@ -73,7 +73,7 @@ func scanOne(t *testing.T, root string) ([]scan.Root, [][]int64) {
 		t.Fatalf("skipped %q, errors %q", got.Skipped, got.Errors)
 	}
 	roots := []scan.Root{got}
-	return roots, scan.Measure(roots)
+	return roots, scan.Measure(context.Background(), roots)
 }
 
 // quietOpts treats every root as quiet.

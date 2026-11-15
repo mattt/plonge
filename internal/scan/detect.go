@@ -19,6 +19,7 @@ type Candidate struct {
 	Path string // absolute path of the directory
 	Rule string // the rule that matched, such as "dist beside package.json"
 	repo string // the directory in which to run Git for this candidate
+	key  string // the cache name in the rules, such as ".build" or "vendor/bundle"
 	// refuse lists paths, relative to Path, at which an entry makes plonge
 	// refuse the candidate, from the rule's refuse_inside entry.
 	refuse []string
@@ -145,7 +146,7 @@ func walk(root string, r rules.Rules) ([]Candidate, []string) {
 		if key != "" {
 			// A path rule such as vendor/bundle keys its entries by the whole path,
 			// not by the directory's own name.
-			found = append(found, Candidate{Path: path, Rule: rule, refuse: r.RefuseInside[key]})
+			found = append(found, Candidate{Path: path, Rule: rule, key: key, refuse: r.RefuseInside[key]})
 			return fs.SkipDir
 		}
 		if slices.Contains(r.Skip, name) {
