@@ -280,6 +280,7 @@ func TestGlobalPathZONFieldValidation(t *testing.T) {
 		{"path = \"~/c\"\npath_zon_field = \"global_cache_dir\"\n", "needs a path command"},
 		{"path = \"t env\"\npath_zon_field = \"env.HOME\"\n", "is not a field name"},
 		{"path = \"t env\"\npath_zon_field = \"1st\"\n", "is not a field name"},
+		{"path = \"t env\"\npath_zon_field = \"global_cache_dir\"\npath_label = \"cache\"\n", "not both"},
 	}
 	for _, c := range cases {
 		f, err := parse(base+c.extra, "test")

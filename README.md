@@ -335,6 +335,7 @@ A relative path in that field is relative to the home directory,
 where Plonge runs the command.
 Plonge skips the rule when the output is not a ZON struct,
 has no such field, or has a value that is not a nonempty string.
+A rule can have `path_label` or `path_zon_field`, not both.
 
 A rule can name a `check`, a command that must not change anything:
 

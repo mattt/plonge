@@ -3,7 +3,6 @@ package global
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -222,21 +221,4 @@ func (p *zonParser) skipValue() error {
 		p.i++
 	}
 	return p.errorf("struct is not closed")
-}
-
-// zonPath reads a path from field of the ZON struct in out.
-// Zig prints a path inside the working directory relative to it,
-// so a relative path is joined to home, where plonge runs the command.
-func zonPath(out, field, home string) (string, error) {
-	path, err := zonField(out, field)
-	if err != nil {
-		return "", err
-	}
-	if path == "" {
-		return "", fmt.Errorf("printed an empty %s", field)
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(home, path)
-	}
-	return filepath.Clean(path), nil
 }

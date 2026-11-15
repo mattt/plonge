@@ -103,7 +103,7 @@ func TestPathFromZONField(t *testing.T) {
 	if e := entries[1]; e.Path != abs {
 		t.Errorf("absolute: %+v", e)
 	}
-	if e := entries[2]; !strings.Contains(e.Skipped, "printed an empty global_cache_dir") {
+	if e := entries[2]; !strings.Contains(e.Skipped, `printed "", which is not an absolute path`) {
 		t.Errorf("empty: %+v", e)
 	}
 	if e := entries[3]; !strings.Contains(e.Skipped, "path command failed: output is not a ZON struct") {

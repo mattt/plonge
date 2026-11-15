@@ -62,6 +62,7 @@ type Global struct {
 	// PathZONField makes plonge read the path from this field of a ZON struct
 	// that the path command prints, as "zig env" does. A relative path in it
 	// is relative to the home directory, where plonge runs the command.
+	// A rule can have PathLabel or PathZONField, not both.
 	PathZONField string `toml:"path_zon_field"`
 	Clean        string `toml:"clean"` // the command that cleans the cache
 	Kind         string `toml:"kind"`
@@ -171,6 +172,9 @@ func (g Global) validate() error {
 		return fmt.Errorf("global rule %q: path_label must be one line and needs a path command", g.ID)
 	}
 	if g.PathZONField != "" {
+		if g.PathLabel != "" {
+			return fmt.Errorf("global rule %q: use path_label or path_zon_field, not both", g.ID)
+		}
 		if g.fixedPath() {
 			return fmt.Errorf("global rule %q: path_zon_field needs a path command", g.ID)
 		}
