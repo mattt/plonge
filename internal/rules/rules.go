@@ -170,11 +170,8 @@ func (g Global) validate() error {
 	if !g.fixedPath() && !g.startsWithTool(g.Path) {
 		return fmt.Errorf("global rule %q: path must be an absolute path, a ~/ path, or a %s command", g.ID, g.Tool)
 	}
-	if g.PathField != "" && g.fixedPath() {
-		return fmt.Errorf("global rule %q: path_field needs a path command", g.ID)
-	}
-	if g.PathLabel != "" && (g.fixedPath() || strings.ContainsAny(g.PathLabel, "\r\n")) {
-		return fmt.Errorf("global rule %q: path_label must be one line and needs a path command", g.ID)
+	if err := g.validatePathKeys(); err != nil {
+		return err
 	}
 	if g.DeleteContents {
 		if err := g.validateDelete(); err != nil {
@@ -187,6 +184,34 @@ func (g Global) validate() error {
 		return fmt.Errorf("global rule %q: targets must be a %s command", g.ID, g.Tool)
 	}
 	return g.validateCheck()
+}
+
+// pathKeys returns the keys that set how plonge reads the output
+// of the path command. Each one replaces the default, the last line.
+func (g Global) pathKeys() []string {
+	var keys []string
+	if g.PathLabel != "" {
+		keys = append(keys, "path_label")
+	}
+	if g.PathField != "" {
+		keys = append(keys, "path_field")
+	}
+	return keys
+}
+
+// validatePathKeys checks that a rule sets at most one path key,
+// and only with a path command, because a fixed path has no output to read.
+func (g Global) validatePathKeys() error {
+	keys := g.pathKeys()
+	switch {
+	case len(keys) > 1:
+		return fmt.Errorf("global rule %q: set only one of %s", g.ID, strings.Join(keys, ", "))
+	case len(keys) == 1 && g.fixedPath():
+		return fmt.Errorf("global rule %q: %s needs a path command", g.ID, keys[0])
+	case strings.ContainsAny(g.PathLabel, "\r\n"):
+		return fmt.Errorf("global rule %q: path_label must be one line", g.ID)
+	}
+	return nil
 }
 
 // validateDelete checks a rule whose contents plonge deletes.

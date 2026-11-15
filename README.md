@@ -322,6 +322,8 @@ the labeled path gets the same checks as any other path.
 If the command prints a JSON object instead,
 set `path_field` to the name of the string field that holds the path,
 such as `path_field = "npmCache"` for `deno info --json`.
+A rule can set only one of `path_label` and `path_field`,
+and only with a `path` command.
 Both `path` and `clean` commands must start with `tool`.
 Command strings are split at whitespace.
 Shell quoting, pipes, and variable expansion are not supported.

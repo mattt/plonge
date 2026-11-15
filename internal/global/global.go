@@ -144,21 +144,28 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 	if err != nil {
 		return "", err
 	}
-	path := lastLine(out)
-	if g.PathField != "" {
-		if path, err = jsonField(out, g.PathField); err != nil {
-			return "", err
-		}
-	}
-	if g.PathLabel != "" {
-		if path, err = labeledPath(out, g.PathLabel); err != nil {
-			return "", err
-		}
+	path, err := printedPath(out, g)
+	if err != nil {
+		return "", err
 	}
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("printed %q, which is not an absolute path", path)
 	}
 	return filepath.Clean(path), nil
+}
+
+// printedPath picks the path text from the output of a rule's path command:
+// the field that path_field names, the text after path_label,
+// or by default the last line. Rule validation allows at most one of the keys.
+func printedPath(out string, g rules.Global) (string, error) {
+	switch {
+	case g.PathField != "":
+		return jsonField(out, g.PathField)
+	case g.PathLabel != "":
+		return labeledPath(out, g.PathLabel)
+	default:
+		return lastLine(out), nil
+	}
 }
 
 // jsonField returns the value of the string field name

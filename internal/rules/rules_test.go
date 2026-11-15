@@ -281,7 +281,7 @@ func TestGlobalCheckValidation(t *testing.T) {
 		{"check = \"t dry\"\nrequire = '^1\\.'\n", ""},
 		{"check = \"t dry\"\ncheck_env = [\"NOVALUE\"]\n", "must be NAME=value"},
 		{"check = \"t dry\"\ncheck_env = [\"=x\"]\n", "must be NAME=value"},
-		{"path_label = \"x\"\n", "path_label must be one line and needs a path command"},
+		{"path_label = \"x\"\n", "path_label needs a path command"},
 		{"check = \"t dry\"\nrefuse = 'bad (?P<path>.+)$'\nrefuse_reason = \"why\"\ncheck_env = [\"A=1\"]\n", ""},
 	}
 	for _, c := range cases {
@@ -308,6 +308,31 @@ func TestGlobalPathFieldValidation(t *testing.T) {
 		_, err := parse(rule+"path = \""+path+"\"\n", "test")
 		if err == nil || !strings.Contains(err.Error(), "path_field needs a path command") {
 			t.Errorf("%s: err = %v", path, err)
+		}
+	}
+}
+
+func TestGlobalPathKeysAreExclusive(t *testing.T) {
+	const rule = "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t info\"\nclean = \"t c\"\nkind = \"prune\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"", ""},
+		{"path_field = \"dir\"\n", ""},
+		{"path_label = \"cache\"\n", ""},
+		{"path_field = \"dir\"\npath_label = \"cache\"\n", "set only one of path_label, path_field"},
+		{"path_label = \"a\\nb\"\n", "path_label must be one line"},
+	}
+	for _, c := range cases {
+		_, err := parse(rule+c.extra, "test")
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%q: %v", c.extra, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
 		}
 	}
 }
