@@ -174,9 +174,10 @@ Plonge does not refuse these repositories when SwiftPM can make them again:
 - A bare clone directly in `repositories` must be bare,
   have no linked worktrees, and have one remote, `origin`,
   set up as a mirror of a `location` that a pin in `Package.resolved` names.
-  The origin URL must equal the `location` exactly,
-  except for one trailing slash;
-  for a local path, both must resolve, through symlinks, to the same directory.
+  Two URLs with a scheme or an scp-style host, such as `git@host:path`,
+  must be equal byte for byte, except for one trailing slash;
+  two absolute paths must resolve, through symlinks, to the same directory.
+  Plonge refuses a relative path in either one.
   No commit may be held only by its reflogs.
 - A checkout directly in `checkouts` must have a `.git` directory,
   not a `.git` file or symlink, and one remote, `origin`,
