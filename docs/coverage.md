@@ -28,6 +28,11 @@ Backend cache locations were checked against
 [mise's source at v2026.10.14][mise-source].
 No cleanup command was applied to build this inventory.
 
+The .NET project rules follow the default output folders in Microsoft's
+[`dotnet build` reference][dotnet-build] (`./bin/<configuration>/<framework>/`)
+and [MSBuild common properties][msbuild-props] (`BaseIntermediateOutputPath`, `obj\`),
+as published for .NET SDK 11.0.100.
+
 ## How to read the tables
 
 The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
@@ -94,8 +99,8 @@ The global-cache column lists additional rules relevant to that tool.
 | --- | --- | --- | --- | --- | --- |
 | `bun` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | Bun-specific: none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Bun-specific rule. | Bun's package cache (`~/.bun/install/cache`) and runtime caches outside matching project directories. |
 | `deno` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | Deno-specific: none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Deno-specific rule. | Deno's dependency and compiled-code cache (`DENO_DIR`). |
-| `dotnet` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no .NET cache rule. `clean --global` selects mise rules; `--include-clear` adds no .NET rule. | Project `bin` and `obj`; NuGet global packages and HTTP cache. |
-| `dotnet-core` (alias of `dotnet`) | Guarded `mise-tools`; same tool as `dotnet` | none yet | none yet | Same as `dotnet`: no project rule; global mise rules only; no additional clear rule. | Same .NET and NuGet gaps as `dotnet`. |
+| `dotnet` | Guarded `mise-tools` | `bin` and `obj` beside `*.csproj`, `*.fsproj`, or `*.vbproj` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no .NET rule. | Output moved by `BaseOutputPath`, `BaseIntermediateOutputPath`, or `--output`; the [`artifacts` layout][dotnet-artifacts] (`UseArtifactsOutput`); `bin` and `obj` beside other project types; NuGet global packages and HTTP cache. |
+| `dotnet-core` (alias of `dotnet`) | Guarded `mise-tools`; same tool as `dotnet` | Same as `dotnet` | none yet | Same as `dotnet`. | Same as `dotnet`. |
 | `elixir` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Elixir cache rule. `clean --global` selects mise rules; `--include-clear` adds no Elixir rule. | Mix `_build` and `deps`; Hex package cache. |
 | `erlang` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Erlang cache rule. `clean --global` selects mise rules; `--include-clear` adds no Erlang rule. | Rebar3 `_build` and global package cache. |
 | `go` | Guarded `mise-tools` | none yet | `go-modules`: `go clean -modcache` (clear); `go-build`: `go clean -cache` (clear) | `scan` and `clean` have no Go project rule. `clean --global` selects mise rules; `--include-clear` adds both Go rules. | Project binaries, `vendor`, and caches at paths other than those returned by Go from the home directory. |
@@ -110,7 +115,7 @@ The global-cache column lists additional rules relevant to that tool.
 "None yet" means there is no dedicated rule for that cache.
 An unrelated directory name can still match a generic project rule.
 Outside the shared mise rules, the core tools with no cache rule are
-`dotnet` (also named `dotnet-core`), `elixir`, `erlang`, `ruby`, and `zig`.
+`elixir`, `erlang`, `ruby`, and `zig`.
 Bun and Deno have project-name matches but no dedicated global-cache rule.
 
 ## Backends
@@ -188,3 +193,6 @@ without checking Xcode workspace metadata.
 [mise-spm]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/spm.rs
 [cargo]: https://mise.jdx.dev/dev-tools/backends/cargo.html
 [pypi]: https://mise.jdx.dev/dev-tools/backends/pypi.html
+[dotnet-build]: https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-build
+[msbuild-props]: https://learn.microsoft.com/en-us/visualstudio/msbuild/common-msbuild-project-properties
+[dotnet-artifacts]: https://learn.microsoft.com/en-us/dotnet/core/sdk/artifacts-output

@@ -388,7 +388,8 @@ Plonge has these default rules:
 ```toml
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
          ".pytest_cache", ".ruff_cache", ".svelte-kit", ".turbo", ".venv",
-         "DerivedData", "__pycache__", "dist", "node_modules", "target", "venv"]
+         "DerivedData", "__pycache__", "bin", "dist", "node_modules", "obj",
+         "target", "venv"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -397,7 +398,9 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # Match these names only when a listed project file is in the same directory.
 # A project file can be a pattern, such as "*.csproj".
 [beside]
+bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 dist = ["package.json"]
+obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 ```

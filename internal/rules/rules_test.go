@@ -10,7 +10,7 @@ import (
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 17 || r.QuietHours != 24 {
+	if len(r.Names) != 19 || r.QuietHours != 24 {
 		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
@@ -123,6 +123,8 @@ func TestMatch(t *testing.T) {
 		{"target", []string{"pom.xml"}, "target beside pom.xml"},
 		{"target", []string{"package.json"}, ""},
 		{"src", []string{"package.json"}, ""},
+		{"bin", nil, ""},
+		{"obj", []string{"package.json"}, ""},
 	}
 	for _, tt := range tests {
 		got := r.Match(tt.name, func(m string) bool { return slices.Contains(tt.siblings, m) })

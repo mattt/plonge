@@ -123,6 +123,29 @@ func TestDetect(t *testing.T) {
 			},
 		},
 		{
+			name: ".NET project output",
+			files: map[string]string{
+				".gitignore":              "bin/\nobj/\n",
+				"App/App.csproj":          "",
+				"App/bin/Debug/App.dll":   "",
+				"App/obj/project.assets":  "",
+				"Lib/Lib.fsproj":          "",
+				"Lib/obj/x":               "",
+				"Vb/Vb.vbproj":            "",
+				"Vb/bin/x":                "",
+				"tools/bin/run.sh":        "", // no project file
+				"App.sln":                 "",
+				"bin/x":                   "", // beside a solution only
+				"App/bin/Debug/sub/obj/x": "", // inside a candidate
+			},
+			want: map[string]string{
+				"App/bin": "bin beside *.csproj",
+				"App/obj": "obj beside *.csproj",
+				"Lib/obj": "obj beside *.fsproj",
+				"Vb/bin":  "bin beside *.vbproj",
+			},
+		},
+		{
 			name: "ignored by a parent directory rule",
 			files: map[string]string{
 				".gitignore":            "build/\n",
