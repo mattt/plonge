@@ -260,6 +260,10 @@ func TestGlobalDeleteContentsValidation(t *testing.T) {
 	if _, err := parse("[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\nkind = \"clear\"\n", "test"); err == nil {
 		t.Error("a rule with neither clean nor delete_contents has no error")
 	}
+	labeled := "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t where\"\npath_label = \"cache\"\ndelete_contents = true\nkind = \"clear\"\n"
+	if f, err := parse(labeled, "test"); err != nil || f.Global[0].PathLabel != "cache" {
+		t.Errorf("path_label with delete_contents: %+v, %v", f.Global, err)
+	}
 }
 
 func TestGlobalCheckValidation(t *testing.T) {

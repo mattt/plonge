@@ -144,9 +144,8 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 	}
 	path := lastLine(out)
 	if g.PathLabel != "" {
-		var ok bool
-		if path, ok = labeledPath(out, g.PathLabel); !ok {
-			return "", fmt.Errorf("printed no line with %q", g.PathLabel+": ")
+		if path, err = labeledPath(out, g.PathLabel); err != nil {
+			return "", err
 		}
 	}
 	if !filepath.IsAbs(path) {
@@ -155,16 +154,27 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 	return filepath.Clean(path), nil
 }
 
-// labeledPath returns the text after "label: " on the last line of out
-// that contains it, so that a prefix such as "info : " is allowed.
-func labeledPath(out, label string) (string, bool) {
-	lines := strings.Split(out, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if _, path, ok := strings.Cut(lines[i], label+": "); ok {
-			return strings.TrimSpace(path), true
+// labeledPath returns the text after "label: " on the lines of out
+// that contain it, so that a prefix such as "info : " is allowed.
+// It fails when no line has the label, or when two lines give different paths,
+// because plonge cannot tell which one the tool means.
+func labeledPath(out, label string) (string, error) {
+	var path string
+	for line := range strings.SplitSeq(out, "\n") {
+		_, p, ok := strings.Cut(line, label+": ")
+		if !ok {
+			continue
 		}
+		p = strings.TrimSpace(p)
+		if path != "" && filepath.Clean(p) != filepath.Clean(path) {
+			return "", fmt.Errorf("printed more than one path for %q", label+": ")
+		}
+		path = p
 	}
-	return "", false
+	if path == "" {
+		return "", fmt.Errorf("printed no line with %q", label+": ")
+	}
+	return path, nil
 }
 
 // List resolves each rule for this operating system and measures its cache.

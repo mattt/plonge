@@ -308,6 +308,10 @@ If the tool prints a label before the path, set `path_label`:
 with `path_label = "global-packages"`, Plonge uses the text after
 `global-packages: ` on the last line that contains it,
 so a line such as `info : global-packages: /path/` gives `/path/`.
+Plonge skips the rule when no line has the label,
+or when two lines with the label give different paths.
+A `delete_contents` rule can also use `path_label`;
+the labeled path gets the same checks as any other path.
 Both `path` and `clean` commands must start with `tool`.
 Command strings are split at whitespace.
 Shell quoting, pipes, and variable expansion are not supported.

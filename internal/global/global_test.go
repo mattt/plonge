@@ -243,12 +243,16 @@ func TestPathLabel(t *testing.T) {
 	addTool(t, bin, "plain", fmt.Sprintf(`echo "store: %s"`, cache))
 	addTool(t, bin, "nolabel", fmt.Sprintf(`echo %q`, cache))
 	addTool(t, bin, "relative", `echo "store: cache"`)
+	addTool(t, bin, "twice", fmt.Sprintf(`echo "store: %s"; echo "store: %s/"; echo "store: /other"`, cache, cache))
+	addTool(t, bin, "same", fmt.Sprintf(`echo "store: %s"; echo "info : store: %s/"`, cache, cache))
 	r := runner(t)
 	entries := r.List(context.Background(), []rules.Global{
 		{ID: "labeled", Tool: "labeled", Path: "labeled list", PathLabel: "store", Clean: "labeled c", Kind: rules.KindClear},
 		{ID: "plain", Tool: "plain", Path: "plain list", PathLabel: "store", Clean: "plain c", Kind: rules.KindClear},
 		{ID: "nolabel", Tool: "nolabel", Path: "nolabel list", PathLabel: "store", Clean: "nolabel c", Kind: rules.KindClear},
 		{ID: "relative", Tool: "relative", Path: "relative list", PathLabel: "store", Clean: "relative c", Kind: rules.KindClear},
+		{ID: "twice", Tool: "twice", Path: "twice list", PathLabel: "store", Clean: "twice c", Kind: rules.KindClear},
+		{ID: "same", Tool: "same", Path: "same list", PathLabel: "store", Clean: "same c", Kind: rules.KindClear},
 	})
 	for _, e := range entries[:2] {
 		if e.Skipped != "" || e.Path != cache || e.Bytes < 10 {
@@ -260,6 +264,12 @@ func TestPathLabel(t *testing.T) {
 	}
 	if e := entries[3]; !strings.Contains(e.Skipped, "not an absolute path") {
 		t.Errorf("relative = %+v", e)
+	}
+	if e := entries[4]; !strings.Contains(e.Skipped, "more than one path") || e.Command != "" {
+		t.Errorf("twice = %+v", e)
+	}
+	if e := entries[5]; e.Skipped != "" || e.Path != cache {
+		t.Errorf("same = %+v", e)
 	}
 }
 
