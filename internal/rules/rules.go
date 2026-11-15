@@ -26,6 +26,10 @@ type Rules struct {
 	// when one of them is in the same parent directory.
 	// A project file can be a pattern, such as "*.csproj"; see IsPattern.
 	Beside map[string][]string
+	// RefuseInside maps a name to paths relative to a matching directory.
+	// Plonge refuses a match that holds an entry at one of them.
+	// Each element of a path can be a pattern; see ValidInsidePath.
+	RefuseInside map[string][]string
 	// QuietHours is how long a project must be inactive to be quiet.
 	QuietHours float64
 	// Skip are directory names that the walk never enters.
@@ -102,8 +106,10 @@ type file struct {
 	Names      []string            `toml:"names"`
 	QuietHours *float64            `toml:"quiet_hours"`
 	Beside     map[string][]string `toml:"beside"`
-	Skip       []string            `toml:"skip"`
-	Global     []Global            `toml:"global"`
+	// RefuseInside is refuse_inside; see Rules.RefuseInside.
+	RefuseInside map[string][]string `toml:"refuse_inside"`
+	Skip         []string            `toml:"skip"`
+	Global       []Global            `toml:"global"`
 }
 
 // versionControlDirs hold a project's history, so no rule may name them as caches.
@@ -138,6 +144,13 @@ func parse(data, name string) (file, error) {
 		for _, m := range markers {
 			if _, err := filepath.Match(m, ""); err != nil {
 				return f, fmt.Errorf("%s: beside %s: invalid project file pattern %q", name, n, m)
+			}
+		}
+	}
+	for n, paths := range f.RefuseInside {
+		for _, p := range paths {
+			if !ValidInsidePath(p) {
+				return f, fmt.Errorf("%s: refuse_inside %s: invalid path %q", name, n, p)
 			}
 		}
 	}
@@ -321,28 +334,53 @@ func (g Global) startsWithTool(cmd string) bool {
 	return len(words) > 0 && words[0] == g.Tool
 }
 
+// ValidInsidePath reports whether p can be a refuse_inside path:
+// one or more elements separated by "/", none of them empty, ".", or "..",
+// where each element is a name or a pattern in the syntax of [filepath.Match].
+func ValidInsidePath(p string) bool {
+	if p == "" || strings.ContainsRune(p, '\\') {
+		return false
+	}
+	for elem := range strings.SplitSeq(p, "/") {
+		if !validName(elem) {
+			return false
+		}
+		if _, err := filepath.Match(elem, ""); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // Default returns the built-in rules.
 func Default() Rules {
 	f, err := parse(defaultTOML, "default rules")
 	if err != nil {
 		panic(err)
 	}
-	return merge(Rules{Beside: map[string][]string{}}, f)
+	return merge(Rules{Beside: map[string][]string{}, RefuseInside: map[string][]string{}}, f)
 }
 
-// merge adds the names and skip names in f to r, replaces each beside entry
-// and each global rule with the same id, adds new global rules,
+// merge adds the names and skip names in f to r,
+// replaces each beside entry, each refuse_inside entry, and each global rule with the same id, adds new global rules,
 // and sets the quiet period when f has one.
 func merge(r Rules, f file) Rules {
 	out := Rules{
-		Names:      slices.Clone(r.Names),
-		Beside:     make(map[string][]string, len(r.Beside)+len(f.Beside)),
-		QuietHours: r.QuietHours,
-		Skip:       slices.Clone(r.Skip),
-		Global:     slices.Clone(r.Global),
+		Names:        slices.Clone(r.Names),
+		Beside:       make(map[string][]string, len(r.Beside)+len(f.Beside)),
+		RefuseInside: make(map[string][]string, len(r.RefuseInside)+len(f.RefuseInside)),
+		QuietHours:   r.QuietHours,
+		Skip:         slices.Clone(r.Skip),
+		Global:       slices.Clone(r.Global),
 	}
 	for k, v := range r.Beside {
 		out.Beside[k] = v
+	}
+	for k, v := range r.RefuseInside {
+		out.RefuseInside[k] = v
+	}
+	for k, v := range f.RefuseInside {
+		out.RefuseInside[k] = v
 	}
 	for _, n := range f.Names {
 		if !slices.Contains(out.Names, n) {

@@ -48,6 +48,9 @@ func Verify(ctx context.Context, root string, c Candidate) (reason string, err e
 	if reason := gitRefusal(c.Path); reason != "" {
 		return reason, nil
 	}
+	if reason := insideRefusal(c); reason != "" {
+		return reason, nil
+	}
 	return "", nil
 }
 

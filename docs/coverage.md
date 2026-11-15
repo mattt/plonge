@@ -147,6 +147,77 @@ under `configuration` ([source][spm-local-config]),
 and Xcode keeps the package's schemes and user data under `xcode`.
 No part of it is a regenerable cache that a directory-name rule can match.
 
+The Mix and Rebar3 rules follow Elixir **1.20.5** and Rebar3 **3.28.0**,
+the current stable releases.
+Mix puts build output in `_build/<env>` beside `mix.exs` by default;
+`MIX_BUILD_ROOT`, `MIX_BUILD_PATH`, and the `:build_path` option change it
+([source][mix-build-path]).
+An umbrella app's `mix.exs` sets `build_path` to the umbrella's `_build`
+([source][mix-umbrella]), so the match is beside the umbrella's `mix.exs`.
+Mix's `_build/<env>/lib/<app>` holds compiled output and symlinks
+to each app's `include` and `priv` ([source][mix-build-structure]).
+Plonge deletes those symlinks and not what they point to.
+`mix clean --deps` removes the build output,
+but it loads the project's `mix.exs` ([source][mix-clean]),
+so Plonge deletes the directory, as it does for setuptools.
+Rebar3 puts build output in `_build/<profile>` beside `rebar.config`,
+and the sources of dependencies in `_build/<profile>/lib`
+([source][rebar3-dirs], [defaults][rebar3-hrl]).
+Rebar3 fetches a Git dependency with `git clone`, which keeps its `.git` directory
+([source][rebar3-git]), so Plonge refuses a `_build` with a Git dependency.
+An edit to a Hex dependency in `_build/<profile>/lib` has no such protection,
+so Plonge does not match `_build` beside `rebar.config`,
+and it refuses any `_build` that holds `*/lib/*/src`,
+such as a Mix project that Rebar3 also built.
+Rebar3 builds the dependencies in `_checkouts` in place of
+fetched ones for local edits ([source][rebar3-checkouts]),
+and Plonge does not match `_checkouts`.
+
+Both tools build a release in `_build/<env or profile>/rel`
+([Mix][mix-release-path], [Rebar3][rebar3-rel]).
+When a Mix release has no `:cookie` option, Mix writes a random Erlang cookie
+to its `releases/COOKIE` file and keeps it in later builds
+([source][mix-cookie]); a new build writes a different one.
+A Rebar3 release can also hold the earlier versions that `relup` needs.
+So the `_build` rule has a `refuse_inside` path, `*/rel`,
+and Plonge refuses a `_build` that holds a release.
+
+Plonge does not match Mix's `deps` directory.
+`deps` holds only dependency sources ([option][mix-deps-path]).
+Mix keeps a Git dependency's `.git` directory ([source][mix-git]),
+which Plonge refuses,
+but Hex unpacks a package into `deps/<name>` with only a `.hex` manifest
+([source][hex-unpack]).
+An edit to such a package is not tracked by Git and has no `.git` entry,
+so Plonge's checks cannot see it and a deletion would lose it.
+`mix deps.clean --all` removes `deps` and its build output
+([source][mix-deps-clean]), but Plonge does not run it.
+
+Hex and Rebar3 have no command that cleans their package caches,
+so `hex-packages` and `rebar3-hex` use the built-in deletion described below.
+Hex 2.7.0 keeps package tarballs in `packages/<repo>` in its cache home
+([source][hex-cache-path]).
+The cache home is `HEX_HOME`, `$XDG_CACHE_HOME/hex` when `MIX_XDG` is set,
+or `~/.hex` ([source][hex-home], [docs][hex-home-docs]).
+`mix hex.config` does not print the packages folder,
+so the rule uses the default, `~/.hex/packages`,
+and a cache moved by `HEX_HOME` or `MIX_XDG` is not covered.
+`~/.hex` also holds `hex.config`, with the user's Hex API key
+([source][hex-config-path]), and the registry cache,
+so the rule deletes only the contents of `packages`.
+The next `mix deps.get` downloads a deleted tarball again;
+`HEX_OFFLINE` uses only cached tarballs ([source][hex-offline]).
+Rebar3 3.28.0 keeps the package index and tarballs in `hex`
+in its global cache ([source][rebar3-hex-dir]),
+which is `REBAR_CACHE_DIR` or `~/.cache/rebar3`
+([source][rebar3-cache-dir], [override][rebar3-cache-env]).
+Rebar3 has no command that prints it, so the rule uses `~/.cache/rebar3/hex`.
+The global cache also holds global plugins
+([source][rebar3-plugins]) and the `rebar3` that `rebar3 local install` writes
+to `bin` and `vsns` ([source][rebar3-local-install]),
+so the rule deletes only the contents of `hex`.
+Both rules are `clear`, because they also delete packages that projects use.
+
 ## How to read the tables
 
 The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
@@ -170,7 +241,8 @@ Project cache names are exact directory names.
 Every match must be inside a scanned root, ignored by Git,
 and contain no tracked files.
 Plonge refuses a match that is or holds a Git repository at any depth,
-as the [README](../README.md#caches-that-hold-a-git-repository) describes.
+as the [README](../README.md#caches-that-hold-a-git-repository) describes,
+and a match that holds an entry at one of its rule's `refuse_inside` paths.
 A listed project file must be in the cache directory's parent directory.
 A project file written as a pattern, such as `*.csproj`, matches any name of that form.
 No project file is required unless the table names one.
@@ -220,8 +292,8 @@ The global-cache column lists additional rules relevant to that tool.
 | `deno` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` if used | `deno-remote`, `deno-npm`, `deno-gen`: `delete_contents` of the `modulesCache`, `npmCache`, and `typescriptCache` paths from `deno info --json` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds the three Deno rules. | `deno clean`, which also deletes user state; `location_data` (localStorage and Cache API data) and REPL history, which hold user state; the `registries` and `dl` folders and the analysis, check, and code caches in `DENO_DIR`. |
 | `dotnet` | Guarded `mise-tools` | `bin` and `obj` beside `*.csproj`, `*.fsproj`, or `*.vbproj` | `nuget-packages`: `dotnet nuget locals global-packages --clear` (clear); `nuget-http-cache`: `dotnet nuget locals http-cache --clear` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds both NuGet rules. | Output moved by `BaseOutputPath`, `BaseIntermediateOutputPath`, or `--output`; the [`artifacts` layout][dotnet-artifacts] (`UseArtifactsOutput`); `bin` and `obj` beside other project types; NuGet's `temp` and `plugins-cache` folders; `packages.config` folders set by `repositoryPath`; NuGet folders set only in a project's `nuget.config`. |
 | `dotnet-core` (alias of `dotnet`) | Guarded `mise-tools`; same tool as `dotnet` | Same as `dotnet` | Same as `dotnet` | Same as `dotnet`. | Same as `dotnet`. |
-| `elixir` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Elixir cache rule. `clean --global` selects mise rules; `--include-clear` adds no Elixir rule. | Mix `_build` and `deps`; Hex package cache. |
-| `erlang` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Erlang cache rule. `clean --global` selects mise rules; `--include-clear` adds no Erlang rule. | Rebar3 `_build` and global package cache. |
+| `elixir` | Guarded `mise-tools` | `_build` beside `mix.exs`, refused when it holds `*/rel` | `hex-packages`: `delete_contents` of `~/.hex/packages` (clear) | `scan` reports project matches; `clean` selects quiet ones. A `_build` that holds a release is refused. `clean --global` selects mise rules; `--include-clear` adds `hex-packages`. | Mix `deps`, which can hold edited dependency sources; `_build` moved by `MIX_BUILD_ROOT`, `MIX_BUILD_PATH`, or `:build_path`; `_build` with a release; a Hex cache moved by `HEX_HOME` or `MIX_XDG`; Hex's registry cache and docs. |
+| `erlang` | Guarded `mise-tools` | none yet; `_build` beside `rebar.config` is left out because it holds dependency sources | `rebar3-hex`: `delete_contents` of `~/.cache/rebar3/hex` (clear) | `scan` and `clean` have no Rebar3 project rule. `clean --global` selects mise rules; `--include-clear` adds `rebar3-hex`. | Rebar3 `_build`, which holds dependency sources that a user can edit; `_checkouts`; a Rebar3 cache moved by `REBAR_CACHE_DIR`; Rebar3's global plugins and its `local install` copy. |
 | `go` | Guarded `mise-tools` | none yet | `go-modules`: `go clean -modcache` (clear); `go-build`: `go clean -cache` (clear) | `scan` and `clean` have no Go project rule. `clean --global` selects mise rules; `--include-clear` adds both Go rules. | Project binaries, `vendor`, and caches at paths other than those returned by Go from the home directory. |
 | `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); Gradle project `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
 | `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1); `yarn-berry`: `yarn cache clean` (clear, Yarn 2 and later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and the one Yarn rule that matches the version of `yarn` in the home directory. | Project `.yarn/cache` folders; the Yarn 2+ global cache when `yarn` in the home directory is Yarn 1 or `enableGlobalCache` is off; separate pnpm stores not resolved from the home directory; `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
@@ -233,8 +305,7 @@ The global-cache column lists additional rules relevant to that tool.
 
 "None yet" means there is no dedicated rule for that cache.
 An unrelated directory name can still match a generic project rule.
-Outside the shared mise rules, the core tools with no cache rule are
-`elixir`, `erlang`, and `ruby`.
+Outside the shared mise rules, the only core tool with no cache rule is `ruby`.
 
 ## Backends
 
@@ -282,6 +353,8 @@ Global rules require their command to be available, except for the Xcode rule.
 | --- | --- | --- | --- | --- |
 | Astro, Next.js, Parcel, SvelteKit, Turborepo | `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo`; `dist` beside `package.json` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. No dedicated global action. |
 | mypy, pytest, Ruff | `.mypy_cache`, `.pytest_cache`, `.ruff_cache` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. |
+| Mix, Rebar3 | `_build` beside `mix.exs` | none | Delete matching project directories; Plonge does not run `mix clean` or `rebar3 clean` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `_build` that holds a release (`*/rel`) or dependency sources (`*/lib/*/src`) is refused. Rebar3 `_build` beside `rebar.config` and Mix `deps` are not matched. |
+| Hex, Rebar3 | none | `hex-packages`, `rebar3-hex` | `delete_contents` of `~/.hex/packages` and `~/.cache/rebar3/hex`; neither tool has a cleanup command | clear; requires `clean --global --include-clear --apply` to run. Caches moved by `HEX_HOME`, `MIX_XDG`, or `REBAR_CACHE_DIR` are not covered. |
 | tox, nox | `.tox`, `.nox` | none | Delete matching project directories; neither tool has a cleanup command | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Environments moved by `--workdir`, `work_dir`, or `--envdir` are not matched. |
 | Maven, Gradle | `target` beside `pom.xml`; `.gradle` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Global repositories and caches remain. |
 | setuptools | `build` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; Plonge does not run `setup.py clean --all` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `build_base` setting that moves the directory is not followed. |
@@ -306,7 +379,8 @@ Such a rule must be a clear rule, so it runs only with
 Plonge skips it when the path is not absolute; is `/`, the home directory,
 or contains the home directory; is or resolves through a symlink;
 is in a Git repository; or does not exist.
-The default `zig-global-cache` rule and the Deno rules use `delete_contents`.
+The default `zig-global-cache`, `hex-packages`, and `rebar3-hex` rules
+and the Deno rules use `delete_contents`.
 See the [README](../README.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
@@ -395,6 +469,31 @@ Then only the `yarn` rule applies, and the Yarn 2+ global cache stays.
 See Yarn's [cache clean command][yarn-clean] and
 [configuration][yarn-config] code.
 
+[mix-build-path]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/project.ex#L782-L786
+[mix-umbrella]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/project.ex#L140-L148
+[mix-build-structure]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/project.ex#L937-L961
+[mix-clean]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/tasks/clean.ex#L31-L40
+[mix-deps-path]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/project.ex#L68-L69
+[mix-git]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/scm/git.ex#L105-L111
+[mix-deps-clean]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/tasks/deps.clean.ex#L8-L20
+[mix-release-path]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/release.ex#L128-L132
+[mix-cookie]: https://github.com/elixir-lang/elixir/blob/v1.20.5/lib/mix/lib/mix/release.ex#L570-L586
+[hex-unpack]: https://github.com/hexpm/hex/blob/v2.7.0/lib/hex/scm.ex#L178-L211
+[hex-cache-path]: https://github.com/hexpm/hex/blob/v2.7.0/lib/hex/scm.ex#L449-L453
+[hex-home]: https://github.com/hexpm/hex/blob/v2.7.0/lib/hex/config.ex#L163-L174
+[hex-home-docs]: https://github.com/hexpm/hex/blob/v2.7.0/lib/mix/tasks/hex.config.ex#L123-L129
+[hex-config-path]: https://github.com/hexpm/hex/blob/v2.7.0/lib/mix/tasks/hex.config.ex#L281-L285
+[hex-offline]: https://github.com/hexpm/hex/blob/v2.7.0/lib/hex/scm.ex#L455-L469
+[rebar3-hex-dir]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_packages.erl#L158-L175
+[rebar3-cache-dir]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_dir.erl#L168-L172
+[rebar3-cache-env]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar3.erl#L175-L180
+[rebar3-plugins]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_prv_plugins.erl#L39
+[rebar3-local-install]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_prv_local_install.erl#L82-L94
+[rebar3-dirs]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_dir.erl#L40-L79
+[rebar3-hrl]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar.hrl#L15-L25
+[rebar3-git]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_git_resource.erl#L191-L196
+[rebar3-checkouts]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_prv_install_deps.erl#L330-L336
+[rebar3-rel]: https://github.com/erlang/rebar3/blob/3.28.0/apps/rebar/src/rebar_relx.erl#L36
 [mise-source]: https://github.com/jdx/mise/tree/v2026.10.14/src/backend
 [mise-prune]: https://github.com/jdx/mise/blob/v2026.10.14/src/cli/prune.rs
 [mise-backend]: https://github.com/jdx/mise/blob/v2026.10.14/src/backend/mod.rs
