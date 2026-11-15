@@ -85,6 +85,9 @@ func (r Runner) refuseDelete(ctx context.Context, path string) string {
 // must not delete its contents: the first entry with one of names,
 // or a directory that it cannot read, which could hide one.
 // It returns "" when names is empty or dir holds none of them.
+// A project rule's refuse_inside paths match only at fixed positions below
+// a match; a name here can be at any depth, such as the metadata file below
+// a Maven group ID, whose number of directories varies.
 func refuseNames(dir string, names []string) string {
 	if len(names) == 0 {
 		return ""
