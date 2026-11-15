@@ -10,11 +10,14 @@ import (
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 19 || r.QuietHours != 24 {
+	if len(r.Names) != 24 || r.QuietHours != 24 {
 		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
 		t.Errorf("beside target = %q", r.Beside["target"])
+	}
+	if !slices.Equal(r.Beside["build"], []string{"pyproject.toml", "setup.py"}) {
+		t.Errorf("beside build = %q", r.Beside["build"])
 	}
 }
 
@@ -89,7 +92,7 @@ func TestLoad(t *testing.T) {
 		})
 	}
 	// Loading must not change the defaults.
-	if !slices.Equal(Default().Beside["dist"], []string{"package.json"}) {
+	if !slices.Equal(Default().Beside["dist"], []string{"package.json", "pyproject.toml", "setup.py"}) {
 		t.Error("Load changed the default rules")
 	}
 }
@@ -120,11 +123,25 @@ func TestMatch(t *testing.T) {
 		{"node_modules", nil, "node_modules"},
 		{"dist", nil, ""},
 		{"dist", []string{"package.json"}, "dist beside package.json"},
+		{"dist", []string{"pyproject.toml"}, "dist beside pyproject.toml"},
+		{"dist", []string{"setup.py"}, "dist beside setup.py"},
+		{"dist", []string{"requirements.txt"}, ""},
 		{"target", []string{"pom.xml"}, "target beside pom.xml"},
 		{"target", []string{"package.json"}, ""},
 		{"src", []string{"package.json"}, ""},
+		{".zig-cache", []string{"build.zig"}, ".zig-cache beside build.zig"},
+		{"zig-cache", []string{"build.zig"}, "zig-cache beside build.zig"},
+		{".zig-cache", nil, ""},
+		{"zig-cache", []string{"build.zig.zon"}, ""},
+		{"zig-out", []string{"build.zig"}, ""},
 		{"bin", nil, ""},
 		{"obj", []string{"package.json"}, ""},
+		{".tox", nil, ".tox"},
+		{".nox", nil, ".nox"},
+		{"build", nil, ""},
+		{"build", []string{"package.json", "build.gradle"}, ""},
+		{"build", []string{"pyproject.toml"}, "build beside pyproject.toml"},
+		{"build", []string{"setup.py"}, "build beside setup.py"},
 	}
 	for _, tt := range tests {
 		got := r.Match(tt.name, func(m string) bool { return slices.Contains(tt.siblings, m) })
@@ -266,6 +283,31 @@ func TestGlobalDeleteContentsValidation(t *testing.T) {
 	}
 }
 
+func TestGlobalPathZONFieldValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\nclean = \"t gc\"\nkind = \"prune\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"path = \"t env\"\npath_zon_field = \"global_cache_dir\"\n", ""},
+		{"path = \"~/c\"\npath_zon_field = \"global_cache_dir\"\n", "needs a path command"},
+		{"path = \"t env\"\npath_zon_field = \"env.HOME\"\n", "is not a field name"},
+		{"path = \"t env\"\npath_zon_field = \"1st\"\n", "is not a field name"},
+		{"path = \"t env\"\npath_zon_field = \"global_cache_dir\"\npath_label = \"cache\"\n", "set only one of path_label, path_zon_field"},
+	}
+	for _, c := range cases {
+		f, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil || f.Global[0].PathZONField != "global_cache_dir" {
+				t.Errorf("%q: %+v, %v", c.extra, f.Global, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
+		}
+	}
+}
+
 func TestGlobalCheckValidation(t *testing.T) {
 	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\nclean = \"t gc\"\nkind = \"prune\"\n"
 	cases := []struct {
@@ -321,6 +363,9 @@ func TestGlobalPathKeysAreExclusive(t *testing.T) {
 		{"path_field = \"dir\"\n", ""},
 		{"path_label = \"cache\"\n", ""},
 		{"path_field = \"dir\"\npath_label = \"cache\"\n", "set only one of path_label, path_field"},
+		{"path_zon_field = \"dir\"\n", ""},
+		{"path_field = \"dir\"\npath_zon_field = \"dir\"\n", "set only one of path_field, path_zon_field"},
+		{"path_label = \"cache\"\npath_field = \"dir\"\npath_zon_field = \"dir\"\n", "set only one of path_label, path_field, path_zon_field"},
 		{"path_label = \"a\\nb\"\n", "path_label must be one line"},
 	}
 	for _, c := range cases {

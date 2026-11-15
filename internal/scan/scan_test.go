@@ -147,6 +147,51 @@ func TestDetect(t *testing.T) {
 			},
 		},
 		{
+			name: "Python test environments",
+			files: map[string]string{
+				".gitignore":               ".tox/\n.nox/\n",
+				"tox.ini":                  "",
+				".tox/py313/bin/python":    "",
+				".tox/.pkg/x":              "",
+				"noxfile.py":               "",
+				".nox/tests/bin/python":    "",
+				"sub/.nox/lint/bin/python": "", // nox has no fixed project file
+				".tox/py313/lib/.nox/x":    "", // inside a candidate
+			},
+			want: map[string]string{
+				".tox":     ".tox",
+				".nox":     ".nox",
+				"sub/.nox": ".nox",
+			},
+		},
+		{
+			name: "Python build and dist output",
+			files: map[string]string{
+				".gitignore":                          "build/\ndist/\n__pycache__/\n",
+				"lib/dist/pkg-1.0-py3-none-any.whl":   "",
+				"old/dist/pkg-1.0.tar.gz":             "",
+				"docs/dist/x":                         "", // no project file
+				"lib/pyproject.toml":                  "",
+				"lib/build/lib/pkg/m.py":              "",
+				"lib/build/lib/pkg/__pycache__/m.pyc": "", // inside a candidate
+				"old/setup.py":                        "",
+				"old/build/temp/x.o":                  "",
+				"web/package.json":                    "{}",
+				"web/build/index.html":                "", // not a Python project
+				"app/build.gradle":                    "",
+				"app/build/classes/x":                 "", // not a Python project
+				"docs/build/html/index.html":          "", // no project file
+				"src/pkg/__pycache__/m.pyc":           "",
+			},
+			want: map[string]string{
+				"lib/build":           "build beside pyproject.toml",
+				"old/build":           "build beside setup.py",
+				"lib/dist":            "dist beside pyproject.toml",
+				"old/dist":            "dist beside setup.py",
+				"src/pkg/__pycache__": "__pycache__",
+			},
+		},
+		{
 			name: "ignored by a parent directory rule",
 			files: map[string]string{
 				".gitignore":            "build/\n",

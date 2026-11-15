@@ -59,9 +59,14 @@ type Global struct {
 	// PathLabel, when set, selects the last line of the path command's output
 	// that contains the label followed by ": ", and takes the path after it.
 	PathLabel string `toml:"path_label"`
-	Clean     string `toml:"clean"` // the command that cleans the cache
-	Kind      string `toml:"kind"`
-	OS        string `toml:"os"` // when set, the rule applies only on this GOOS
+	// PathZONField makes plonge read the path from this field of a ZON struct
+	// that the path command prints, as "zig env" does. A relative path in it
+	// is relative to the home directory, where plonge runs the command.
+	// A rule can set only one of PathLabel, PathZONField, and PathField.
+	PathZONField string `toml:"path_zon_field"`
+	Clean        string `toml:"clean"` // the command that cleans the cache
+	Kind         string `toml:"kind"`
+	OS           string `toml:"os"` // when set, the rule applies only on this GOOS
 
 	// PathField names the string field that holds the path
 	// when the path command prints a JSON object.
@@ -196,6 +201,9 @@ func (g Global) pathKeys() []string {
 	if g.PathField != "" {
 		keys = append(keys, "path_field")
 	}
+	if g.PathZONField != "" {
+		keys = append(keys, "path_zon_field")
+	}
 	return keys
 }
 
@@ -210,6 +218,8 @@ func (g Global) validatePathKeys() error {
 		return fmt.Errorf("global rule %q: %s needs a path command", g.ID, keys[0])
 	case strings.ContainsAny(g.PathLabel, "\r\n"):
 		return fmt.Errorf("global rule %q: path_label must be one line", g.ID)
+	case g.PathZONField != "" && !validZONField(g.PathZONField):
+		return fmt.Errorf("global rule %q: path_zon_field %q is not a field name", g.ID, g.PathZONField)
 	}
 	return nil
 }
@@ -255,6 +265,20 @@ func (g Global) validateCheck() error {
 		}
 	}
 	return nil
+}
+
+// validZONField reports whether name is a plain Zig identifier,
+// the form that the ZON fields plonge reads are written in.
+func validZONField(name string) bool {
+	for i, c := range name {
+		switch {
+		case c == '_', 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z':
+		case '0' <= c && c <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return name != ""
 }
 
 func (g Global) fixedPath() bool {

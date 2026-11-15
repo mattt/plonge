@@ -148,6 +148,11 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 	if err != nil {
 		return "", err
 	}
+	if g.PathZONField != "" && path != "" && !filepath.IsAbs(path) {
+		// Zig prints a path inside its working directory relative to it,
+		// and plonge runs the command from the home directory.
+		path = filepath.Join(r.Home, path)
+	}
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("printed %q, which is not an absolute path", path)
 	}
@@ -155,12 +160,15 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 }
 
 // printedPath picks the path text from the output of a rule's path command:
-// the field that path_field names, the text after path_label,
-// or by default the last line. Rule validation allows at most one of the keys.
+// the JSON field that path_field names, the ZON field that path_zon_field
+// names, the text after path_label, or by default the last line.
+// Rule validation allows at most one of these keys.
 func printedPath(out string, g rules.Global) (string, error) {
 	switch {
 	case g.PathField != "":
 		return jsonField(out, g.PathField)
+	case g.PathZONField != "":
+		return zonField(out, g.PathZONField)
 	case g.PathLabel != "":
 		return labeledPath(out, g.PathLabel)
 	default:

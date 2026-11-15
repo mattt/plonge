@@ -332,4 +332,45 @@ esac`, packages, http))
 	if e := got["uv"]; e.Skipped != "tool not found" {
 		t.Errorf("uv = %+v", e)
 	}
+	if e := got["zig-global-cache"]; e.Skipped != "tool not found" || e.Kind != "clear" {
+		t.Errorf("zig-global-cache = %+v", e)
+	}
+}
+
+// TestDefaultZigRule resolves the Zig global cache through a fake zig env
+// and deletes its contents, keeping the directory.
+func TestDefaultZigRule(t *testing.T) {
+	r, tmp, _, _ := deleteSetup(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	cache := filepath.Join(r.Home, ".cache", "zig")
+	addFile(t, filepath.Join(cache, "p", "pkg", "build.zig"))
+	env := filepath.Join(tmp, "env.zon")
+	if err := os.WriteFile(env, []byte(zigEnv(".cache/zig")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(tmp, "zig.log")
+	addTool(t, bin, "zig", fmt.Sprintf(`echo "$*" >> %q; [ "$*" = env ] && /bin/cat %q`, log, env))
+	var rule rules.Global
+	for _, g := range rules.Default().Global {
+		if g.ID == "zig-global-cache" {
+			rule = g
+		}
+	}
+	ctx := context.Background()
+	entries := r.List(ctx, []rules.Global{rule})
+	e := entries[0]
+	if e.Skipped != "" || e.Path != cache || e.Command != "delete contents of ~/.cache/zig (built in)" {
+		t.Fatalf("entry = %+v", e)
+	}
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	if o := res.Outcomes[0]; o.Status != Ran {
+		t.Errorf("outcome = %+v", o)
+	}
+	if ents, err := os.ReadDir(cache); err != nil || len(ents) != 0 {
+		t.Errorf("cache entries = %v, err = %v", ents, err)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil || strings.TrimSpace(string(data)) != "env" {
+		t.Errorf("zig calls = %q, err = %v", data, err)
+	}
 }
