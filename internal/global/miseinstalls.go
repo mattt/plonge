@@ -20,7 +20,8 @@ const miseDoctor = "mise doctor --json"
 // For mise's installed versions, it is the installs directory that mise uses.
 // When mise cannot report that directory, the rule's path is used with a note.
 func (r Runner) rulePath(ctx context.Context, e *Entry, g rules.Global, t tool) (string, error) {
-	if g.ID != rules.MiseToolsRuleID || g.Tool != "mise" {
+	// A rule that deletes its path's contents must act on that path only.
+	if g.ID != rules.MiseToolsRuleID || g.Tool != "mise" || g.DeleteContents {
 		return r.cachePath(ctx, g, t)
 	}
 	dir, err := r.miseInstallsDir(ctx, t)

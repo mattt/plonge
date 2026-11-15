@@ -379,8 +379,9 @@ It checks the path when it lists the rule and again right before it deletes.
 
 When your rule has the same `id` as a default, it replaces all of the default,
 so copy the default's `check` and `targets` to keep them.
-For `mise-tools` with `tool = "mise"`, `path` is used only when mise
-cannot report its installs directory.
+For `mise-tools` with `tool = "mise"` and a `clean` command,
+`path` is used only when mise cannot report its installs directory.
+A `delete_contents` rule always uses its own `path`.
 
 ## Disk
 
