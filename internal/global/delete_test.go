@@ -291,3 +291,32 @@ esac`)
 		t.Errorf("a tool command ran: %v", err)
 	}
 }
+
+// A mise-tools override that deletes contents must keep to its own path,
+// not the installs directory that mise reports.
+func TestDeleteContentsMiseToolsKeepsItsPath(t *testing.T) {
+	r, tmp, cache, _ := deleteSetup(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	addTool(t, bin, "mise", "exit 0")
+	installs := filepath.Join(tmp, "installs")
+	addFile(t, filepath.Join(installs, "go", "1.26.0", "bin", "go"))
+	t.Setenv("MISE_INSTALLS_DIR", installs)
+	t.Setenv("MISE_DATA_DIR", "")
+	rule := rules.Global{ID: rules.MiseToolsRuleID, Tool: "mise", Path: cache, Kind: rules.KindClear, DeleteContents: true}
+	ctx := context.Background()
+
+	entries := r.List(ctx, []rules.Global{rule})
+	if e := entries[0]; e.Skipped != "" || e.Path != cache {
+		t.Fatalf("entry = %+v", e)
+	}
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	if o := res.Outcomes[0]; o.Status != Ran {
+		t.Fatalf("outcome = %+v", o)
+	}
+	if ents, _ := os.ReadDir(cache); len(ents) != 0 {
+		t.Errorf("cache entries = %v", ents)
+	}
+	if _, err := os.Stat(filepath.Join(installs, "go", "1.26.0", "bin", "go")); err != nil {
+		t.Errorf("the installs directory changed: %v", err)
+	}
+}

@@ -25,8 +25,9 @@ venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 # or contains it; is or resolves through a symlink; is in a Git repository;
 # or does not exist.
 
-# This fixed path assumes mise's default installs directory.
-# Override this rule in rules.toml if mise uses a different directory.
+# Plonge measures the installs directory that mise uses:
+# $MISE_INSTALLS_DIR, or installs in the data directory from "mise doctor --json".
+# This path is used only when mise cannot report that directory.
 # A tracked config that mise cannot load does not protect its tool versions,
 # so a prune can remove a version that a project needs.
 # mise prints the load warnings only at the info log level or lower,

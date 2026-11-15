@@ -53,7 +53,12 @@ esac`, dir, log, dir)
 
 var uvRule = rules.Global{ID: "uv", Tool: "uv", Path: "uv cache dir", Clean: "uv cache prune", Kind: rules.KindPrune}
 
+// runner returns a Runner with a temporary home directory.
+// It clears mise's directory variables,
+// so that no test measures an inherited installs directory.
 func runner(t *testing.T) Runner {
+	t.Setenv("MISE_DATA_DIR", "")
+	t.Setenv("MISE_INSTALLS_DIR", "")
 	return Runner{Home: t.TempDir(), GOOS: "testos"}
 }
 

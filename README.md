@@ -261,12 +261,15 @@ that mise lists as removable,
 and the report names them.
 The names and sizes come from `mise ls --prunable --json`.
 That command and the dry run are separate calls; their results can change.
-If the list command fails, Plonge reports the size of the configured
-`installs` directory and adds a note.
-The default path is `~/.local/share/mise/installs`.
-If mise uses a different installs directory, override the rule
-as shown below to correct the fallback size and freed-space estimate.
-The cleanup command still uses mise's environment and settings.
+If the list command fails, Plonge reports the size of mise's installs
+directory and adds a note.
+Plonge also measures that directory to estimate the space freed.
+It uses `$MISE_INSTALLS_DIR`, or the `installs` directory
+in the data directory that `mise doctor --json` reports,
+so a custom `MISE_DATA_DIR` is followed.
+If mise cannot report its data directory,
+Plonge uses the rule's `path`, `~/.local/share/mise/installs` by default,
+and adds a note.
 
 On macOS, a built-in rule, `xcode-derived-data`, selects stale Xcode build data.
 Xcode has no prune command,
@@ -282,7 +285,7 @@ in `rules.toml`:
 [[global]]
 id = "mise-tools"
 tool = "mise"
-path = "~/data/mise/installs" # for a custom MISE_DATA_DIR
+path = "~/.local/share/mise/installs"
 clean = "mise prune --tools --yes"
 kind = "prune"
 check = "mise prune --tools --dry-run"
@@ -387,6 +390,9 @@ It checks the path when it lists the rule and again right before it deletes.
 
 When your rule has the same `id` as a default, it replaces all of the default,
 so copy the default's `check` and `targets` to keep them.
+For `mise-tools` with `tool = "mise"` and a `clean` command,
+`path` is used only when mise cannot report its installs directory.
+A `delete_contents` rule always uses its own `path`.
 
 ## Disk
 
