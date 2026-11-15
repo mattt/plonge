@@ -72,11 +72,8 @@ func scanOne(t *testing.T, root string) ([]scan.Root, [][]int64) {
 	if got.Skipped != "" || len(got.Errors) > 0 {
 		t.Fatalf("skipped %q, errors %q", got.Skipped, got.Errors)
 	}
-	var dirs []string
-	for _, c := range got.Candidates {
-		dirs = append(dirs, c.Path)
-	}
-	return []scan.Root{got}, [][]int64{scan.Sizes(dirs)}
+	roots := []scan.Root{got}
+	return roots, scan.Measure(roots)
 }
 
 // quietOpts treats every root as quiet.
@@ -238,6 +235,25 @@ func TestRecheck(t *testing.T) {
 			keep:   "node_modules/a/index.js",
 		},
 		{
+			name: "holds a repository with a commit",
+			change: func(t *testing.T, root string) {
+				dep := filepath.Join(root, "node_modules", "dep")
+				write(t, filepath.Join(dep, "work.txt"), "uncommitted")
+				git(t, dep, "init", "-q")
+				git(t, dep, "commit", "-q", "--allow-empty", "-m", "work")
+			},
+			reason: "contains a Git repository at dep",
+			keep:   "node_modules/dep/work.txt",
+		},
+		{
+			name: "holds a worktree-style .git file",
+			change: func(t *testing.T, root string) {
+				write(t, filepath.Join(root, "node_modules", "a", ".git"), "gitdir: /elsewhere\n")
+			},
+			reason: "contains a Git repository at a",
+			keep:   "node_modules/a/index.js",
+		},
+		{
 			name: "parent moved outside the root",
 			change: func(t *testing.T, root string) {
 				outside := filepath.Join(filepath.Dir(root), "outside")
@@ -278,6 +294,27 @@ func TestRecheck(t *testing.T) {
 				t.Error("the unchanged cache was not deleted")
 			}
 		})
+	}
+}
+
+func TestApplyKeepsNestedRepository(t *testing.T) {
+	root := repoWith(t)
+	dep := filepath.Join(root, "node_modules", "dep")
+	write(t, filepath.Join(dep, "work.txt"), "uncommitted")
+	git(t, dep, "init", "-q")
+	git(t, dep, "commit", "-q", "--allow-empty", "-m", "work")
+
+	roots, sizes := scanOne(t, root)
+	res := Run(context.Background(), roots, sizes, quietOpts(true))
+	if !exists(filepath.Join(dep, "work.txt")) || !exists(filepath.Join(dep, ".git")) {
+		t.Fatal("the nested repository was deleted")
+	}
+	if len(res.Refused) != 1 || res.Refused[0].Path != filepath.Join(root, "node_modules") ||
+		res.Refused[0].Reason != "contains a Git repository at dep" {
+		t.Errorf("refused %+v", res.Refused)
+	}
+	if exists(filepath.Join(root, ".venv")) || res.Selected.Caches != 1 {
+		t.Errorf("the other cache was not deleted: %+v", res)
 	}
 }
 

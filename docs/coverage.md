@@ -112,6 +112,41 @@ so a file that you built but did not upload must be built again.
 Plonge matches `dist` beside `pyproject.toml` or `setup.py`,
 in addition to `package.json`.
 
+The SwiftPM rules follow [Swift Package Manager 6.4.2][spm-purge].
+`swift package purge-cache` removes the contents of the shared cache's
+`repositories` and `registry/downloads` folders and its manifest cache
+([source][spm-purge-caches]).
+It does not check whether a project uses them, so both rules are `clear`;
+the next resolve downloads them again.
+It keeps the `artifacts` and `prebuilts` folders in the same cache
+([source][spm-shared-folders]), which Plonge includes in the size,
+so the size can be larger than the space that the command frees.
+The shared cache is `org.swift.swiftpm` in the user's caches directory
+([source][spm-cache-dir]),
+which is [`~/Library/Caches`][apple-caches] on macOS
+and `$XDG_CACHE_HOME`, or `~/.cache`, on Linux
+([swift-foundation 6.4.2][foundation-xdg]).
+Only the `--cache-path` option moves it ([source][spm-cache-path]),
+and SwiftPM has no command that prints it,
+so each rule measures the default path for its system
+and passes the same path to `--cache-path`.
+The command then cleans the cache that Plonge measured,
+even when `XDG_CACHE_HOME` moves SwiftPM's own default;
+a cache moved by `XDG_CACHE_HOME` or by another `--cache-path` is not covered.
+This was checked with Swift 6.4.2 on macOS, in temporary directories.
+Outside a package, SwiftPM writes `CACHEDIR.TAG` and a build-system file
+to `.build` in its working directory
+([scratch path][spm-scratch], [files][spm-scratch-files]).
+Plonge runs commands from the home directory,
+so the rules pass a `--scratch-path` relative to it
+that names the cache directory, and SwiftPM does not create `~/.build`.
+This was checked with Swift 6.4.2 on macOS, in a temporary directory.
+`.swiftpm` in a package is not covered:
+it holds the package's `mirrors.json` and `registries.json`
+under `configuration` ([source][spm-local-config]),
+and Xcode keeps the package's schemes and user data under `xcode`.
+No part of it is a regenerable cache that a directory-name rule can match.
+
 ## How to read the tables
 
 The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
@@ -134,6 +169,8 @@ For every row:
 Project cache names are exact directory names.
 Every match must be inside a scanned root, ignored by Git,
 and contain no tracked files.
+Plonge refuses a match that is or holds a Git repository at any depth,
+as the [README](../README.md#caches-that-hold-a-git-repository) describes.
 A listed project file must be in the cache directory's parent directory.
 A project file written as a pattern, such as `*.csproj`, matches any name of that form.
 No project file is required unless the table names one.
@@ -191,7 +228,7 @@ The global-cache column lists additional rules relevant to that tool.
 | `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py`; `build` and `dist` beside `pyproject.toml` or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | tox and nox environments moved by `--workdir`, `work_dir`, or `--envdir`; build output moved by setuptools' `build_base`; `*.egg-info`; `dist` moved by `--outdir` or `--out-dir`; uv-managed Python installations outside mise; caches at other configured paths. |
 | `ruby` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Ruby cache rule. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/bundle` and `vendor/cache`; RubyGems' gem cache; application `tmp/cache`. |
 | `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Rust rule. | Cargo's registry and Git caches (`~/.cargo/registry`, `~/.cargo/git`); sccache; toolchains managed outside mise. |
-| `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds no Swift rule. | Swift Package Manager's global cache; `.swiftpm`; Xcode build data for existing workspaces, archives, device support, and simulators. |
+| `swift` | Guarded `mise-tools` | `.build`, `DerivedData` | `swiftpm-macos` (macOS): `swift package purge-cache --cache-path Library/Caches/org.swift.swiftpm --scratch-path Library/Caches/org.swift.swiftpm` (clear); `swiftpm-linux` (Linux): `swift package purge-cache --cache-path .cache/org.swift.swiftpm --scratch-path .cache/org.swift.swiftpm` (clear); `xcode-derived-data`: built-in deletion of stale Xcode build directories (prune, macOS) | `scan` reports project matches; `clean` selects quiet ones. A `.build` directory for a package with remote dependencies is refused, because it holds Git checkouts and bare clones. `clean --global` selects mise rules and the Xcode rule when available; `--include-clear` adds the SwiftPM rule for the system. | `.build` directories with remote dependencies; SwiftPM's `artifacts` and `prebuilts` caches; a shared cache moved by `--cache-path` or `XDG_CACHE_HOME`; `.swiftpm`, which holds package configuration and Xcode schemes; Xcode build data for existing workspaces, archives, device support, and simulators. |
 | `zig` | Guarded `mise-tools` | `.zig-cache` and `zig-cache` (before Zig 0.13) beside `build.zig` | `zig-global-cache`: `delete_contents` (built-in deletion) of the `global_cache_dir` that `zig env` prints (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `zig-global-cache`. | `zig-out` install output, which can hold programs and libraries that a user runs; local caches moved with `--cache-dir` or `ZIG_LOCAL_CACHE_DIR`; the global cache when `zig env` prints JSON, as before Zig 0.15 (override the rule with a fixed path). |
 
 "None yet" means there is no dedicated rule for that cache.
@@ -258,6 +295,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | Yarn 1 | `node_modules` | `yarn` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Only when `yarn --version` reports 1.x. |
 | Yarn 2 and later | `node_modules` | `yarn-berry` | `yarn cache clean` | clear; requires `clean --global --include-clear --apply` to run. Only when `yarn --version` reports 2.x or later. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
+| Swift Package Manager | `.build` | `swiftpm-macos`, `swiftpm-linux` | `swift package purge-cache`, with `--cache-path` and `--scratch-path` set to the measured cache directory | clear; requires `clean --global --include-clear --apply` to run. Each rule applies only on its system. `artifacts` and `prebuilts` remain. |
 | Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. |
 
 A global rule can also set `delete_contents` in place of a cleanup command,
@@ -399,3 +437,13 @@ See Yarn's [cache clean command][yarn-clean] and
 [setuptools-dist]: https://github.com/pypa/setuptools/blob/v84.2.1/setuptools/_distutils/command/sdist.py#L174
 [uv-publish]: https://github.com/astral-sh/uv/blob/0.13.8/crates/uv-cli/src/lib.rs#L7433-L7438
 [nuget-locals-source]: https://github.com/NuGet/NuGet.Client/blob/8.2.0.14/src/NuGet.Core/NuGet.Commands/CommandRunners/LocalsCommandRunner.cs#L109-L117
+[spm-purge]: https://github.com/swiftlang/swift-package-manager/blob/swift-6.4.2-RELEASE/Sources/Commands/PackageCommands/ResetCommands.swift#L32-L44
+[spm-purge-caches]: https://github.com/swiftlang/swift-package-manager/blob/swift-6.4.2-RELEASE/Sources/CoreCommands/SwiftCommandState.swift#L643-L688
+[spm-shared-folders]: https://github.com/swiftlang/swift-package-manager/blob/swift-6.4.2-RELEASE/Sources/Workspace/Workspace+Configuration.swift#L142-L161
+[spm-cache-dir]: https://github.com/swiftlang/swift-package-manager/blob/swift-6.4.2-RELEASE/Sources/Basics/FileSystem/FileSystem+Extensions.swift#L245-L254
+[spm-cache-path]: https://github.com/swiftlang/swift-package-manager/blob/swift-6.4.2-RELEASE/Sources/CoreCommands/SwiftCommandState.swift#L1391-L1402
+[spm-scratch]: https://github.com/swiftlang/swift-package-manager/blob/swift-6.4.2-RELEASE/Sources/CoreCommands/SwiftCommandState.swift#L463-L466
+[spm-scratch-files]: https://github.com/swiftlang/swift-package-manager/blob/swift-6.4.2-RELEASE/Sources/CoreCommands/SwiftCommandState.swift#L215-L238
+[spm-local-config]: https://github.com/swiftlang/swift-package-manager/blob/swift-6.4.2-RELEASE/Sources/Workspace/Workspace+Configuration.swift#L227-L250
+[apple-caches]: https://developer.apple.com/documentation/foundation/filemanager/searchpathdirectory/cachesdirectory
+[foundation-xdg]: https://github.com/swiftlang/swift-foundation/blob/swift-6.4.2-RELEASE/Sources/FoundationEssentials/FileManager/SearchPaths/FileManager+XDGSearchPaths.swift#L45-L52

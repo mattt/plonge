@@ -43,6 +43,11 @@ func Verify(ctx context.Context, root string, c Candidate) (reason string, err e
 	if len(kept) == 0 {
 		return "is no longer ignored by Git, or now contains a tracked file", nil
 	}
+	// The enclosing repository does not see a repository inside the candidate,
+	// so look for one before deleting its commits and uncommitted work.
+	if reason := gitRefusal(c.Path); reason != "" {
+		return reason, nil
+	}
 	return "", nil
 }
 

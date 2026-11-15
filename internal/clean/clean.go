@@ -73,6 +73,9 @@ type Result struct {
 	Skipped     int         `json:"skipped"`
 	Failed      int         `json:"failed"`
 	Errors      []string    `json:"errors"`
+	// Refused lists the caches that the scan refused
+	// because they are or hold a Git repository.
+	Refused []scan.Refusal `json:"refused"`
 
 	ActivitySources []scan.Source `json:"activity_sources"`
 }
@@ -86,13 +89,14 @@ type planned struct {
 // Run selects caches from the scan results and, with Apply, deletes them.
 // sizes holds one slice per root, in the order of the candidates.
 func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) Result {
-	res := Result{Applied: opts.Apply, Items: []Item{}, Errors: []string{}, ActivitySources: []scan.Source{}}
+	res := Result{Applied: opts.Apply, Items: []Item{}, Errors: []string{}, Refused: []scan.Refusal{}, ActivitySources: []scan.Source{}}
 	var plan []planned
 	for i, root := range roots {
 		if root.Skipped != "" {
 			continue
 		}
 		res.Errors = append(res.Errors, root.Errors...)
+		res.Refused = append(res.Refused, root.Refused...)
 		quiet := scan.Quiet(root.LastActivity, opts.Now, opts.QuietHours)
 		for j, c := range root.Candidates {
 			n := sizes[i][j]

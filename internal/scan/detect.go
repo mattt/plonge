@@ -21,12 +21,23 @@ type Candidate struct {
 	repo string // the directory in which to run Git for this candidate
 }
 
+// Refusal is a candidate that plonge must not delete, and why.
+type Refusal struct {
+	Path    string `json:"path"`
+	Project string `json:"project"`
+	Rule    string `json:"rule"`
+	Reason  string `json:"reason"`
+}
+
 // Root is the result of scanning one project root.
 type Root struct {
 	Path       string
 	Skipped    string // why the root was skipped, or empty
 	Candidates []Candidate
 	Errors     []string // Git failures; the candidates they affect are left out
+	// Refused lists the candidates that Measure left out
+	// because they are or hold a Git repository.
+	Refused []Refusal
 	// LastActivity is the newest activity that any source saw.
 	// Detect sets it to the modification time of the Git HEAD log, else of HEAD.
 	LastActivity time.Time
@@ -56,6 +67,8 @@ type Source struct {
 
 // Detect walks root and returns the candidates that Git ignores
 // and that hold no tracked files.
+// Call Measure on the result to size the candidates
+// and to refuse the ones that hold a Git repository.
 // It does not follow symlinks, does not enter a directory in the skip list,
 // and does not descend into a candidate.
 func Detect(ctx context.Context, root string, r rules.Rules) Root {
