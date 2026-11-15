@@ -237,9 +237,10 @@ Plonge then cannot detect busy projects through Paseo.
 Global caches are stored outside projects.
 Plonge uses cleanup commands from their tools,
 plus a built-in rule for Xcode build data on macOS.
-A rule for a cache without a cleanup command
+A rule for a cache without a cleanup command,
+or whose command also removes user state,
 can delete the contents of its path instead,
-as `zig-global-cache` does for Zig.
+as `zig-global-cache` does for Zig and the Deno rules do.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -274,7 +275,10 @@ Neither kind guarantees that the whole reported size will be freed.
 | `go-modules` | clear | `go clean -modcache` |
 | `go-build` | clear | `go clean -cache` |
 | `npm` | clear | `npm cache clean --force` |
+| `bun` | clear | `bun pm cache prune` (Bun 1.4.4 or later) |
+| `deno-remote`, `deno-npm`, `deno-gen` | clear | Built-in deletion of the contents of Deno's module, npm, and TypeScript caches |
 | `yarn` | clear | `yarn cache clean` (Yarn 1) |
+| `yarn-berry` | clear | `yarn cache clean` (Yarn 2 and later) |
 | `pip` | clear | `pip cache purge` |
 | `homebrew` | clear | `brew cleanup --prune=all` |
 | `nuget-packages` | clear | `dotnet nuget locals global-packages --clear` |
@@ -358,6 +362,9 @@ Plonge skips the rule when no line has the label,
 or when two lines with the label give different paths.
 A `delete_contents` rule can also use `path_label`;
 the labeled path gets the same checks as any other path.
+If the command prints a JSON object instead,
+set `path_field` to the name of the string field that holds the path,
+such as `path_field = "npmCache"` for `deno info --json`.
 Both `path` and `clean` commands must start with `tool`.
 Command strings are split at whitespace.
 Shell quoting, pipes, and variable expansion are not supported.
@@ -379,7 +386,8 @@ It skips the rule when the output is not one complete ZON struct,
 has text other than whitespace and comments after it,
 has a field twice, has no such field,
 or has a value that is not a nonempty string.
-A rule can have `path_label` or `path_zon_field`, not both.
+A rule can set only one of `path_label`, `path_field`, and `path_zon_field`,
+and only with a `path` command.
 
 A rule can name a `check`, a command that must not change anything:
 
@@ -402,7 +410,35 @@ and again right before `--apply` runs the rule.
 The rule is skipped when the check fails
 or a line of its standard output or standard error matches `refuse`,
 a regular expression.
+`require` is also a regular expression;
+when it is set, the rule is skipped unless exactly one line of that output
+matches it.
+For example, `check = "yarn --version"` with `require = '^1\.'`
+limits a rule to Yarn 1.
 A skipped rule does not count toward the totals.
+
+A rule can add more checks, each with the same keys,
+in `[[global.checks]]` tables after the rule.
+The rule must have its own `check` first.
+Plonge runs the checks in order and skips the rule at the first one
+that does not pass:
+
+```toml
+[[global]]
+id = "yarn-berry"
+tool = "yarn"
+path = "yarn config get cacheFolder"
+clean = "yarn cache clean"
+kind = "clear"
+check = "yarn --version"
+require = '^[0-9]+\.[0-9]+\.[0-9]+'
+refuse = '^[01]\.[0-9]+\.[0-9]+'
+refuse_reason = "yarn --version did not report Yarn 2 or later"
+
+[[global.checks]]
+check = "yarn config get enableGlobalCache"
+require = '^true$'
+```
 
 A group named `path` in `refuse` limits matches to files that may still exist.
 For absolute paths and `~/` paths, missing files do not count.
@@ -455,7 +491,8 @@ It checks the path when it lists the rule and again right before it deletes.
 `tool` must still be available, and a `path` command must still start with it.
 
 When your rule has the same `id` as a default, it replaces all of the default,
-so copy the default's `check` and `targets` to keep them.
+so copy the default's `check`, `require`, `refuse`, `checks`, and `targets`
+to keep them.
 For `mise-tools` with `tool = "mise"` and a `clean` command,
 `path` is used only when mise cannot report its installs directory.
 A `delete_contents` rule always uses its own `path`.

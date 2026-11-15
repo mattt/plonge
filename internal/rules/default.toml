@@ -92,6 +92,54 @@ path = "pnpm store path"
 clean = "pnpm store prune"
 kind = "prune"
 
+# bun pm cache prune removes package folders that are more than 30 days old.
+# Where the file system does not record access times, as on macOS,
+# the age is the time since download, so it can remove packages in use: clear.
+# It keeps the global store in links/, which bun pm cache rm deletes.
+# Bun added the command in 1.4.4, so the check needs exactly one version line
+# and refuses older versions.
+[[global]]
+id = "bun"
+tool = "bun"
+path = "bun pm cache"
+clean = "bun pm cache prune"
+kind = "clear"
+check = "bun --version"
+require = '^[0-9]+\.[0-9]+\.[0-9]+'
+refuse = '^(0\.|1\.[0-3]\.|1\.4\.[0-3]([^0-9]|$))'
+refuse_reason = "Bun before 1.4.4 has no cache prune command"
+
+# deno clean deletes all of DENO_DIR, which also holds user state:
+# localStorage and Cache API data in location_data, and the REPL history.
+# These rules delete only the caches that deno info --json names.
+[[global]]
+id = "deno-remote"
+tool = "deno"
+path = "deno info --json"
+path_field = "modulesCache"
+delete_contents = true
+kind = "clear"
+
+[[global]]
+id = "deno-npm"
+tool = "deno"
+path = "deno info --json"
+path_field = "npmCache"
+delete_contents = true
+kind = "clear"
+
+[[global]]
+id = "deno-gen"
+tool = "deno"
+path = "deno info --json"
+path_field = "typescriptCache"
+delete_contents = true
+kind = "clear"
+
+# The yarn and yarn-berry rules run the same yarn. Each one requires
+# yarn --version to print exactly one version line, and refuses the versions
+# that the other rule accepts, so at most one of them runs.
+
 # Yarn 1 only. Yarn 2 and later do not provide "yarn cache dir".
 [[global]]
 id = "yarn"
@@ -99,6 +147,31 @@ tool = "yarn"
 path = "yarn cache dir"
 clean = "yarn cache clean"
 kind = "clear"
+check = "yarn --version"
+require = '^[0-9]+\.[0-9]+\.[0-9]+'
+refuse = '^(0|[2-9]|[1-9][0-9]+)\.[0-9]+\.[0-9]+'
+refuse_reason = "yarn --version did not report Yarn 1"
+
+# Yarn 2 and later. yarn cache clean deletes cacheFolder.
+# Only with enableGlobalCache is cacheFolder the global cache.
+# Without it, cacheFolder is a project's .yarn/cache, which a project
+# with zero-installs keeps in Git, and a command rule has no Git check.
+# So the second check requires enableGlobalCache to be true,
+# and skips the rule when Yarn does not report the setting.
+[[global]]
+id = "yarn-berry"
+tool = "yarn"
+path = "yarn config get cacheFolder"
+clean = "yarn cache clean"
+kind = "clear"
+check = "yarn --version"
+require = '^[0-9]+\.[0-9]+\.[0-9]+'
+refuse = '^[01]\.[0-9]+\.[0-9]+'
+refuse_reason = "yarn --version did not report Yarn 2 or later"
+
+[[global.checks]]
+check = "yarn config get enableGlobalCache"
+require = '^true$'
 
 [[global]]
 id = "pip"

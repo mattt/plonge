@@ -62,11 +62,15 @@ type Global struct {
 	// PathZONField makes plonge read the path from this field of a ZON struct
 	// that the path command prints, as "zig env" does. A relative path in it
 	// is relative to the home directory, where plonge runs the command.
-	// A rule can have PathLabel or PathZONField, not both.
+	// A rule can set only one of PathLabel, PathZONField, and PathField.
 	PathZONField string `toml:"path_zon_field"`
 	Clean        string `toml:"clean"` // the command that cleans the cache
 	Kind         string `toml:"kind"`
 	OS           string `toml:"os"` // when set, the rule applies only on this GOOS
+
+	// PathField names the string field that holds the path
+	// when the path command prints a JSON object.
+	PathField string `toml:"path_field"`
 
 	// DeleteContents makes plonge delete what is in Path, in place of Clean.
 	// It is for caches that have no cleanup command, and needs kind clear.
@@ -83,6 +87,12 @@ type Global struct {
 	Refuse string `toml:"refuse"`
 	// RefuseReason says in the report what the matches of Refuse mean.
 	RefuseReason string `toml:"refuse_reason"`
+	// Checks are more checks that must also pass, in order, after Check.
+	// Each has the same keys as the rule's own check.
+	Checks []CheckSpec `toml:"checks"`
+	// Require is a regular expression. Unless exactly one line of Check's output
+	// matches it, the rule is skipped.
+	Require string `toml:"require"`
 	// Targets is a command that prints, as JSON, what Clean would remove.
 	// The rule's size is then the size of those items, not of its whole path.
 	Targets string `toml:"targets"`
@@ -168,19 +178,8 @@ func (g Global) validate() error {
 	if !g.fixedPath() && !g.startsWithTool(g.Path) {
 		return fmt.Errorf("global rule %q: path must be an absolute path, a ~/ path, or a %s command", g.ID, g.Tool)
 	}
-	if g.PathLabel != "" && (g.fixedPath() || strings.ContainsAny(g.PathLabel, "\r\n")) {
-		return fmt.Errorf("global rule %q: path_label must be one line and needs a path command", g.ID)
-	}
-	if g.PathZONField != "" {
-		if g.PathLabel != "" {
-			return fmt.Errorf("global rule %q: use path_label or path_zon_field, not both", g.ID)
-		}
-		if g.fixedPath() {
-			return fmt.Errorf("global rule %q: path_zon_field needs a path command", g.ID)
-		}
-		if !validZONField(g.PathZONField) {
-			return fmt.Errorf("global rule %q: path_zon_field %q is not a field name", g.ID, g.PathZONField)
-		}
+	if err := g.validatePathKeys(); err != nil {
+		return err
 	}
 	if g.DeleteContents {
 		if err := g.validateDelete(); err != nil {
@@ -193,6 +192,39 @@ func (g Global) validate() error {
 		return fmt.Errorf("global rule %q: targets must be a %s command", g.ID, g.Tool)
 	}
 	return g.validateCheck()
+}
+
+// pathKeys returns the keys that set how plonge reads the output
+// of the path command. Each one replaces the default, the last line.
+func (g Global) pathKeys() []string {
+	var keys []string
+	if g.PathLabel != "" {
+		keys = append(keys, "path_label")
+	}
+	if g.PathField != "" {
+		keys = append(keys, "path_field")
+	}
+	if g.PathZONField != "" {
+		keys = append(keys, "path_zon_field")
+	}
+	return keys
+}
+
+// validatePathKeys checks that a rule sets at most one path key,
+// and only with a path command, because a fixed path has no output to read.
+func (g Global) validatePathKeys() error {
+	keys := g.pathKeys()
+	switch {
+	case len(keys) > 1:
+		return fmt.Errorf("global rule %q: set only one of %s", g.ID, strings.Join(keys, ", "))
+	case len(keys) == 1 && g.fixedPath():
+		return fmt.Errorf("global rule %q: %s needs a path command", g.ID, keys[0])
+	case strings.ContainsAny(g.PathLabel, "\r\n"):
+		return fmt.Errorf("global rule %q: path_label must be one line", g.ID)
+	case g.PathZONField != "" && !validZONField(g.PathZONField):
+		return fmt.Errorf("global rule %q: path_zon_field %q is not a field name", g.ID, g.PathZONField)
+	}
+	return nil
 }
 
 // validateDelete checks a rule whose contents plonge deletes.
@@ -211,23 +243,54 @@ func (g Global) validateDelete() error {
 	return nil
 }
 
+// CheckSpec is a command that must succeed, and must not change anything,
+// before a rule runs, with the patterns that its output must pass.
+type CheckSpec struct {
+	Check        string   `toml:"check"`
+	CheckEnv     []string `toml:"check_env"`
+	Refuse       string   `toml:"refuse"`
+	RefuseReason string   `toml:"refuse_reason"`
+	Require      string   `toml:"require"`
+}
+
+// CheckSpecs returns the rule's own check, if it has one, and then its Checks.
+func (g Global) CheckSpecs() []CheckSpec {
+	if g.Check == "" {
+		return nil
+	}
+	own := CheckSpec{Check: g.Check, CheckEnv: g.CheckEnv, Refuse: g.Refuse, RefuseReason: g.RefuseReason, Require: g.Require}
+	return append([]CheckSpec{own}, g.Checks...)
+}
+
 func (g Global) validateCheck() error {
 	if g.Check == "" {
-		if g.Refuse != "" || g.RefuseReason != "" || len(g.CheckEnv) > 0 {
-			return fmt.Errorf("global rule %q: refuse, refuse_reason, and check_env need check", g.ID)
+		if g.Refuse != "" || g.RefuseReason != "" || g.Require != "" || len(g.CheckEnv) > 0 || len(g.Checks) > 0 {
+			return fmt.Errorf("global rule %q: refuse, refuse_reason, require, check_env, and checks need check", g.ID)
 		}
 		return nil
 	}
-	if !g.startsWithTool(g.Check) {
+	for _, c := range g.CheckSpecs() {
+		if err := g.validateCheckSpec(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g Global) validateCheckSpec(c CheckSpec) error {
+	if !g.startsWithTool(c.Check) {
 		return fmt.Errorf("global rule %q: check must be a %s command", g.ID, g.Tool)
 	}
-	if g.Refuse == "" && g.RefuseReason != "" {
+	if c.Refuse == "" && c.RefuseReason != "" {
 		return fmt.Errorf("global rule %q: refuse_reason needs refuse", g.ID)
 	}
-	if _, err := regexp.Compile(g.Refuse); err != nil {
+	if _, err := regexp.Compile(c.Refuse); err != nil {
 		return fmt.Errorf("global rule %q: refuse: %w", g.ID, err)
 	}
-	for _, kv := range g.CheckEnv {
+	if _, err := regexp.Compile(c.Require); err != nil {
+		return fmt.Errorf("global rule %q: require: %w", g.ID, err)
+	}
+	for _, kv := range c.CheckEnv {
 		if name, _, ok := strings.Cut(kv, "="); !ok || name == "" {
 			return fmt.Errorf("global rule %q: check_env entry %q must be NAME=value", g.ID, kv)
 		}
