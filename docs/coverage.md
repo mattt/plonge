@@ -95,7 +95,7 @@ The next build writes it again; a strict editable install stops working
 until it is installed again.
 `build` is a common directory name, so the rule matches it only
 beside `pyproject.toml` or `setup.py`, the files that start a setuptools build.
-No other default rule uses the name `build`.
+The Gradle rule below also matches `build`, beside Gradle's project files.
 A `build` directory that matches is not entered,
 so a cache inside it, such as `__pycache__`, is part of that match.
 
@@ -295,8 +295,8 @@ The global-cache column lists additional rules relevant to that tool.
 | `elixir` | Guarded `mise-tools` | `_build` beside `mix.exs`, refused when it holds `*/rel` | `hex-packages`: `delete_contents` of `~/.hex/packages` (clear) | `scan` reports project matches; `clean` selects quiet ones. A `_build` that holds a release is refused. `clean --global` selects mise rules; `--include-clear` adds `hex-packages`. | Mix `deps`, which can hold edited dependency sources; `_build` moved by `MIX_BUILD_ROOT`, `MIX_BUILD_PATH`, or `:build_path`; `_build` with a release; a Hex cache moved by `HEX_HOME` or `MIX_XDG`; Hex's registry cache and docs. |
 | `erlang` | Guarded `mise-tools` | none yet; `_build` beside `rebar.config` is left out because it holds dependency sources | `rebar3-hex`: `delete_contents` of `~/.cache/rebar3/hex` (clear) | `scan` and `clean` have no Rebar3 project rule. `clean --global` selects mise rules; `--include-clear` adds `rebar3-hex`. | Rebar3 `_build`, which holds dependency sources that a user can edit; `_checkouts`; a Rebar3 cache moved by `REBAR_CACHE_DIR`; Rebar3's global plugins and its `local install` copy. |
 | `go` | Guarded `mise-tools` | none yet | `go-modules`: `go clean -modcache` (clear); `go-build`: `go clean -cache` (clear) | `scan` and `clean` have no Go project rule. `clean --global` selects mise rules; `--include-clear` adds both Go rules. | Project binaries, `vendor`, and caches at paths other than those returned by Go from the home directory. |
-| `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); Gradle project `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
-| `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1); `yarn-berry`: `yarn cache clean` (clear, Yarn 2 and later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and the one Yarn rule that matches the version of `yarn` in the home directory. | Project `.yarn/cache` folders; the Yarn 2+ global cache when `yarn` in the home directory is Yarn 1 or `enableGlobalCache` is off; separate pnpm stores not resolved from the home directory; `build` output, unless `pyproject.toml` or `setup.py` is beside it. |
+| `java` | Guarded `mise-tools` | `.gradle`; `target` beside `pom.xml`; `build` beside `build.gradle`, `build.gradle.kts`, `settings.gradle`, or `settings.gradle.kts` | none yet | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds no Java rule. | Maven's local repository (`~/.m2`); Gradle's global cache (`~/.gradle`); `build` moved by `layout.buildDirectory`, or in a subproject with no build file of its own; `build.gradle.dcl` and `settings.gradle.dcl` projects; `.kotlin`. |
+| `node` | Guarded `mise-tools` | `node_modules`; `dist` beside `package.json`; `.astro`, `.next`, `.parcel-cache`, `.svelte-kit`, `.turbo` | `pnpm`: `pnpm store prune` (prune); `npm`: `npm cache clean --force` (clear); `yarn`: `yarn cache clean` (clear, Yarn 1); `yarn-berry`: `yarn cache clean` (clear, Yarn 2 and later) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `pnpm`; `--include-clear` adds `npm` and the one Yarn rule that matches the version of `yarn` in the home directory. | Project `.yarn/cache` folders; the Yarn 2+ global cache when `yarn` in the home directory is Yarn 1 or `enableGlobalCache` is off; separate pnpm stores not resolved from the home directory; `build` output, unless a Python or Gradle project file is beside it. |
 | `python` | Guarded `mise-tools` | `.venv`, `__pycache__`, `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `.tox`, `.nox`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py`; `build` and `dist` beside `pyproject.toml` or `setup.py` | `uv`: `uv cache prune` (prune); `pip`: `pip cache purge` (clear) | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules and `uv`; `--include-clear` adds `pip`. | tox and nox environments moved by `--workdir`, `work_dir`, or `--envdir`; build output moved by setuptools' `build_base`; `*.egg-info`; `dist` moved by `--outdir` or `--out-dir`; uv-managed Python installations outside mise; caches at other configured paths. |
 | `ruby` | Guarded `mise-tools` | none yet | none yet | `scan` and `clean` have no Ruby cache rule. `clean --global` selects mise rules; `--include-clear` adds no Ruby rule. | Bundler's `vendor/bundle` and `vendor/cache`; RubyGems' gem cache; application `tmp/cache`. |
 | `rust` | Guarded `mise-tools` | `target` beside `Cargo.toml` | `cargo-registry`: `delete_contents` of `registry` in the Cargo home (clear); the Cargo home is `$CARGO_HOME`, or `~/.cargo` | `scan` reports project matches; `clean` selects quiet ones. `clean --global` selects mise rules; `--include-clear` adds `cargo-registry`. Cargo 1.88 and later also delete global cache files that they have not used for 1 or 3 months. | Cargo's Git cache (`git` in the Cargo home), whose checkouts are working trees that a user can edit; `cargo clean gc`, which is unstable; a relative `CARGO_HOME`, which the rules skip; a `CARGO_HOME` that only the environment of `mise exec` sets; `bin`, `config.toml`, `credentials.toml`, `.crates.toml`, and `.crates2.json`, which hold installed programs and user state; sccache, which has no cleanup command; toolchains managed outside mise. |
@@ -356,7 +356,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | Mix, Rebar3 | `_build` beside `mix.exs` | none | Delete matching project directories; Plonge does not run `mix clean` or `rebar3 clean` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `_build` that holds a release (`*/rel`) or dependency sources (`*/lib/*/src`) is refused. Rebar3 `_build` beside `rebar.config` and Mix `deps` are not matched. |
 | Hex, Rebar3 | none | `hex-packages`, `rebar3-hex` | `delete_contents` of `~/.hex/packages` and `~/.cache/rebar3/hex`; neither tool has a cleanup command | clear; requires `clean --global --include-clear --apply` to run. Caches moved by `HEX_HOME`, `MIX_XDG`, or `REBAR_CACHE_DIR` are not covered. |
 | tox, nox | `.tox`, `.nox` | none | Delete matching project directories; neither tool has a cleanup command | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Environments moved by `--workdir`, `work_dir`, or `--envdir` are not matched. |
-| Maven, Gradle | `target` beside `pom.xml`; `.gradle` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Global repositories and caches remain. |
+| Maven, Gradle | `target` beside `pom.xml`; `.gradle`; `build` beside `build.gradle`, `build.gradle.kts`, `settings.gradle`, or `settings.gradle.kts` | none yet | Delete matching project directories | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Global repositories and caches remain. |
 | setuptools | `build` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; Plonge does not run `setup.py clean --all` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. A `build_base` setting that moves the directory is not followed. |
 | build, `uv build` | `dist` beside `pyproject.toml` or `setup.py` | none | Delete matching project directories; neither tool has a command that removes `dist` | `scan` reports; `clean` selects quiet projects; `--apply` deletes. Output moved by `--outdir` or `--out-dir` is not matched. |
 | uv | `.venv`; `venv` beside `pyproject.toml`, `requirements.txt`, or `setup.py` | `uv` | `uv cache prune` | prune; eligible with `clean --global`; requires `--apply` to run |
@@ -446,6 +446,30 @@ or reset statistics; none clears or prunes the cache
 ([source][sccache-cmdline]).
 sccache limits the cache to 10 gigabytes by default.
 Plonge has no sccache rule.
+
+### Gradle
+
+The Gradle rule was checked against the documentation and source
+of Gradle **9.9.1**, the current stable release.
+Gradle recognizes `build` and `settings` files with the extensions
+`.gradle`, `.gradle.kts`, and `.gradle.dcl`
+([names][gradle-logic-files], [extensions][gradle-script-langs]).
+A project's output goes in `build` in the project directory by default
+([source][gradle-build-dir]), and `layout.buildDirectory` can move it
+([source][gradle-layout]).
+`clean` deletes that directory ([base plugin][gradle-base-plugin]),
+so a later build writes it again.
+Plonge matches `build` only beside `build.gradle`, `build.gradle.kts`,
+`settings.gradle`, or `settings.gradle.kts`.
+A subproject that has no build file of its own, because the root build
+configures it, is not matched.
+`.gradle.dcl` files are for Gradle's declarative preview
+and are not matched yet.
+`buildSrc` is a separate build with its own build file
+([docs][gradle-buildsrc]), so its `build` matches in the same way.
+The project `.gradle` directory holds Gradle's incremental build state and
+the configuration cache ([docs][gradle-project-cache]);
+Plonge already matched it by name.
 
 ### Bun
 
@@ -610,3 +634,10 @@ See Yarn's [cache clean command][yarn-clean] and
 [spm-local-config]: https://github.com/swiftlang/swift-package-manager/blob/swift-6.4.2-RELEASE/Sources/Workspace/Workspace+Configuration.swift#L227-L250
 [apple-caches]: https://developer.apple.com/documentation/foundation/filemanager/searchpathdirectory/cachesdirectory
 [foundation-xdg]: https://github.com/swiftlang/swift-foundation/blob/swift-6.4.2-RELEASE/Sources/FoundationEssentials/FileManager/SearchPaths/FileManager+XDGSearchPaths.swift#L45-L52
+[gradle-logic-files]: https://github.com/gradle/gradle/blob/v9.9.1/platforms/core-runtime/build-discovery/src/main/java/org/gradle/internal/initialization/BuildLogicFiles.java#L24-L53
+[gradle-script-langs]: https://github.com/gradle/gradle/blob/v9.9.1/platforms/core-runtime/build-discovery/src/main/java/org/gradle/internal/scripts/ScriptingLanguages.java#L30-L37
+[gradle-build-dir]: https://github.com/gradle/gradle/blob/v9.9.1/subprojects/core-api/src/main/java/org/gradle/api/Project.java#L240
+[gradle-layout]: https://github.com/gradle/gradle/blob/v9.9.1/platforms/core-configuration/file-operations/src/main/java/org/gradle/api/internal/file/DefaultProjectLayout.java#L71
+[gradle-base-plugin]: https://docs.gradle.org/9.9.1/userguide/base_plugin.html#sec:base_tasks
+[gradle-buildsrc]: https://docs.gradle.org/9.9.1/userguide/sharing_build_logic_between_subprojects.html
+[gradle-project-cache]: https://docs.gradle.org/9.9.1/userguide/directory_layout.html#dir:caches:project_local

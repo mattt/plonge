@@ -13,6 +13,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 # Zig 0.13 renamed the local cache from zig-cache to .zig-cache.
 # zig-out is left out: it is install output, not a cache, and can hold
 # programs and libraries that a user runs or links from.
+# Gradle puts a project's output in build beside its build or settings file.
+# setuptools uses build beside pyproject.toml or setup.py.
 # Mix puts build output in _build. Mix keeps dependency sources in deps,
 # which is left out because an edited Hex package there has no Git data
 # that plonge can check. Rebar3 also uses _build, but it puts dependency
@@ -22,7 +24,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 ".zig-cache" = ["build.zig"]
 _build = ["mix.exs"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
-build = ["pyproject.toml", "setup.py"]
+build = ["build.gradle", "build.gradle.kts", "pyproject.toml", "settings.gradle",
+         "settings.gradle.kts", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]

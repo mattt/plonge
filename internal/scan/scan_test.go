@@ -178,8 +178,6 @@ func TestDetect(t *testing.T) {
 				"old/build/temp/x.o":                  "",
 				"web/package.json":                    "{}",
 				"web/build/index.html":                "", // not a Python project
-				"app/build.gradle":                    "",
-				"app/build/classes/x":                 "", // not a Python project
 				"docs/build/html/index.html":          "", // no project file
 				"src/pkg/__pycache__/m.pyc":           "",
 			},
@@ -189,6 +187,33 @@ func TestDetect(t *testing.T) {
 				"lib/dist":            "dist beside pyproject.toml",
 				"old/dist":            "dist beside setup.py",
 				"src/pkg/__pycache__": "__pycache__",
+			},
+		},
+		{
+			name: "Gradle build output",
+			files: map[string]string{
+				".gitignore":                       "build/\n.gradle/\n",
+				"settings.gradle.kts":              "",
+				"build/reports/x.html":             "",
+				".gradle/8.14/checksums/x":         "",
+				"app/build.gradle.kts":             "",
+				"app/build/classes/x":              "",
+				"lib/build.gradle":                 "",
+				"lib/build/libs/lib.jar":           "",
+				"old/settings.gradle":              "",
+				"old/build/tmp/x":                  "",
+				"web/build/index.html":             "", // no project file
+				"app/src/build.gradle.kts.bak":     "",
+				"app/src/build/generated/x.java":   "", // beside no project file
+				"app/build/sub/build.gradle":       "", // inside a candidate
+				"app/build/sub/build/classes/x.cl": "",
+			},
+			want: map[string]string{
+				"build":     "build beside settings.gradle.kts",
+				".gradle":   ".gradle",
+				"app/build": "build beside build.gradle.kts",
+				"lib/build": "build beside build.gradle",
+				"old/build": "build beside settings.gradle",
 			},
 		},
 		{

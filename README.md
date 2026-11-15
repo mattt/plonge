@@ -630,7 +630,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 ".zig-cache" = ["build.zig"]
 _build = ["mix.exs"]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
-build = ["pyproject.toml", "setup.py"]
+build = ["build.gradle", "build.gradle.kts", "pyproject.toml", "settings.gradle",
+         "settings.gradle.kts", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
@@ -655,10 +656,11 @@ quiet_hours = 72
 skip = ["third_party"]
 
 [beside]
-build = ["build.gradle", "build.gradle.kts", "pyproject.toml", "setup.py"]
+build = ["build.gradle", "build.gradle.kts", "meson.build", "pyproject.toml",
+         "settings.gradle", "settings.gradle.kts", "setup.py"]
 ```
 
-This `build` entry adds Gradle projects.
+This `build` entry adds Meson projects that use a `build` directory.
 It replaces the default entry, so it lists the default project files too.
 
 A `refuse_inside` entry lists paths, relative to a matching directory,

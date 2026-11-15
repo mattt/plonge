@@ -17,7 +17,9 @@ func TestDefault(t *testing.T) {
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
 		t.Errorf("beside target = %q", r.Beside["target"])
 	}
-	if !slices.Equal(r.Beside["build"], []string{"pyproject.toml", "setup.py"}) {
+	wantBuild := []string{"build.gradle", "build.gradle.kts", "pyproject.toml",
+		"settings.gradle", "settings.gradle.kts", "setup.py"}
+	if !slices.Equal(r.Beside["build"], wantBuild) {
 		t.Errorf("beside build = %q", r.Beside["build"])
 	}
 	if !slices.Equal(r.Beside["_build"], []string{"mix.exs"}) {
@@ -150,7 +152,12 @@ func TestMatch(t *testing.T) {
 		{".tox", nil, ".tox"},
 		{".nox", nil, ".nox"},
 		{"build", nil, ""},
-		{"build", []string{"package.json", "build.gradle"}, ""},
+		{"build", []string{"package.json"}, ""},
+		{"build", []string{"build.gradle"}, "build beside build.gradle"},
+		{"build", []string{"build.gradle.kts"}, "build beside build.gradle.kts"},
+		{"build", []string{"settings.gradle"}, "build beside settings.gradle"},
+		{"build", []string{"settings.gradle.kts"}, "build beside settings.gradle.kts"},
+		{"build", []string{"build.gradle.dcl", "gradle.properties"}, ""},
 		{"build", []string{"pyproject.toml"}, "build beside pyproject.toml"},
 		{"build", []string{"setup.py"}, "build beside setup.py"},
 	}
