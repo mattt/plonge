@@ -173,9 +173,9 @@ func TestMatch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		// The parent of a one-name path is the root.
-		got := r.Match(tt.name, func(dir, m string) bool { return dir == "" && slices.Contains(tt.siblings, m) })
-		if got != tt.want {
-			t.Errorf("Match(%q, %q) = %q, want %q", tt.name, tt.siblings, got, tt.want)
+		key, got := r.Match(tt.name, func(dir, m string) bool { return dir == "" && slices.Contains(tt.siblings, m) })
+		if wantKey, _, _ := strings.Cut(tt.want, " beside "); got != tt.want || key != wantKey {
+			t.Errorf("Match(%q, %q) = %q, %q; want %q", tt.name, tt.siblings, key, got, tt.want)
 		}
 	}
 }
@@ -203,9 +203,9 @@ func TestMatchPathName(t *testing.T) {
 		{"tmp/x/y", "", ""},
 	}
 	for _, tt := range tests {
-		got := r.Match(tt.rel, func(dir, m string) bool { return dir == tt.dir && m == "x.proj" })
-		if got != tt.want {
-			t.Errorf("Match(%q) with x.proj in %q = %q, want %q", tt.rel, tt.dir, got, tt.want)
+		key, got := r.Match(tt.rel, func(dir, m string) bool { return dir == tt.dir && m == "x.proj" })
+		if wantKey, _, _ := strings.Cut(tt.want, " beside "); got != tt.want || key != wantKey {
+			t.Errorf("Match(%q) with x.proj in %q = %q, %q; want %q", tt.rel, tt.dir, key, got, tt.want)
 		}
 	}
 }

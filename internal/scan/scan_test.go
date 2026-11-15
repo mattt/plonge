@@ -777,6 +777,58 @@ func TestVerifyRefusesInsidePath(t *testing.T) {
 	}
 }
 
+// pathRuleRepo makes a repository with a cache that the path rule "out/gen"
+// matches, and returns rules in which refuse_inside protects keep in it.
+func pathRuleRepo(t *testing.T) (r rules.Rules, root, cache string) {
+	t.Helper()
+	r = rules.Default()
+	r.Names = append(r.Names, "out/gen")
+	r.Beside["out/gen"] = []string{"x.proj"}
+	r.RefuseInside["out/gen"] = []string{"keep"}
+	root = filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{".gitignore": "gen/\n", "app/x.proj": ""})
+	cache = filepath.Join(root, "app", "out", "gen")
+	write(t, filepath.Join(cache, "obj", "x"), "")
+	return r, root, cache
+}
+
+func TestMeasureRefusesInsidePathOfPathRule(t *testing.T) {
+	isolateGit(t)
+	r, root, cache := pathRuleRepo(t)
+	write(t, filepath.Join(cache, "keep"), "x")
+	roots := []Root{Detect(context.Background(), root, r)}
+	Measure(roots)
+	got := roots[0]
+	want := `contains keep, which refuse_inside "keep" protects`
+	if len(got.Refused) != 1 || got.Refused[0].Path != cache || got.Refused[0].Reason != want ||
+		got.Refused[0].Rule != "out/gen beside x.proj" {
+		t.Errorf("refused %+v, want %s: %s", got.Refused, cache, want)
+	}
+	if len(got.Candidates) != 0 {
+		t.Errorf("candidates %+v", got.Candidates)
+	}
+}
+
+func TestVerifyRefusesInsidePathOfPathRule(t *testing.T) {
+	isolateGit(t)
+	r, root, cache := pathRuleRepo(t)
+	roots := []Root{Detect(context.Background(), root, r)}
+	Measure(roots)
+	if len(roots[0].Candidates) != 1 || roots[0].Candidates[0].Path != cache {
+		t.Fatalf("candidates %+v, refused %+v", roots[0].Candidates, roots[0].Refused)
+	}
+	c := roots[0].Candidates[0]
+	if reason, err := Verify(context.Background(), root, c); err != nil || reason != "" {
+		t.Fatalf("before keep: reason %q, err %v", reason, err)
+	}
+	// An entry made after the scan must still stop the deletion.
+	write(t, filepath.Join(cache, "keep"), "x")
+	reason, err := Verify(context.Background(), root, c)
+	if err != nil || reason != `contains keep, which refuse_inside "keep" protects` {
+		t.Errorf("after keep: reason %q, err %v", reason, err)
+	}
+}
+
 func TestDetectBEAMBuild(t *testing.T) {
 	isolateGit(t)
 	root := filepath.Join(t.TempDir(), "repo")

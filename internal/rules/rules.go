@@ -509,8 +509,11 @@ func IsPattern(marker string) bool {
 // or one that matches a pattern. For a beside rule, that directory is
 // the one that holds the name: the parent of rel, or for "vendor/bundle",
 // the parent of vendor.
-// The result is empty when nothing matches.
-func (r Rules) Match(rel string, has func(dir, marker string) bool) string {
+// Match returns the matched entry of Names, such as "vendor/bundle",
+// which is the key for Beside and RefuseInside,
+// and the rule's display text, such as "vendor/bundle beside Gemfile".
+// Both are empty when nothing matches.
+func (r Rules) Match(rel string, has func(dir, marker string) bool) (key, rule string) {
 	for _, n := range r.Names {
 		dir, ok := holder(rel, n)
 		if !ok {
@@ -518,15 +521,15 @@ func (r Rules) Match(rel string, has func(dir, marker string) bool) string {
 		}
 		markers, ok := r.Beside[n]
 		if !ok {
-			return n
+			return n, n
 		}
 		for _, m := range markers {
 			if has(dir, m) {
-				return n + " beside " + m
+				return n, n + " beside " + m
 			}
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // holder returns the part of rel before name, when rel ends with name.

@@ -729,6 +729,8 @@ the `vendor` directory itself is not a cache.
 The whole path must be below the scanned root.
 For a path, a `beside` project file must be in the directory that holds
 the first name, here the directory that holds `vendor`.
+`beside` and `refuse_inside` entries for a path use the whole path as their key,
+such as `"vendor/bundle" = ["keep"]`.
 
 The scan never enters a directory in `skip`.
 This keeps out caches that are nested in a tool's own cache,
