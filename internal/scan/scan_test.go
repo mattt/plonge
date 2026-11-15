@@ -192,6 +192,34 @@ func TestDetect(t *testing.T) {
 			},
 		},
 		{
+			name: "Ruby and Rails projects",
+			files: map[string]string{
+				".gitignore": "vendor/\ntmp/\n",
+				"Gemfile":    "",
+				"config.ru":  "",
+				"vendor/bundle/ruby/3.4.0/gems/rack/x.rb": "",
+				"vendor/cache/rack-3.1.0.gem":             "", // bundle cache output is kept
+				"vendor/javascript/app.js":                "",
+				"tmp/cache/bootsnap/x":                    "",
+				"tmp/pids/server.pid":                     "",
+				"tmp/local_secret.txt":                    "",
+				"gemsrb/gems.rb":                          "",
+				"gemsrb/vendor/bundle/ruby/x":             "",
+				"lib/Gemfile":                             "",
+				"lib/tmp/cache/x":                         "", // no config.ru
+				"lib/bundle/x":                            "", // not inside vendor
+				"pinned/Gemfile":                          "",
+				"pinned/vendor/bundle/ruby/x!":            "", // tracked
+				"go/go.mod":                               "",
+				"go/vendor/bundle/x":                      "", // no Gemfile
+			},
+			want: map[string]string{
+				"vendor/bundle":        "vendor/bundle beside Gemfile",
+				"tmp/cache":            "tmp/cache beside config.ru",
+				"gemsrb/vendor/bundle": "vendor/bundle beside gems.rb",
+			},
+		},
+		{
 			name: "ignored by a parent directory rule",
 			files: map[string]string{
 				".gitignore":            "build/\n",
@@ -239,6 +267,38 @@ func TestDetectBesidePattern(t *testing.T) {
 	want := map[string]string{
 		"app/out": "out beside *.proj",
 		"dir/out": "out beside *.proj",
+	}
+	if f := found(got); !mapsEqual(f, want) {
+		t.Errorf("found %v, want %v", f, want)
+	}
+}
+
+func TestDetectPathName(t *testing.T) {
+	isolateGit(t)
+	r := rules.Default()
+	r.Names = append(r.Names, "out/gen")
+	r.Beside["out/gen"] = []string{"x.proj"}
+	root := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{
+		".gitignore":      "gen/\n",
+		"x.proj":          "",
+		"out/gen/a":       "",
+		"app/x.proj":      "",
+		"app/out/gen/a":   "",
+		"app/out/keep":    "", // out itself is not a cache
+		"lib/out/x.proj":  "", // beside gen, not beside out
+		"lib/out/gen/a":   "",
+		"none/out/gen/a":  "",
+		"app/gen/a":       "", // not inside out
+		"app/myout/gen/a": "",
+	})
+	got := Detect(context.Background(), root, r)
+	if got.Skipped != "" || len(got.Errors) > 0 {
+		t.Fatalf("skipped %q, errors %q", got.Skipped, got.Errors)
+	}
+	want := map[string]string{
+		"out/gen":     "out/gen beside x.proj",
+		"app/out/gen": "out/gen beside x.proj",
 	}
 	if f := found(got); !mapsEqual(f, want) {
 		t.Errorf("found %v, want %v", f, want)
@@ -714,6 +774,58 @@ func TestVerifyRefusesInsidePath(t *testing.T) {
 	reason, err := Verify(context.Background(), root, c)
 	if err != nil || reason != `contains prod/rel, which refuse_inside "*/rel" protects` {
 		t.Errorf("after release: reason %q, err %v", reason, err)
+	}
+}
+
+// pathRuleRepo makes a repository with a cache that the path rule "out/gen"
+// matches, and returns rules in which refuse_inside protects keep in it.
+func pathRuleRepo(t *testing.T) (r rules.Rules, root, cache string) {
+	t.Helper()
+	r = rules.Default()
+	r.Names = append(r.Names, "out/gen")
+	r.Beside["out/gen"] = []string{"x.proj"}
+	r.RefuseInside["out/gen"] = []string{"keep"}
+	root = filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{".gitignore": "gen/\n", "app/x.proj": ""})
+	cache = filepath.Join(root, "app", "out", "gen")
+	write(t, filepath.Join(cache, "obj", "x"), "")
+	return r, root, cache
+}
+
+func TestMeasureRefusesInsidePathOfPathRule(t *testing.T) {
+	isolateGit(t)
+	r, root, cache := pathRuleRepo(t)
+	write(t, filepath.Join(cache, "keep"), "x")
+	roots := []Root{Detect(context.Background(), root, r)}
+	Measure(roots)
+	got := roots[0]
+	want := `contains keep, which refuse_inside "keep" protects`
+	if len(got.Refused) != 1 || got.Refused[0].Path != cache || got.Refused[0].Reason != want ||
+		got.Refused[0].Rule != "out/gen beside x.proj" {
+		t.Errorf("refused %+v, want %s: %s", got.Refused, cache, want)
+	}
+	if len(got.Candidates) != 0 {
+		t.Errorf("candidates %+v", got.Candidates)
+	}
+}
+
+func TestVerifyRefusesInsidePathOfPathRule(t *testing.T) {
+	isolateGit(t)
+	r, root, cache := pathRuleRepo(t)
+	roots := []Root{Detect(context.Background(), root, r)}
+	Measure(roots)
+	if len(roots[0].Candidates) != 1 || roots[0].Candidates[0].Path != cache {
+		t.Fatalf("candidates %+v, refused %+v", roots[0].Candidates, roots[0].Refused)
+	}
+	c := roots[0].Candidates[0]
+	if reason, err := Verify(context.Background(), root, c); err != nil || reason != "" {
+		t.Fatalf("before keep: reason %q, err %v", reason, err)
+	}
+	// An entry made after the scan must still stop the deletion.
+	write(t, filepath.Join(cache, "keep"), "x")
+	reason, err := Verify(context.Background(), root, c)
+	if err != nil || reason != `contains keep, which refuse_inside "keep" protects` {
+		t.Errorf("after keep: reason %q, err %v", reason, err)
 	}
 }
 

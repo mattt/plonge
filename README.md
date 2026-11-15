@@ -244,7 +244,7 @@ plus a built-in rule for Xcode build data on macOS.
 A rule for a cache without a cleanup command,
 or whose command also removes user state,
 can delete the contents of its path instead,
-as `zig-global-cache` does for Zig,
+as `zig-global-cache` does for Zig, `rubygems-cache` does for RubyGems,
 and as the Deno, Cargo, `hex-packages`, and `rebar3-hex` rules do.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
@@ -295,6 +295,7 @@ Neither kind guarantees that the whole reported size will be freed.
 | `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
 | `hex-packages` | clear | Built-in deletion of the contents of `~/.hex/packages` |
 | `rebar3-hex` | clear | Built-in deletion of the contents of `~/.cache/rebar3/hex` |
+| `rubygems-cache` | clear | Built-in deletion of the contents of RubyGems' gem cache |
 
 Plonge runs a tool through `mise exec --`
 when `mise which` finds it from your home directory,
@@ -399,22 +400,34 @@ and only with a `path` command.
 
 A fixed `path` can give way to an environment variable
 that holds the tool's directory.
-`path_env` names the variable,
-and `path_env_subdir` is a relative path inside the directory it names:
+`path_env` names the variable:
 
 ```toml
-path = "~/.cargo/registry"
+path = "~/.cargo"
 path_env = "CARGO_HOME"
-path_env_subdir = "registry"
+path_subdir = "registry"
 ```
 
-When the variable is set and not empty, Plonge uses its value
-joined with `path_env_subdir`, here `$CARGO_HOME/registry`;
+When the variable is set and not empty, Plonge uses its value;
 otherwise it uses `path`.
 Plonge reads the variable from its own environment,
 not from the environment that `mise exec` gives the tool.
 It skips the rule when the value is not an absolute path.
-`path_env_subdir` cannot start with `/` or leave the directory with `..`.
+
+When the cache is inside the directory that a rule resolves,
+`path_subdir` names the cache's relative path below it.
+Plonge joins it to whichever path the rule resolves:
+a fixed `path`, the value of `path_env`, or the path that a `path` command prints.
+In the example above, the cache is `$CARGO_HOME/registry` or `~/.cargo/registry`.
+For RubyGems, which prints the directory above its cache:
+
+```toml
+path = "gem env gemdir"
+path_subdir = "cache"
+```
+
+`path_subdir` must be a relative path of directory names:
+it cannot start with `/`, end with `/`, or contain `.` or `..`.
 
 Cargo's command that cleans its global cache, `cargo clean gc`, is unstable,
 so the `cargo-registry` rule deletes the contents
@@ -530,6 +543,18 @@ or does not exist or is not a directory.
 It checks the path when it lists the rule and again right before it deletes.
 `tool` must still be available, and a `path` command must still start with it.
 
+The default `rubygems-cache` rule deletes the `cache` directory's contents
+in the gem directory that `gem env gemdir` prints.
+RubyGems keeps a copy of each `.gem` file that it installs there,
+and has no command that removes the copies.
+`gem cleanup` does something else: it uninstalls old gem versions,
+which a project can still need, so Plonge does not run it.
+After a clear, `gem pristine` downloads a missing copy.
+`bundle cache` reports a missing gem file for a gem whose copy is gone;
+with `--all-platforms`, it can download the gem instead.
+The rule reaches only the Ruby that `gem` runs from your home directory;
+each Ruby version has its own gem directory.
+
 When your rule has the same `id` as a default, it replaces all of the default,
 so copy the default's `check`, `require`, `refuse`, `checks`, and `targets`
 to keep them.
@@ -617,8 +642,8 @@ Plonge has these default rules:
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          ".parcel-cache", ".pytest_cache", ".ruff_cache", ".svelte-kit", ".tox",
          ".turbo", ".venv", ".zig-cache", "DerivedData", "__pycache__", "_build",
-         "bin", "build", "dist", "node_modules", "obj", "target", "venv",
-         "zig-cache"]
+         "bin", "build", "dist", "node_modules", "obj", "target", "tmp/cache",
+         "vendor/bundle", "venv", "zig-cache"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
@@ -626,6 +651,8 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
 # Match these names only when a listed project file is in the same directory.
 # A project file can be a pattern, such as "*.csproj".
+# For a path name, such as "vendor/bundle", the project file is beside
+# the first name in the path.
 [beside]
 ".zig-cache" = ["build.zig"]
 _build = ["mix.exs"]
@@ -634,6 +661,8 @@ build = ["pyproject.toml", "setup.py"]
 dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
+"tmp/cache" = ["config.ru"]
+"vendor/bundle" = ["Gemfile", "gems.rb"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 zig-cache = ["build.zig"]
 
@@ -694,11 +723,21 @@ in the syntax of Go's [`filepath.Match`](https://pkg.go.dev/path/filepath#Match)
 A name that contains `*`, `?`, `[`, or `\` is a pattern;
 a pattern matches any entry in the same directory, as a literal name does.
 
+A name in `names` can be a path of directory names, such as `vendor/bundle`.
+It matches a directory named `bundle` whose parent directory is named `vendor`;
+the `vendor` directory itself is not a cache.
+The whole path must be below the scanned root.
+For a path, a `beside` project file must be in the directory that holds
+the first name, here the directory that holds `vendor`.
+`beside` and `refuse_inside` entries for a path use the whole path as their key,
+such as `"vendor/bundle" = ["keep"]`.
+
 The scan never enters a directory in `skip`.
 This keeps out caches that are nested in a tool's own cache,
 such as `__pycache__` inside a `.cache/uv` environment.
 A name in both `names` and `skip` is reported as a cache and is not entered.
-`.git`, `.hg`, `.jj`, and `.svn` cannot be added to `names`.
+`.git`, `.hg`, `.jj`, and `.svn` cannot be added to `names`,
+alone or as part of a path.
 
 ## Development
 

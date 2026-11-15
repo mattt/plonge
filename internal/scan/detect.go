@@ -135,12 +135,17 @@ func walk(root string, r rules.Rules) ([]Candidate, []string) {
 			return nil
 		}
 		name := d.Name()
-		parent := filepath.Dir(path)
-		rule := r.Match(name, func(marker string) bool {
-			return hasEntry(parent, marker)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return fs.SkipDir
+		}
+		key, rule := r.Match(filepath.ToSlash(rel), func(dir, marker string) bool {
+			return hasEntry(filepath.Join(root, filepath.FromSlash(dir)), marker)
 		})
-		if rule != "" {
-			found = append(found, Candidate{Path: path, Rule: rule, refuse: r.RefuseInside[name]})
+		if key != "" {
+			// A path rule such as vendor/bundle keys its entries by the whole path,
+			// not by the directory's own name.
+			found = append(found, Candidate{Path: path, Rule: rule, refuse: r.RefuseInside[key]})
 			return fs.SkipDir
 		}
 		if slices.Contains(r.Skip, name) {

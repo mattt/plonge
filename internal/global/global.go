@@ -129,9 +129,20 @@ func command(t tool, cmd string) (argv []string, display string) {
 	return argv, strings.Join(append(append([]string{}, t.display...), words...), " ")
 }
 
-// cachePath returns the cache directory of a rule.
+// cachePath returns the cache directory of a rule:
+// the path that basePath resolves, with path_subdir joined to it.
 // An error from a path command says so; an error from path_env names the variable.
 func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, error) {
+	path, err := r.basePath(ctx, g, t)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(path, filepath.FromSlash(g.PathSubdir)), nil
+}
+
+// basePath returns the path that a rule's path_env, fixed path,
+// or path command gives, before path_subdir is joined to it.
+func (r Runner) basePath(ctx context.Context, g rules.Global, t tool) (string, error) {
 	if g.PathEnv != "" {
 		if dir := os.Getenv(g.PathEnv); dir != "" {
 			// Cargo resolves a relative CARGO_HOME from its working directory,
@@ -139,7 +150,7 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 			if !filepath.IsAbs(dir) {
 				return "", fmt.Errorf("%s is %q, which is not an absolute path", g.PathEnv, dir)
 			}
-			return filepath.Join(dir, filepath.FromSlash(g.PathEnvSubdir)), nil
+			return filepath.Clean(dir), nil
 		}
 	}
 	if rest, ok := strings.CutPrefix(g.Path, "~/"); ok {
