@@ -63,31 +63,13 @@ func Inspect(ctx context.Context, sel Selection) (Inventory, error) {
 	paths = mise.DropNested(paths, func(root string) bool { return inTree[root] })
 	inv.Roots = scan.Run(ctx, paths, inv.Rules)
 	inv.Sources = agents.Apply(ctx, inv.Roots, env.Home, inv.Now)
-	inv.Sizes = measure(inv.Roots)
+	inv.Sizes = scan.Measure(inv.Roots)
 	inv.Report = report.Build(inv.Roots, inv.Sizes, inv.Rules.QuietHours, broken, inv.Now)
 	inv.Report.ActivitySources = inv.Sources
 	if sel.Global {
 		inv.Report.Global = global.New(env.Home).List(ctx, inv.Rules.Global)
 	}
 	return inv, nil
-}
-
-// measure sizes every candidate across all roots at once.
-func measure(results []scan.Root) [][]int64 {
-	var dirs []string
-	for _, r := range results {
-		for _, c := range r.Candidates {
-			dirs = append(dirs, c.Path)
-		}
-	}
-	flat := scan.Sizes(dirs)
-	sizes := make([][]int64, len(results))
-	k := 0
-	for i, r := range results {
-		sizes[i] = flat[k : k+len(r.Candidates)]
-		k += len(r.Candidates)
-	}
-	return sizes
 }
 
 // CleanOptions choose what Clean deletes.

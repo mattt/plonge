@@ -497,3 +497,108 @@ func TestInRepositoryRefusesUnexpectedOutput(t *testing.T) {
 		t.Errorf("false, false: InRepository = %v, %v", got, err)
 	}
 }
+
+func TestMeasureRefusesGitRepositories(t *testing.T) {
+	isolateGit(t)
+	tests := []struct {
+		name   string
+		setup  func(t *testing.T, root string) // adds a repository to a cache
+		reason string
+	}{
+		{
+			name: "nested repository with a commit in build",
+			setup: func(t *testing.T, root string) {
+				newRepo(t, filepath.Join(root, "build", "dep"), map[string]string{"work.txt": "keep"})
+			},
+			reason: "contains a Git repository at dep",
+		},
+		{
+			name: "cache that is a work tree",
+			setup: func(t *testing.T, root string) {
+				newRepo(t, filepath.Join(root, "build"), map[string]string{"work.txt": "keep"})
+			},
+			reason: "is a Git repository",
+		},
+		{
+			name: "worktree-style .git file",
+			setup: func(t *testing.T, root string) {
+				write(t, filepath.Join(root, "node_modules", "pkg", ".git"), "gitdir: /elsewhere/.git/worktrees/pkg\n")
+			},
+			reason: "contains a Git repository at pkg",
+		},
+		{
+			name: "dangling .git symlink",
+			setup: func(t *testing.T, root string) {
+				dir := filepath.Join(root, "node_modules", "a", "b")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("/nonexistent", filepath.Join(dir, ".git")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			reason: "contains a Git repository at a/b",
+		},
+		{
+			name: "bare repository",
+			setup: func(t *testing.T, root string) {
+				run(t, root, "init", "-q", "--bare", filepath.Join(root, "node_modules", "mirror.git"))
+			},
+			reason: "contains a Git directory at mirror.git",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "repo")
+			newRepo(t, root, map[string]string{
+				".gitignore":     "build/\nnode_modules/\n.venv/\n",
+				"pyproject.toml": "",
+			})
+			write(t, filepath.Join(root, ".venv", "bin", "python"), "")
+			write(t, filepath.Join(root, "build", "lib", "m.py"), "")
+			write(t, filepath.Join(root, "node_modules", "x", "index.js"), "")
+			tt.setup(t, root)
+
+			roots := []Root{Detect(context.Background(), root, rules.Default())}
+			sizes := Measure(roots)
+			got := roots[0]
+			if len(got.Refused) != 1 {
+				t.Fatalf("refused %+v, want one", got.Refused)
+			}
+			r := got.Refused[0]
+			if r.Reason != tt.reason || r.Project != root {
+				t.Errorf("refusal %+v, want reason %q", r, tt.reason)
+			}
+			// The other caches stay, each with its size.
+			if len(got.Candidates) != 2 || len(sizes[0]) != 2 {
+				t.Fatalf("candidates %+v, sizes %v", got.Candidates, sizes)
+			}
+			for _, c := range got.Candidates {
+				if c.Path == r.Path {
+					t.Errorf("%s is both refused and a candidate", c.Path)
+				}
+			}
+		})
+	}
+}
+
+func TestMeasureRefusesUnreadableDirectory(t *testing.T) {
+	isolateGit(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root can read every directory")
+	}
+	root := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{".gitignore": "node_modules/\n"})
+	locked := filepath.Join(root, "node_modules", "locked")
+	write(t, filepath.Join(locked, "x.js"), "")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	roots := []Root{Detect(context.Background(), root, rules.Default())}
+	Measure(roots)
+	if len(roots[0].Refused) != 1 || !strings.Contains(roots[0].Refused[0].Reason, "cannot check for Git repositories") {
+		t.Errorf("refused %+v", roots[0].Refused)
+	}
+}
