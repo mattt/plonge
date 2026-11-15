@@ -27,34 +27,36 @@ var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 // guard is the check that a rule must pass before it runs.
 type guard struct {
-	argv   []string
-	env    []string
-	refuse string
-	reason string
+	argv    []string
+	display string // the check command for people to read
+	env     []string
+	refuse  string
+	reason  string
+	require string
 }
 
-func newGuard(t tool, g rules.Global) *guard {
-	argv, _ := command(t, g.Check)
-	reason := g.RefuseReason
+func newGuard(t tool, c rules.CheckSpec) *guard {
+	argv, display := command(t, c.Check)
+	reason := c.RefuseReason
 	if reason == "" {
 		reason = "the check refused this rule"
 	}
-	return &guard{argv: argv, env: g.CheckEnv, refuse: g.Refuse, reason: reason}
+	return &guard{argv: argv, display: display, env: c.CheckEnv, refuse: c.Refuse, reason: reason, require: c.Require}
 }
 
-// passes runs the entry's check, if it has one.
-// When the check does not pass, the entry is marked skipped and cannot run.
+// passes runs the entry's checks in order, if it has any.
+// When one does not pass, the entry is marked skipped and cannot run,
+// and the later checks do not run.
 func (r Runner) passes(ctx context.Context, e *Entry) bool {
-	if e.guard == nil {
-		return true
+	for _, g := range e.guards {
+		reason, refused := r.evaluate(ctx, g)
+		if reason != "" {
+			e.Skipped, e.Refused = reason, refused
+			e.Command, e.argv = "", nil
+			return false
+		}
 	}
-	reason, refused := r.evaluate(ctx, e.guard)
-	if reason == "" {
-		return true
-	}
-	e.Skipped, e.Refused = reason, refused
-	e.Command, e.argv = "", nil
-	return false
+	return true
 }
 
 // evaluate returns why the check refuses the rule, or an empty reason.
@@ -65,6 +67,25 @@ func (r Runner) evaluate(ctx context.Context, g *guard) (reason string, refused 
 	if err != nil {
 		return "check failed: " + err.Error(), nil
 	}
+	lines := strings.Split(ansiEscape.ReplaceAllString(out, ""), "\n")
+	if g.require != "" {
+		pattern, err := regexp.Compile(g.require)
+		if err != nil {
+			return "invalid require pattern: " + err.Error(), nil
+		}
+		matches := 0
+		for _, line := range lines {
+			if pattern.MatchString(line) {
+				matches++
+			}
+		}
+		switch {
+		case matches == 0:
+			return fmt.Sprintf("%s printed no line that matches %s", g.display, g.require), nil
+		case matches > 1:
+			return fmt.Sprintf("%s printed more than one line that matches %s", g.display, g.require), nil
+		}
+	}
 	if g.refuse == "" {
 		return "", nil
 	}
@@ -73,7 +94,7 @@ func (r Runner) evaluate(ctx context.Context, g *guard) (reason string, refused 
 		return "invalid refuse pattern: " + err.Error(), nil
 	}
 	group := pattern.SubexpIndex("path")
-	for _, line := range strings.Split(ansiEscape.ReplaceAllString(out, ""), "\n") {
+	for _, line := range lines {
 		m := pattern.FindStringSubmatch(line)
 		if m == nil {
 			continue

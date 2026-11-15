@@ -135,3 +135,113 @@ func TestCheckEnvReachesOnlyTheCheck(t *testing.T) {
 		t.Fatalf("with check_env: %+v", e)
 	}
 }
+
+func TestRequireNeedsOneMatchingLine(t *testing.T) {
+	rule := rules.Global{ID: "gc", Tool: "gc", Path: "~/cache", Clean: "gc run", Kind: rules.KindPrune, Check: "gc dry", Require: `^2\.`}
+	cases := map[string]bool{
+		`echo 2.1.0`:                       true,
+		`printf '\033[1m2.1.0\033[0m\n'`:   true,
+		`echo "a warning" >&2; echo 2.1.0`: true,
+		`echo 1.9.0`:                       false,
+		`true`:                             false,
+		`echo "version 2.1.0"`:             false,
+		`echo 2.1.0; echo 2.2.0`:           false,
+	}
+	for output, ok := range cases {
+		bin := fakeTools(t)
+		log := filepath.Join(t.TempDir(), "log")
+		addTool(t, bin, "gc", fakeGC(output, log))
+		r := runner(t)
+		ctx := context.Background()
+		entries := r.List(ctx, []rules.Global{rule})
+		e := entries[0]
+		if ok {
+			if e.Skipped != "" {
+				t.Errorf("%s: skipped: %s", output, e.Skipped)
+			}
+			continue
+		}
+		want := `gc dry printed no line that matches ^2\.`
+		if strings.Count(output, "2.") > 1 {
+			want = `gc dry printed more than one line that matches ^2\.`
+		}
+		if e.Skipped != want || e.Command != "" {
+			t.Errorf("%s: entry = %+v, want %q", output, e, want)
+		}
+		if res := r.Clean(ctx, entries, Options{Apply: true}); res.Outcomes[0].Status != Skipped || ran(t, log) {
+			t.Errorf("%s: result = %+v", output, res)
+		}
+	}
+}
+
+func TestRequireRunsAgainBeforeApply(t *testing.T) {
+	bin := fakeTools(t)
+	log := filepath.Join(t.TempDir(), "log")
+	addTool(t, bin, "gc", fakeGC(`echo 2.1.0`, log))
+	rule := rules.Global{ID: "gc", Tool: "gc", Path: "~/cache", Clean: "gc run", Kind: rules.KindPrune, Check: "gc dry", Require: `^2\.`}
+	r := runner(t)
+	ctx := context.Background()
+	entries := r.List(ctx, []rules.Global{rule})
+	if entries[0].Skipped != "" {
+		t.Fatalf("entry = %+v", entries[0])
+	}
+	addTool(t, bin, "gc", fakeGC(`echo 1.0.0`, log))
+	res := r.Clean(ctx, entries, Options{Apply: true})
+	if o := res.Outcomes[0]; o.Status != Skipped || !strings.Contains(o.Reason, "no line that matches") || ran(t, log) {
+		t.Errorf("outcome = %+v", o)
+	}
+}
+
+func TestEveryCheckMustPass(t *testing.T) {
+	bin := fakeTools(t)
+	log := filepath.Join(t.TempDir(), "log")
+	state := filepath.Join(t.TempDir(), "state")
+	addTool(t, bin, "gc", fmt.Sprintf(`echo "$*" >> %q
+case "$*" in
+version) echo 2.1.0 ;;
+setting) /bin/cat %q ;;
+run) echo run >> %q ;;
+*) exit 9 ;;
+esac`, log, state, log))
+	rule := rules.Global{
+		ID: "gc", Tool: "gc", Path: "~/cache", Clean: "gc run", Kind: rules.KindPrune,
+		Check: "gc version", Require: `^2\.`,
+		Checks: []rules.CheckSpec{{Check: "gc setting", Require: `^on$`}},
+	}
+	write := func(v string) {
+		if err := os.WriteFile(state, []byte(v+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := runner(t)
+	ctx := context.Background()
+
+	write("off")
+	if e := r.List(ctx, []rules.Global{rule})[0]; e.Skipped != "gc setting printed no line that matches ^on$" {
+		t.Errorf("second check: %+v", e)
+	}
+	write("on")
+	entries := r.List(ctx, []rules.Global{rule})
+	if entries[0].Skipped != "" {
+		t.Fatalf("both pass: %+v", entries[0])
+	}
+	write("off")
+	if o := r.Clean(ctx, entries, Options{Apply: true}).Outcomes[0]; o.Status != Skipped {
+		t.Errorf("recheck: %+v", o)
+	}
+	data, _ := os.ReadFile(log)
+	if strings.Contains(string(data), "run") {
+		t.Errorf("log = %q", data)
+	}
+
+	// A failing first check stops the later ones.
+	if err := os.Remove(log); err != nil {
+		t.Fatal(err)
+	}
+	first := rule
+	first.Require = `^3\.`
+	r.List(ctx, []rules.Global{first})
+	if data, _ := os.ReadFile(log); strings.Contains(string(data), "setting") {
+		t.Errorf("later check ran: %q", data)
+	}
+}

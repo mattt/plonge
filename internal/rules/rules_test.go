@@ -362,7 +362,7 @@ func TestGlobalPathZONFieldValidation(t *testing.T) {
 		{"path = \"~/c\"\npath_zon_field = \"global_cache_dir\"\n", "needs a path command"},
 		{"path = \"t env\"\npath_zon_field = \"env.HOME\"\n", "is not a field name"},
 		{"path = \"t env\"\npath_zon_field = \"1st\"\n", "is not a field name"},
-		{"path = \"t env\"\npath_zon_field = \"global_cache_dir\"\npath_label = \"cache\"\n", "not both"},
+		{"path = \"t env\"\npath_zon_field = \"global_cache_dir\"\npath_label = \"cache\"\n", "set only one of path_label, path_zon_field"},
 	}
 	for _, c := range cases {
 		f, err := parse(base+c.extra, "test")
@@ -388,13 +388,64 @@ func TestGlobalCheckValidation(t *testing.T) {
 		{"check_env = [\"A=1\"]\n", "need check"},
 		{"check = \"t dry\"\nrefuse_reason = \"why\"\n", "refuse_reason needs refuse"},
 		{"check = \"t dry\"\nrefuse = \"(\"\n", "refuse:"},
+		{"require = \"x\"\n", "need check"},
+		{"check = \"t dry\"\nrequire = \"(\"\n", "require:"},
+		{"check = \"t dry\"\nrequire = '^1\\.'\n", ""},
+		{"[[global.checks]]\ncheck = \"t more\"\n", "need check"},
+		{"check = \"t dry\"\n[[global.checks]]\ncheck = \"t more\"\nrequire = '^on$'\n", ""},
+		{"check = \"t dry\"\n[[global.checks]]\ncheck = \"other more\"\n", "check must be a t command"},
+		{"check = \"t dry\"\n[[global.checks]]\nrequire = 'x'\n", "check must be a t command"},
+		{"check = \"t dry\"\n[[global.checks]]\ncheck = \"t more\"\nrequire = \"(\"\n", "require:"},
+		{"check = \"t dry\"\n[[global.checks]]\ncheck = \"t more\"\nnope = 1\n", "unknown keys"},
 		{"check = \"t dry\"\ncheck_env = [\"NOVALUE\"]\n", "must be NAME=value"},
 		{"check = \"t dry\"\ncheck_env = [\"=x\"]\n", "must be NAME=value"},
-		{"path_label = \"x\"\n", "path_label must be one line and needs a path command"},
+		{"path_label = \"x\"\n", "path_label needs a path command"},
 		{"check = \"t dry\"\nrefuse = 'bad (?P<path>.+)$'\nrefuse_reason = \"why\"\ncheck_env = [\"A=1\"]\n", ""},
 	}
 	for _, c := range cases {
 		_, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%q: %v", c.extra, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
+		}
+	}
+}
+
+func TestGlobalPathFieldValidation(t *testing.T) {
+	const rule = "[[global]]\nid = \"a\"\ntool = \"t\"\nclean = \"t c\"\nkind = \"prune\"\npath_field = \"dir\"\n"
+	f, err := parse(rule+"path = \"t info --json\"\n", "test")
+	if err != nil || f.Global[0].PathField != "dir" {
+		t.Errorf("path command: %+v, %v", f.Global, err)
+	}
+	for _, path := range []string{"~/c", "/c"} {
+		_, err := parse(rule+"path = \""+path+"\"\n", "test")
+		if err == nil || !strings.Contains(err.Error(), "path_field needs a path command") {
+			t.Errorf("%s: err = %v", path, err)
+		}
+	}
+}
+
+func TestGlobalPathKeysAreExclusive(t *testing.T) {
+	const rule = "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t info\"\nclean = \"t c\"\nkind = \"prune\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"", ""},
+		{"path_field = \"dir\"\n", ""},
+		{"path_label = \"cache\"\n", ""},
+		{"path_field = \"dir\"\npath_label = \"cache\"\n", "set only one of path_label, path_field"},
+		{"path_zon_field = \"dir\"\n", ""},
+		{"path_field = \"dir\"\npath_zon_field = \"dir\"\n", "set only one of path_field, path_zon_field"},
+		{"path_label = \"cache\"\npath_field = \"dir\"\npath_zon_field = \"dir\"\n", "set only one of path_label, path_field, path_zon_field"},
+		{"path_label = \"a\\nb\"\n", "path_label must be one line"},
+	}
+	for _, c := range cases {
+		_, err := parse(rule+c.extra, "test")
 		if c.want == "" {
 			if err != nil {
 				t.Errorf("%q: %v", c.extra, err)

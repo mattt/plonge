@@ -7,7 +7,8 @@ mise en place is the preparation, and the plonge is where the dishes get done.
 
 `plonge scan` and `plonge clean` without `--apply` delete nothing.
 `plonge clean --apply` deletes selected project cache directories
-only if Git ignores them and they contain no tracked files.
+only if Git ignores them, they contain no tracked files,
+and they are not and do not hold a Git repository.
 It excludes active and busy projects by default.
 `plonge clean --global --apply` instead runs global cleanup actions,
 which do not use those project checks.
@@ -72,6 +73,8 @@ plonge scan --no-mise --root .
 A cache is a directory whose name matches a rule,
 such as `node_modules` or `.venv`.
 Plonge reports it only if Git ignores it and it contains no tracked files.
+It refuses a cache that is or holds a Git repository,
+as [described below](#caches-that-hold-a-git-repository).
 A rule defines a cache name, any required project file,
 or a global cleanup action.
 
@@ -106,7 +109,8 @@ You can repeat `--root`; `--no-mise` requires at least one root.
 
 Before each deletion, Plonge checks that the path is still a directory,
 is not a symlink, is inside its root,
-is ignored by Git, and contains no tracked files.
+is ignored by Git, contains no tracked files,
+and is not and does not hold a Git repository.
 It asks Paseo again once per project, before the first deletion there,
 and skips the project's caches if Paseo now reports an agent there
 or if Plonge cannot read Paseo's status.
@@ -121,6 +125,38 @@ Files linked elsewhere, filesystem snapshots, and changes during cleanup
 can affect how much space becomes available.
 Global size totals can also overlap.
 Use `plonge disk` to check free space on your home directory's volume.
+
+### Caches that hold a Git repository
+
+A cache can hold a separate Git repository,
+such as a dependency checked out from Git or a clone in a `build` directory.
+The enclosing repository ignores the cache and does not see that repository's files,
+so its ignore and tracked-file checks cannot protect its commits or uncommitted work.
+Plonge refuses a cache that has a `.git` entry of any type
+(a directory, a worktree-style file, or a symlink) at any depth,
+or a Git directory (`HEAD` beside `objects` and `refs`), such as a bare clone.
+It also refuses a cache with a directory that it cannot read,
+because that directory could hide a repository.
+Plonge stops at the first repository that it finds,
+does not follow symlinks, and checks while it measures the cache's size.
+It checks again right before deletion.
+
+`scan` and `clean` list each refused cache and the reason,
+and do not count it in the totals:
+
+```console
+Refused ~/code/app/node_modules: contains a Git repository at some-dep
+```
+
+With `--json`, the `refused` list has the `path`, `project`, `rule`, and `reason`
+of each one.
+
+npm, pnpm, and Yarn 1 do not keep `.git` when they install a package from Git,
+so such a `node_modules` is not refused for that reason.
+Swift Package Manager keeps Git checkouts and bare clones in `.build`,
+so Plonge refuses a `.build` directory for a package with remote dependencies.
+`swift package reset` removes it;
+`swift package clean` removes only the build output and keeps the checkouts.
 
 ## Project discovery and activity
 
@@ -201,9 +237,11 @@ Plonge then cannot detect busy projects through Paseo.
 Global caches are stored outside projects.
 Plonge uses cleanup commands from their tools,
 plus a built-in rule for Xcode build data on macOS.
-A rule for a cache without a cleanup command
+A rule for a cache without a cleanup command,
+or whose command also removes user state,
 can delete the contents of its path instead,
-as `zig-global-cache` does for Zig and `rubygems-cache` does for RubyGems.
+as `zig-global-cache` does for Zig, `rubygems-cache` does for RubyGems,
+and the Deno rules do.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -238,20 +276,28 @@ Neither kind guarantees that the whole reported size will be freed.
 | `go-modules` | clear | `go clean -modcache` |
 | `go-build` | clear | `go clean -cache` |
 | `npm` | clear | `npm cache clean --force` |
+| `bun` | clear | `bun pm cache prune` (Bun 1.4.4 or later) |
+| `deno-remote`, `deno-npm`, `deno-gen` | clear | Built-in deletion of the contents of Deno's module, npm, and TypeScript caches |
 | `yarn` | clear | `yarn cache clean` (Yarn 1) |
+| `yarn-berry` | clear | `yarn cache clean` (Yarn 2 and later) |
 | `pip` | clear | `pip cache purge` |
 | `homebrew` | clear | `brew cleanup --prune=all` |
 | `nuget-packages` | clear | `dotnet nuget locals global-packages --clear` |
 | `nuget-http-cache` | clear | `dotnet nuget locals http-cache --clear` |
+| `swiftpm-macos` | clear | `swift package purge-cache` (macOS) |
+| `swiftpm-linux` | clear | `swift package purge-cache` (Linux) |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
 | `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
-| `rubygems-cache` | clear | Built-in deletion of the `.gem` files in RubyGems' cache |
+| `rubygems-cache` | clear | Built-in deletion of the contents of RubyGems' gem cache |
 
 Plonge runs a tool through `mise exec --`
 when `mise which` finds it from your home directory,
 and otherwise from `PATH`, passing over mise's shims.
 It runs commands from your home directory, without a shell.
 A rule whose tool is missing is skipped and reported.
+The SwiftPM rules add `--scratch-path`, relative to the home directory,
+so that `purge-cache` writes its `.build` marker files
+in SwiftPM's cache directory and does not create `~/.build`.
 
 mise does not count a tracked config that it cannot load,
 so a prune can remove a version that such a config pins.
@@ -318,6 +364,9 @@ Plonge skips the rule when no line has the label,
 or when two lines with the label give different paths.
 A `delete_contents` rule can also use `path_label`;
 the labeled path gets the same checks as any other path.
+If the command prints a JSON object instead,
+set `path_field` to the name of the string field that holds the path,
+such as `path_field = "npmCache"` for `deno info --json`.
 Both `path` and `clean` commands must start with `tool`.
 Command strings are split at whitespace.
 Shell quoting, pipes, and variable expansion are not supported.
@@ -339,7 +388,8 @@ It skips the rule when the output is not one complete ZON struct,
 has text other than whitespace and comments after it,
 has a field twice, has no such field,
 or has a value that is not a nonempty string.
-A rule can have `path_label` or `path_zon_field`, not both.
+A rule can set only one of `path_label`, `path_field`, and `path_zon_field`,
+and only with a `path` command.
 
 When the `path` command prints the directory above the cache,
 `path_subdir` names the cache's relative path below it:
@@ -374,7 +424,35 @@ and again right before `--apply` runs the rule.
 The rule is skipped when the check fails
 or a line of its standard output or standard error matches `refuse`,
 a regular expression.
+`require` is also a regular expression;
+when it is set, the rule is skipped unless exactly one line of that output
+matches it.
+For example, `check = "yarn --version"` with `require = '^1\.'`
+limits a rule to Yarn 1.
 A skipped rule does not count toward the totals.
+
+A rule can add more checks, each with the same keys,
+in `[[global.checks]]` tables after the rule.
+The rule must have its own `check` first.
+Plonge runs the checks in order and skips the rule at the first one
+that does not pass:
+
+```toml
+[[global]]
+id = "yarn-berry"
+tool = "yarn"
+path = "yarn config get cacheFolder"
+clean = "yarn cache clean"
+kind = "clear"
+check = "yarn --version"
+require = '^[0-9]+\.[0-9]+\.[0-9]+'
+refuse = '^[01]\.[0-9]+\.[0-9]+'
+refuse_reason = "yarn --version did not report Yarn 2 or later"
+
+[[global.checks]]
+check = "yarn config get enableGlobalCache"
+require = '^true$'
+```
 
 A group named `path` in `refuse` limits matches to files that may still exist.
 For absolute paths and `~/` paths, missing files do not count.
@@ -439,7 +517,8 @@ The rule reaches only the Ruby that `gem` runs from your home directory;
 each Ruby version has its own gem directory.
 
 When your rule has the same `id` as a default, it replaces all of the default,
-so copy the default's `check` and `targets` to keep them.
+so copy the default's `check`, `require`, `refuse`, `checks`, and `targets`
+to keep them.
 For `mise-tools` with `tool = "mise"` and a `clean` command,
 `path` is used only when mise cannot report its installs directory.
 A `delete_contents` rule always uses its own `path`.

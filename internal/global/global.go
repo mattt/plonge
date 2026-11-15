@@ -4,6 +4,7 @@ package global
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,8 +39,8 @@ type Entry struct {
 	// although the rule has targets.
 	Note string `json:"note,omitempty"`
 
-	argv  []string
-	guard *guard
+	argv   []string
+	guards []*guard
 	// targeted is true when targetPaths, and not Path, gives Bytes.
 	targeted    bool
 	targetPaths []string
@@ -158,14 +159,14 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 	return filepath.Join(path, filepath.FromSlash(g.PathSubdir)), nil
 }
 
-// labeledPath returns the text after "label: " on the lines of out
-// that contain it, so that a prefix such as "info : " is allowed.
-// It fails when no line has the label, or when two lines give different paths,
-// because plonge cannot tell which one the tool means.
-// printedPath selects the path in the output of a rule's path command:
-// a ZON field, the text after a label, or the last line.
+// printedPath picks the path text from the output of a rule's path command:
+// the JSON field that path_field names, the ZON field that path_zon_field
+// names, the text after path_label, or by default the last line.
+// Rule validation allows at most one of these keys.
 func printedPath(out string, g rules.Global) (string, error) {
 	switch {
+	case g.PathField != "":
+		return jsonField(out, g.PathField)
 	case g.PathZONField != "":
 		return zonField(out, g.PathZONField)
 	case g.PathLabel != "":
@@ -175,6 +176,28 @@ func printedPath(out string, g rules.Global) (string, error) {
 	}
 }
 
+// jsonField returns the value of the string field name
+// in the JSON object that out holds.
+func jsonField(out, name string) (string, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &fields); err != nil {
+		return "", fmt.Errorf("printed invalid JSON: %w", err)
+	}
+	raw, ok := fields[name]
+	if !ok {
+		return "", fmt.Errorf("printed no %q field", name)
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf("printed a %q field that is not a string", name)
+	}
+	return value, nil
+}
+
+// labeledPath returns the text after "label: " on the lines of out
+// that contain it, so that a prefix such as "info : " is allowed.
+// It fails when no line has the label, or when two lines give different paths,
+// because plonge cannot tell which one the tool means.
 func labeledPath(out, label string) (string, error) {
 	var path string
 	for line := range strings.SplitSeq(out, "\n") {
@@ -226,7 +249,9 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 			e.argv, e.Command = command(t, g.Clean)
 		}
 		if e.Skipped == "" && g.Check != "" {
-			e.guard = newGuard(t, g)
+			for _, c := range g.CheckSpecs() {
+				e.guards = append(e.guards, newGuard(t, c))
+			}
 			r.passes(ctx, &e)
 		}
 		if e.Skipped == "" && g.Targets != "" {
