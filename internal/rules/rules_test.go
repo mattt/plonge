@@ -10,7 +10,7 @@ import (
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 19 || r.QuietHours != 24 {
+	if len(r.Names) != 21 || r.QuietHours != 24 {
 		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
@@ -128,12 +128,38 @@ func TestMatch(t *testing.T) {
 		{".zig-cache", nil, ""},
 		{"zig-cache", []string{"build.zig.zon"}, ""},
 		{"zig-out", []string{"build.zig"}, ""},
+		{"bin", nil, ""},
+		{"obj", []string{"package.json"}, ""},
 	}
 	for _, tt := range tests {
 		got := r.Match(tt.name, func(m string) bool { return slices.Contains(tt.siblings, m) })
 		if got != tt.want {
 			t.Errorf("Match(%q, %q) = %q, want %q", tt.name, tt.siblings, got, tt.want)
 		}
+	}
+}
+
+func TestBesidePatterns(t *testing.T) {
+	for _, m := range []string{"*.csproj", "a?.txt", "[ab].toml", `\*`} {
+		if !IsPattern(m) {
+			t.Errorf("IsPattern(%q) = false", m)
+		}
+	}
+	for _, m := range []string{"package.json", "Cargo.toml"} {
+		if IsPattern(m) {
+			t.Errorf("IsPattern(%q) = true", m)
+		}
+	}
+	r, err := Load(writeRules(t, "names = [\"out\"]\n[beside]\nout = [\"*.proj\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.Beside["out"], []string{"*.proj"}) {
+		t.Errorf("beside out = %q", r.Beside["out"])
+	}
+	_, err = Load(writeRules(t, "[beside]\nout = [\"[a\"]\n"))
+	if err == nil || !strings.Contains(err.Error(), "invalid project file pattern") {
+		t.Errorf("bad pattern: err = %v", err)
 	}
 }
 
@@ -196,14 +222,15 @@ os = "darwin"
 
 	base := "tool = \"t\"\npath = \"t p\"\nclean = \"t c\"\nkind = \"prune\"\n"
 	bad := map[string]string{
-		"no id":        "[[global]]\n" + base,
-		"bad kind":     "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"t c\"\nkind = \"nuke\"\n",
-		"other clean":  "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"rm -rf /\"\nkind = \"prune\"\n",
-		"other path":   "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"echo /x\"\nclean = \"t c\"\nkind = \"prune\"\n",
-		"empty tool":   "[[global]]\nid = \"a\"\ntool = \"\"\npath = \"/x\"\nclean = \"t c\"\nkind = \"prune\"\n",
-		"reserved id":  "[[global]]\nid = \"xcode-derived-data\"\n" + base,
-		"unknown key":  "[[global]]\nid = \"a\"\nnope = 1\n" + base,
-		"duplicate id": "[[global]]\nid = \"a\"\n" + base + "[[global]]\nid = \"a\"\n" + base,
+		"no id":             "[[global]]\n" + base,
+		"bad kind":          "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"t c\"\nkind = \"nuke\"\n",
+		"other clean":       "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t p\"\nclean = \"rm -rf /\"\nkind = \"prune\"\n",
+		"other path":        "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"echo /x\"\nclean = \"t c\"\nkind = \"prune\"\n",
+		"empty tool":        "[[global]]\nid = \"a\"\ntool = \"\"\npath = \"/x\"\nclean = \"t c\"\nkind = \"prune\"\n",
+		"reserved id":       "[[global]]\nid = \"xcode-derived-data\"\n" + base,
+		"unknown key":       "[[global]]\nid = \"a\"\nnope = 1\n" + base,
+		"label, fixed path": "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"/x\"\npath_label = \"p\"\nclean = \"t c\"\nkind = \"prune\"\n",
+		"duplicate id":      "[[global]]\nid = \"a\"\n" + base + "[[global]]\nid = \"a\"\n" + base,
 	}
 	for name, body := range bad {
 		if _, err := Load(writeRules(t, body)); err == nil {
@@ -237,6 +264,10 @@ func TestGlobalDeleteContentsValidation(t *testing.T) {
 	}
 	if _, err := parse("[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\nkind = \"clear\"\n", "test"); err == nil {
 		t.Error("a rule with neither clean nor delete_contents has no error")
+	}
+	labeled := "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"t where\"\npath_label = \"cache\"\ndelete_contents = true\nkind = \"clear\"\n"
+	if f, err := parse(labeled, "test"); err != nil || f.Global[0].PathLabel != "cache" {
+		t.Errorf("path_label with delete_contents: %+v, %v", f.Global, err)
 	}
 }
 
@@ -276,6 +307,7 @@ func TestGlobalCheckValidation(t *testing.T) {
 		{"check = \"t dry\"\nrefuse = \"(\"\n", "refuse:"},
 		{"check = \"t dry\"\ncheck_env = [\"NOVALUE\"]\n", "must be NAME=value"},
 		{"check = \"t dry\"\ncheck_env = [\"=x\"]\n", "must be NAME=value"},
+		{"path_label = \"x\"\n", "path_label must be one line and needs a path command"},
 		{"check = \"t dry\"\nrefuse = 'bad (?P<path>.+)$'\nrefuse_reason = \"why\"\ncheck_env = [\"A=1\"]\n", ""},
 	}
 	for _, c := range cases {

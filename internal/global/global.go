@@ -34,7 +34,8 @@ type Entry struct {
 	// Targets are the items that the rule's command would remove.
 	// When the rule lists them, Bytes is their size and not the size of Path.
 	Targets []string `json:"targets,omitempty"`
-	// Note says why Bytes is the size of Path although the rule has targets.
+	// Note says why Path is a fallback, or why Bytes is the size of Path
+	// although the rule has targets.
 	Note string `json:"note,omitempty"`
 
 	argv  []string
@@ -146,10 +147,38 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 		return zonPath(out, g.PathZONField, r.Home)
 	}
 	path := lastLine(out)
+	if g.PathLabel != "" {
+		if path, err = labeledPath(out, g.PathLabel); err != nil {
+			return "", err
+		}
+	}
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("printed %q, which is not an absolute path", path)
 	}
 	return filepath.Clean(path), nil
+}
+
+// labeledPath returns the text after "label: " on the lines of out
+// that contain it, so that a prefix such as "info : " is allowed.
+// It fails when no line has the label, or when two lines give different paths,
+// because plonge cannot tell which one the tool means.
+func labeledPath(out, label string) (string, error) {
+	var path string
+	for line := range strings.SplitSeq(out, "\n") {
+		_, p, ok := strings.Cut(line, label+": ")
+		if !ok {
+			continue
+		}
+		p = strings.TrimSpace(p)
+		if path != "" && filepath.Clean(p) != filepath.Clean(path) {
+			return "", fmt.Errorf("printed more than one path for %q", label+": ")
+		}
+		path = p
+	}
+	if path == "" {
+		return "", fmt.Errorf("printed no line with %q", label+": ")
+	}
+	return path, nil
 }
 
 // List resolves each rule for this operating system and measures its cache.
@@ -170,7 +199,7 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 			}
 			tools[g.Tool] = t
 		}
-		path, err := r.cachePath(ctx, g, t)
+		path, err := r.rulePath(ctx, &e, g, t)
 		e.Path = path
 		switch {
 		case err != nil:

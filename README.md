@@ -241,6 +241,8 @@ Neither kind guarantees that the whole reported size will be freed.
 | `yarn` | clear | `yarn cache clean` (Yarn 1) |
 | `pip` | clear | `pip cache purge` |
 | `homebrew` | clear | `brew cleanup --prune=all` |
+| `nuget-packages` | clear | `dotnet nuget locals global-packages --clear` |
+| `nuget-http-cache` | clear | `dotnet nuget locals http-cache --clear` |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
 | `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
 
@@ -261,12 +263,15 @@ that mise lists as removable,
 and the report names them.
 The names and sizes come from `mise ls --prunable --json`.
 That command and the dry run are separate calls; their results can change.
-If the list command fails, Plonge reports the size of the configured
-`installs` directory and adds a note.
-The default path is `~/.local/share/mise/installs`.
-If mise uses a different installs directory, override the rule
-as shown below to correct the fallback size and freed-space estimate.
-The cleanup command still uses mise's environment and settings.
+If the list command fails, Plonge reports the size of mise's installs
+directory and adds a note.
+Plonge also measures that directory to estimate the space freed.
+It uses `$MISE_INSTALLS_DIR`, or the `installs` directory
+in the data directory that `mise doctor --json` reports,
+so a custom `MISE_DATA_DIR` is followed.
+If mise cannot report its data directory,
+Plonge uses the rule's `path`, `~/.local/share/mise/installs` by default,
+and adds a note.
 
 On macOS, a built-in rule, `xcode-derived-data`, selects stale Xcode build data.
 Xcode has no prune command,
@@ -282,7 +287,7 @@ in `rules.toml`:
 [[global]]
 id = "mise-tools"
 tool = "mise"
-path = "~/data/mise/installs" # for a custom MISE_DATA_DIR
+path = "~/.local/share/mise/installs"
 clean = "mise prune --tools --yes"
 kind = "prune"
 check = "mise prune --tools --dry-run"
@@ -303,6 +308,15 @@ os = "darwin"
 `tool` is the command that must be available.
 `path` is a command that prints the cache's path,
 or a fixed path that starts with `/` or `~/`.
+Plonge uses the last line that the command prints.
+If the tool prints a label before the path, set `path_label`:
+with `path_label = "global-packages"`, Plonge uses the text after
+`global-packages: ` on the last line that contains it,
+so a line such as `info : global-packages: /path/` gives `/path/`.
+Plonge skips the rule when no line has the label,
+or when two lines with the label give different paths.
+A `delete_contents` rule can also use `path_label`;
+the labeled path gets the same checks as any other path.
 Both `path` and `clean` commands must start with `tool`.
 Command strings are split at whitespace.
 Shell quoting, pipes, and variable expansion are not supported.
@@ -397,6 +411,9 @@ It checks the path when it lists the rule and again right before it deletes.
 
 When your rule has the same `id` as a default, it replaces all of the default,
 so copy the default's `check` and `targets` to keep them.
+For `mise-tools` with `tool = "mise"` and a `clean` command,
+`path` is used only when mise cannot report its installs directory.
+A `delete_contents` rule always uses its own `path`.
 
 ## Disk
 
@@ -477,15 +494,19 @@ Plonge has these default rules:
 ```toml
 names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".parcel-cache",
          ".pytest_cache", ".ruff_cache", ".svelte-kit", ".turbo", ".venv",
-         "DerivedData", "__pycache__", "dist", "node_modules", "target", "venv"]
+         "DerivedData", "__pycache__", "bin", "dist", "node_modules", "obj",
+         "target", "venv"]
 quiet_hours = 24
 
 # Do not scan inside these directories.
 skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 
 # Match these names only when a listed project file is in the same directory.
+# A project file can be a pattern, such as "*.csproj".
 [beside]
+bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 dist = ["package.json"]
+obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
 ```
@@ -506,6 +527,11 @@ skip = ["third_party"]
 build = ["build.gradle", "build.gradle.kts"]
 dist = ["package.json", "pyproject.toml"]
 ```
+
+A `beside` project file can be a pattern, such as `*.csproj`,
+in the syntax of Go's [`filepath.Match`](https://pkg.go.dev/path/filepath#Match).
+A name that contains `*`, `?`, `[`, or `\` is a pattern;
+a pattern matches any entry in the same directory, as a literal name does.
 
 The scan never enters a directory in `skip`.
 This keeps out caches that are nested in a tool's own cache,

@@ -53,7 +53,12 @@ esac`, dir, log, dir)
 
 var uvRule = rules.Global{ID: "uv", Tool: "uv", Path: "uv cache dir", Clean: "uv cache prune", Kind: rules.KindPrune}
 
+// runner returns a Runner with a temporary home directory.
+// It clears mise's directory variables,
+// so that no test measures an inherited installs directory.
 func runner(t *testing.T) Runner {
+	t.Setenv("MISE_DATA_DIR", "")
+	t.Setenv("MISE_INSTALLS_DIR", "")
 	return Runner{Home: t.TempDir(), GOOS: "testos"}
 }
 
@@ -236,11 +241,54 @@ func TestFailuresAndFixedPath(t *testing.T) {
 	}
 }
 
+func TestPathLabel(t *testing.T) {
+	bin := fakeTools(t)
+	cache := cacheDir(t, 10)
+	addTool(t, bin, "labeled", fmt.Sprintf(`echo "Welcome"; echo "info : store: %s/"; echo "done"`, cache))
+	addTool(t, bin, "plain", fmt.Sprintf(`echo "store: %s"`, cache))
+	addTool(t, bin, "nolabel", fmt.Sprintf(`echo %q`, cache))
+	addTool(t, bin, "relative", `echo "store: cache"`)
+	addTool(t, bin, "twice", fmt.Sprintf(`echo "store: %s"; echo "store: %s/"; echo "store: /other"`, cache, cache))
+	addTool(t, bin, "same", fmt.Sprintf(`echo "store: %s"; echo "info : store: %s/"`, cache, cache))
+	r := runner(t)
+	entries := r.List(context.Background(), []rules.Global{
+		{ID: "labeled", Tool: "labeled", Path: "labeled list", PathLabel: "store", Clean: "labeled c", Kind: rules.KindClear},
+		{ID: "plain", Tool: "plain", Path: "plain list", PathLabel: "store", Clean: "plain c", Kind: rules.KindClear},
+		{ID: "nolabel", Tool: "nolabel", Path: "nolabel list", PathLabel: "store", Clean: "nolabel c", Kind: rules.KindClear},
+		{ID: "relative", Tool: "relative", Path: "relative list", PathLabel: "store", Clean: "relative c", Kind: rules.KindClear},
+		{ID: "twice", Tool: "twice", Path: "twice list", PathLabel: "store", Clean: "twice c", Kind: rules.KindClear},
+		{ID: "same", Tool: "same", Path: "same list", PathLabel: "store", Clean: "same c", Kind: rules.KindClear},
+	})
+	for _, e := range entries[:2] {
+		if e.Skipped != "" || e.Path != cache || e.Bytes < 10 {
+			t.Errorf("%s = %+v", e.ID, e)
+		}
+	}
+	if e := entries[2]; !strings.Contains(e.Skipped, `no line with "store: "`) || e.Command != "" {
+		t.Errorf("nolabel = %+v", e)
+	}
+	if e := entries[3]; !strings.Contains(e.Skipped, "not an absolute path") {
+		t.Errorf("relative = %+v", e)
+	}
+	if e := entries[4]; !strings.Contains(e.Skipped, "more than one path") || e.Command != "" {
+		t.Errorf("twice = %+v", e)
+	}
+	if e := entries[5]; e.Skipped != "" || e.Path != cache {
+		t.Errorf("same = %+v", e)
+	}
+}
+
 // TestDefaultRulesRunOnlyFakes checks the default rules with only fake tools on PATH.
 func TestDefaultRulesRunOnlyFakes(t *testing.T) {
 	bin := fakeTools(t)
 	cache := cacheDir(t, 10)
 	addTool(t, bin, "pip", fmt.Sprintf(`[ "$*" = "cache dir" ] && echo %q`, cache))
+	packages, http := cacheDir(t, 10), cacheDir(t, 10)
+	addTool(t, bin, "dotnet", fmt.Sprintf(`case "$*" in
+"nuget locals global-packages --list") echo "info : global-packages: %s/" ;;
+"nuget locals http-cache --list") echo "info : http-cache: %s" ;;
+*) exit 9 ;;
+esac`, packages, http))
 	r := runner(t)
 	got := map[string]Entry{}
 	for _, e := range r.List(context.Background(), rules.Default().Global) {
@@ -248,6 +296,14 @@ func TestDefaultRulesRunOnlyFakes(t *testing.T) {
 	}
 	if e := got["pip"]; e.Skipped != "" || e.Path != cache || e.Command != "pip cache purge" || e.Kind != "clear" {
 		t.Errorf("pip = %+v", e)
+	}
+	if e := got["nuget-packages"]; e.Skipped != "" || e.Path != packages ||
+		e.Command != "dotnet nuget locals global-packages --clear" || e.Kind != "clear" {
+		t.Errorf("nuget-packages = %+v", e)
+	}
+	if e := got["nuget-http-cache"]; e.Skipped != "" || e.Path != http ||
+		e.Command != "dotnet nuget locals http-cache --clear" || e.Kind != "clear" {
+		t.Errorf("nuget-http-cache = %+v", e)
 	}
 	if e := got["uv"]; e.Skipped != "tool not found" {
 		t.Errorf("uv = %+v", e)
