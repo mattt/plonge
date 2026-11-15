@@ -130,7 +130,18 @@ func command(t tool, cmd string) (argv []string, display string) {
 }
 
 // cachePath returns the cache directory of a rule.
+// An error from a path command says so; an error from path_env names the variable.
 func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, error) {
+	if g.PathEnv != "" {
+		if dir := os.Getenv(g.PathEnv); dir != "" {
+			// Cargo resolves a relative CARGO_HOME from its working directory,
+			// which differs between commands, so plonge does not guess.
+			if !filepath.IsAbs(dir) {
+				return "", fmt.Errorf("%s is %q, which is not an absolute path", g.PathEnv, dir)
+			}
+			return filepath.Join(dir, filepath.FromSlash(g.PathEnvSubdir)), nil
+		}
+	}
 	if rest, ok := strings.CutPrefix(g.Path, "~/"); ok {
 		return filepath.Join(r.Home, rest), nil
 	}
@@ -142,11 +153,11 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 	argv, _ := command(t, g.Path)
 	out, err := r.run(lookup, argv)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("path command failed: %w", err)
 	}
 	path, err := printedPath(out, g)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("path command failed: %w", err)
 	}
 	if g.PathZONField != "" && path != "" && !filepath.IsAbs(path) {
 		// Zig prints a path inside its working directory relative to it,
@@ -154,7 +165,7 @@ func (r Runner) cachePath(ctx context.Context, g rules.Global, t tool) (string, 
 		path = filepath.Join(r.Home, path)
 	}
 	if !filepath.IsAbs(path) {
-		return "", fmt.Errorf("printed %q, which is not an absolute path", path)
+		return "", fmt.Errorf("path command failed: printed %q, which is not an absolute path", path)
 	}
 	return filepath.Clean(path), nil
 }
@@ -239,7 +250,7 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 		e.Path = path
 		switch {
 		case err != nil:
-			e.Skipped = "path command failed: " + err.Error()
+			e.Skipped = err.Error()
 		case g.DeleteContents:
 			e.deleteContents = true
 			if e.Skipped = r.refuseDelete(ctx, path); e.Skipped == "" {

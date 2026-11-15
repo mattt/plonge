@@ -453,3 +453,43 @@ done
 		})
 	}
 }
+
+// TestPathEnvMustBeAbsolute skips a rule whose variable holds a relative path,
+// because the tool would resolve it from a working directory that plonge cannot know.
+func TestPathEnvMustBeAbsolute(t *testing.T) {
+	bin := fakeTools(t)
+	addTool(t, bin, "mytool", "exit 9")
+	t.Setenv("MYTOOL_HOME", "relative/home")
+	r := runner(t)
+	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool/cache", PathEnv: "MYTOOL_HOME",
+		PathEnvSubdir: "cache", Kind: rules.KindClear, DeleteContents: true}
+	entries := r.List(context.Background(), []rules.Global{rule})
+	e := entries[0]
+	if e.Skipped != `MYTOOL_HOME is "relative/home", which is not an absolute path` || e.Command != "" {
+		t.Errorf("entry = %+v", e)
+	}
+	res := r.Clean(context.Background(), entries, Options{Apply: true, IncludeClear: true})
+	if o := res.Outcomes[0]; o.Status != Skipped {
+		t.Errorf("outcome = %+v", o)
+	}
+}
+
+// TestPathEnvReplacesFixedPath uses the variable when it is set and not empty,
+// and the fixed path otherwise.
+func TestPathEnvReplacesFixedPath(t *testing.T) {
+	bin := fakeTools(t)
+	addTool(t, bin, "mytool", "exit 9")
+	r := runner(t)
+	rule := rules.Global{ID: "mycache", Tool: "mytool", Path: "~/.mytool/cache", PathEnv: "MYTOOL_HOME",
+		PathEnvSubdir: "cache", Clean: "mytool gc", Kind: rules.KindClear}
+	dir := t.TempDir()
+	for value, want := range map[string]string{
+		"":  filepath.Join(r.Home, ".mytool", "cache"),
+		dir: filepath.Join(dir, "cache"),
+	} {
+		t.Setenv("MYTOOL_HOME", value)
+		if e := r.List(context.Background(), []rules.Global{rule})[0]; e.Path != want || e.Skipped != "" {
+			t.Errorf("MYTOOL_HOME=%q: %+v", value, e)
+		}
+	}
+}

@@ -387,3 +387,33 @@ func TestGlobalPathKeysAreExclusive(t *testing.T) {
 		}
 	}
 }
+
+func TestGlobalPathEnvValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\ndelete_contents = true\nkind = \"clear\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c\"\n", ""},
+		{"path = \"/t/c\"\npath_env = \"T_HOME\"\n", ""},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c/d\"\n", ""},
+		{"path = \"t where\"\npath_env = \"T_HOME\"\n", "path_env needs a fixed path"},
+		{"path = \"~/.t/c\"\npath_env_subdir = \"c\"\n", "path_env_subdir needs path_env"},
+		{"path = \"~/.t/c\"\npath_env = \"T-HOME\"\n", "is not an environment variable name"},
+		{"path = \"~/.t/c\"\npath_env = \"1HOME\"\n", "is not an environment variable name"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"../c\"\n", "must be a relative path inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"/c\"\n", "must be a relative path inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c/..\"\n", "must be a relative path inside"},
+	}
+	for _, c := range cases {
+		_, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%q: %v", c.extra, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
+		}
+	}
+}

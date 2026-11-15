@@ -389,6 +389,25 @@ or has a value that is not a nonempty string.
 A rule can set only one of `path_label`, `path_field`, and `path_zon_field`,
 and only with a `path` command.
 
+A fixed `path` can give way to an environment variable
+that holds the tool's directory.
+`path_env` names the variable,
+and `path_env_subdir` is a relative path inside the directory it names:
+
+```toml
+path = "~/.cargo/registry"
+path_env = "CARGO_HOME"
+path_env_subdir = "registry"
+```
+
+When the variable is set and not empty, Plonge uses its value
+joined with `path_env_subdir`, here `$CARGO_HOME/registry`;
+otherwise it uses `path`.
+Plonge reads the variable from its own environment,
+not from the environment that `mise exec` gives the tool.
+It skips the rule when the value is not an absolute path.
+`path_env_subdir` cannot start with `/` or leave the directory with `..`.
+
 A rule can name a `check`, a command that must not change anything:
 
 ```toml
@@ -495,7 +514,7 @@ so copy the default's `check`, `require`, `refuse`, `checks`, and `targets`
 to keep them.
 For `mise-tools` with `tool = "mise"` and a `clean` command,
 `path` is used only when mise cannot report its installs directory.
-A `delete_contents` rule always uses its own `path`.
+A `delete_contents` rule always uses its own `path`, or its `path_env`.
 
 ## Disk
 
