@@ -239,15 +239,14 @@ func TestMiseFreedBytesUseTheWholeFolder(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(version, "blob"), make([]byte, 60_000), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	bin := fakeTools(t)
-	addTool(t, bin, "mise", fmt.Sprintf(`case "$*" in
+	fakeMiseCases(t, fmt.Sprintf(`%s
 "ls --prunable --json") echo '{"bun":[{"version":"1.3.10","install_path":%q}]}' ;;
-"prune --tools --yes") /bin/rm -r %q ;;
-esac`, version, version))
+"prune --tools --yes") /bin/rm -r %q ;;`, fakeMiseDoctor, version, version))
+	useMiseData(t, r)
 
 	entries := r.List(ctx, []rules.Global{miseToolsRule(t)})
 	res := r.Clean(ctx, entries, Options{Apply: true})
-	if o := res.Outcomes[0]; o.Status != Ran || o.FreedBytes < 60_000 {
+	if o := res.Outcomes[0]; o.Status != Ran || o.Note != "" || o.FreedBytes < 60_000 {
 		t.Errorf("outcome = %+v", o)
 	}
 }
