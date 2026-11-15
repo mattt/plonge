@@ -94,6 +94,23 @@ func (p swiftPackage) writeResolved(t *testing.T, location, revision string) {
 `, location, revision))
 }
 
+// useSpacedOrigin points the bare clone's origin at a separate repository
+// whose path is the upstream's path with a final space.
+func (p swiftPackage) useSpacedOrigin(t *testing.T) {
+	t.Helper()
+	spaced := p.upstream + " "
+	run(t, p.root, "clone", "-q", "--bare", p.upstream, spaced)
+	run(t, p.mirror, "config", "remote.origin.url", spaced)
+}
+
+// useRelativeLocation sets the pin's location and the bare clone's origin
+// to the same relative path.
+func (p swiftPackage) useRelativeLocation(t *testing.T) {
+	t.Helper()
+	p.writeResolved(t, "dep", p.pinned)
+	run(t, p.mirror, "config", "remote.origin.url", "dep")
+}
+
 // localCommit makes a commit in the checkout and leaves HEAD at the pin,
 // and returns the new commit.
 func (p swiftPackage) localCommit(t *testing.T) string {
@@ -294,6 +311,16 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 			reason: "contains a Git directory at repositories/dep-95d00fdd whose origin no pin in Package.resolved names",
 		},
 		{
+			name:   "origin at a separate repository whose path ends in a space",
+			setup:  func(t *testing.T, p swiftPackage) { p.useSpacedOrigin(t) },
+			reason: "contains a Git directory at repositories/dep-95d00fdd whose origin no pin in Package.resolved names",
+		},
+		{
+			name:   "equal relative paths",
+			setup:  func(t *testing.T, p swiftPackage) { p.useRelativeLocation(t) },
+			reason: "contains a Git directory at repositories/dep-95d00fdd whose origin no pin in Package.resolved names",
+		},
+		{
 			name: "bare clone that is not a mirror",
 			setup: func(t *testing.T, p swiftPackage) {
 				run(t, p.mirror, "config", "--unset", "remote.origin.mirror")
@@ -423,6 +450,16 @@ func TestVerifySwiftPMCheckoutChange(t *testing.T) {
 			reason: "contains a Git directory at repositories/dep-95d00fdd whose origin no pin in Package.resolved names",
 		},
 		{
+			name:   "origin moved to a separate repository whose path ends in a space",
+			change: func(t *testing.T, p swiftPackage) { p.useSpacedOrigin(t) },
+			reason: "contains a Git directory at repositories/dep-95d00fdd whose origin no pin in Package.resolved names",
+		},
+		{
+			name:   "pin and origin changed to equal relative paths",
+			change: func(t *testing.T, p swiftPackage) { p.useRelativeLocation(t) },
+			reason: "contains a Git directory at repositories/dep-95d00fdd whose origin no pin in Package.resolved names",
+		},
+		{
 			name: "Package.swift removed",
 			change: func(t *testing.T, p swiftPackage) {
 				if err := os.Remove(filepath.Join(p.root, "Package.swift")); err != nil {
@@ -484,6 +521,10 @@ func TestSameLocation(t *testing.T) {
 		{dep, dep + ".git"},
 		{dep, "file://" + dep},
 		{dep, filepath.Join(tmp, "missing")},
+		{dep, dep + " "},
+		{"dep", "dep"},
+		{"../dep", "../dep"},
+		{"https://github.com/apple/swift-nio", "https://github.com/apple/swift-nio "},
 		{"", ""},
 	}
 	// On a case-insensitive volume, Dep and dep are the same directory.

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -161,11 +162,11 @@ func checkMirror(ctx context.Context, gitDir string, pins map[string]pin) (mirro
 	if err != nil || strings.TrimSpace(string(out)) != "true" {
 		return mirror{}, "that is not a mirror of its origin"
 	}
-	out, _, err = g("config", "--get", "remote.origin.url")
+	url, err := originURL(g)
 	if err != nil {
 		return fail(err)
 	}
-	if !pinned(strings.TrimSpace(string(out)), pins) {
+	if !pinned(url, pins) {
 		return mirror{}, "whose origin no pin in Package.resolved names"
 	}
 	out, _, err = g("rev-list", "-n", "1", "--reflog", "--not", "--all")
@@ -192,7 +193,7 @@ func originReason(g func(args ...string) ([]byte, int, error)) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(string(out)) != "origin" {
+	if string(out) != "origin\n" {
 		return "that does not have exactly one remote, origin", nil
 	}
 	return "", nil
@@ -224,11 +225,43 @@ func pinned(url string, pins map[string]pin) bool {
 	return false
 }
 
+// originURL returns the one URL of the origin remote, byte for byte.
+// It is an error when origin has no URL or more than one.
+func originURL(g func(args ...string) ([]byte, int, error)) (string, error) {
+	out, _, err := g("config", "-z", "--get-all", "remote.origin.url")
+	if err != nil {
+		return "", err
+	}
+	values := strings.Split(string(out), "\x00")
+	if len(values) != 2 || values[1] != "" {
+		return "", errors.New("remote.origin.url must have exactly one value")
+	}
+	return values[0], nil
+}
+
+// schemeURL matches a URL with a scheme, such as https:// or file://.
+var schemeURL = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://`)
+
+// isRemoteURL reports whether s is a URL with a scheme,
+// or an scp-style address such as git@host:path,
+// which Git recognizes by a colon before the first slash.
+func isRemoteURL(s string) bool {
+	if schemeURL.MatchString(s) {
+		return true
+	}
+	colon := strings.IndexByte(s, ':')
+	slash := strings.IndexByte(s, '/')
+	return colon > 0 && (slash < 0 || colon < slash)
+}
+
 // sameLocation reports whether a clone's origin URL is a pin's location.
 // Two absolute paths must resolve, through symlinks, to the same directory.
-// Anything else must be equal, except for one trailing slash on either.
-// Any other difference, such as case or a .git suffix, can name
-// a different repository, so plonge refuses the clone rather than delete it.
+// Two remote URLs must be equal, except for one trailing slash on either.
+// Any other pair fails, including a relative path,
+// whose directory depends on where Git runs.
+// Any other difference, such as case, white space, or a .git suffix,
+// can name a different repository, so plonge refuses the clone
+// rather than delete it.
 func sameLocation(url, location string) bool {
 	if filepath.IsAbs(url) && filepath.IsAbs(location) {
 		a, err := filepath.EvalSymlinks(url)
@@ -246,7 +279,10 @@ func sameLocation(url, location string) bool {
 		bi, err := os.Stat(b)
 		return err == nil && os.SameFile(ai, bi)
 	}
-	return url != "" && strings.TrimSuffix(url, "/") == strings.TrimSuffix(location, "/")
+	if !isRemoteURL(url) || !isRemoteURL(location) {
+		return false
+	}
+	return strings.TrimSuffix(url, "/") == strings.TrimSuffix(location, "/")
 }
 
 // checkCheckout returns why the checkout at dir has work that
@@ -310,12 +346,14 @@ func checkCheckout(ctx context.Context, dir, revision string, mirrors []mirror) 
 	} else if why != "" {
 		return why
 	}
-	out, _, err = g("config", "--get", "remote.origin.url")
+	url, err := originURL(g)
 	if err != nil {
 		return fail(err)
 	}
 	var m *mirror
-	if real, err := filepath.EvalSymlinks(strings.TrimSpace(string(out))); err == nil {
+	if !filepath.IsAbs(url) {
+		// EvalSymlinks would resolve a relative path from plonge's directory.
+	} else if real, err := filepath.EvalSymlinks(url); err == nil {
 		for i := range mirrors {
 			if mirrors[i].real == real {
 				m = &mirrors[i]
