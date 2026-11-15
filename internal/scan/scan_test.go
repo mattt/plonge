@@ -602,3 +602,117 @@ func TestMeasureRefusesUnreadableDirectory(t *testing.T) {
 		t.Errorf("refused %+v", roots[0].Refused)
 	}
 }
+
+func TestMeasureRefusesInsidePaths(t *testing.T) {
+	isolateGit(t)
+	tests := []struct {
+		name   string
+		setup  func(t *testing.T, cache string)
+		reason string // empty when the cache stays a candidate
+	}{
+		{
+			name:   "matching directory",
+			setup:  func(t *testing.T, cache string) { write(t, filepath.Join(cache, "prod", "rel", "app", "COOKIE"), "x") },
+			reason: `contains prod/rel, which refuse_inside "*/rel" protects`,
+		},
+		{
+			name:   "matching file",
+			setup:  func(t *testing.T, cache string) { write(t, filepath.Join(cache, "dev", "rel"), "") },
+			reason: `contains dev/rel, which refuse_inside "*/rel" protects`,
+		},
+		{
+			name:  "no match at that depth",
+			setup: func(t *testing.T, cache string) { write(t, filepath.Join(cache, "rel", "x"), "") },
+		},
+		{
+			name: "symlinked directory is not followed",
+			setup: func(t *testing.T, cache string) {
+				outside := t.TempDir()
+				write(t, filepath.Join(outside, "rel", "x"), "")
+				write(t, filepath.Join(cache, "dev", "lib", "x"), "")
+				if err := os.Symlink(outside, filepath.Join(cache, "linked")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := rules.Default()
+			r.Names = append(r.Names, "out")
+			r.RefuseInside["out"] = []string{"*/rel"}
+			root := filepath.Join(t.TempDir(), "repo")
+			newRepo(t, root, map[string]string{".gitignore": "out/\nnode_modules/\n"})
+			write(t, filepath.Join(root, "node_modules", "dev", "rel"), "") // another rule
+			cache := filepath.Join(root, "out")
+			write(t, filepath.Join(cache, "dev", "lib", "app.beam"), "")
+			tt.setup(t, cache)
+
+			roots := []Root{Detect(context.Background(), root, r)}
+			Measure(roots)
+			got := roots[0]
+			if tt.reason == "" {
+				if len(got.Refused) != 0 || len(got.Candidates) != 2 {
+					t.Fatalf("refused %+v, candidates %+v", got.Refused, got.Candidates)
+				}
+				return
+			}
+			if len(got.Refused) != 1 || got.Refused[0].Path != cache || got.Refused[0].Reason != tt.reason {
+				t.Fatalf("refused %+v, want %s: %s", got.Refused, cache, tt.reason)
+			}
+			if len(got.Candidates) != 1 || got.Candidates[0].Path != filepath.Join(root, "node_modules") {
+				t.Errorf("candidates %+v, want only node_modules", got.Candidates)
+			}
+		})
+	}
+}
+
+func TestMeasureRefusesUnreadableInsidePath(t *testing.T) {
+	isolateGit(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root can read every directory")
+	}
+	r := rules.Default()
+	r.Names = append(r.Names, "out")
+	r.RefuseInside["out"] = []string{"*/rel"}
+	root := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{".gitignore": "out/\n"})
+	locked := filepath.Join(root, "out", "prod")
+	write(t, filepath.Join(locked, "x"), "")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	roots := []Root{Detect(context.Background(), root, r)}
+	Measure(roots)
+	if len(roots[0].Refused) != 1 || !strings.Contains(roots[0].Refused[0].Reason, `cannot check for */rel`) {
+		t.Errorf("refused %+v", roots[0].Refused)
+	}
+}
+
+func TestVerifyRefusesInsidePath(t *testing.T) {
+	isolateGit(t)
+	r := rules.Default()
+	r.Names = append(r.Names, "out")
+	r.RefuseInside["out"] = []string{"*/rel"}
+	root := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{".gitignore": "out/\n"})
+	write(t, filepath.Join(root, "out", "dev", "lib", "app.beam"), "")
+
+	roots := []Root{Detect(context.Background(), root, r)}
+	Measure(roots)
+	if len(roots[0].Candidates) != 1 {
+		t.Fatalf("candidates %+v", roots[0].Candidates)
+	}
+	c := roots[0].Candidates[0]
+	if reason, err := Verify(context.Background(), root, c); err != nil || reason != "" {
+		t.Fatalf("before release: reason %q, err %v", reason, err)
+	}
+	// A release built after the scan must still stop the deletion.
+	write(t, filepath.Join(root, "out", "prod", "rel", "app", "COOKIE"), "x")
+	reason, err := Verify(context.Background(), root, c)
+	if err != nil || reason != `contains prod/rel, which refuse_inside "*/rel" protects` {
+		t.Errorf("after release: reason %q, err %v", reason, err)
+	}
+}

@@ -68,7 +68,8 @@ const scanUsage = `Usage: plonge scan [--root <dir>]... [--no-mise] [--global] [
 Scan reports caches in projects recorded by mise and in each --root directory.
 A root is a directory to scan; it must be in a Git work tree.
 A root outside one is skipped, but the roots inside it are still scanned.
-Scan refuses a cache that is or holds a Git repository, and lists it.
+Scan refuses a cache that is or holds a Git repository,
+or that holds an entry that its rule's refuse_inside paths protect, and lists it.
 Scan deletes nothing. With --global, it also reports global caches.
 
 Options:

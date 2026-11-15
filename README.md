@@ -8,7 +8,8 @@ mise en place is the preparation, and the plonge is where the dishes get done.
 `plonge scan` and `plonge clean` without `--apply` delete nothing.
 `plonge clean --apply` deletes selected project cache directories
 only if Git ignores them, they contain no tracked files,
-and they are not and do not hold a Git repository.
+they are not and do not hold a Git repository,
+and they hold nothing that their rule protects.
 It excludes active and busy projects by default.
 `plonge clean --global --apply` instead runs global cleanup actions,
 which do not use those project checks.
@@ -74,7 +75,8 @@ A cache is a directory whose name matches a rule,
 such as `node_modules` or `.venv`.
 Plonge reports it only if Git ignores it and it contains no tracked files.
 It refuses a cache that is or holds a Git repository,
-as [described below](#caches-that-hold-a-git-repository).
+as [described below](#caches-that-hold-a-git-repository),
+and a cache that holds an entry that its rule protects.
 A rule defines a cache name, any required project file,
 or a global cleanup action.
 
@@ -110,7 +112,8 @@ You can repeat `--root`; `--no-mise` requires at least one root.
 Before each deletion, Plonge checks that the path is still a directory,
 is not a symlink, is inside its root,
 is ignored by Git, contains no tracked files,
-and is not and does not hold a Git repository.
+is not and does not hold a Git repository,
+and holds no entry that its rule protects.
 It asks Paseo again once per project, before the first deletion there,
 and skips the project's caches if Paseo now reports an agent there
 or if Plonge cannot read Paseo's status.
@@ -577,6 +580,29 @@ build = ["build.gradle", "build.gradle.kts", "pyproject.toml", "setup.py"]
 
 This `build` entry adds Gradle projects.
 It replaces the default entry, so it lists the default project files too.
+
+A `refuse_inside` entry lists paths, relative to a matching directory,
+that hold data a rebuild cannot restore:
+
+```toml
+[refuse_inside]
+_build = ["*/rel"]
+```
+
+Plonge refuses a match that has an entry, a file or a directory,
+at one of these paths, and lists it with the path that it found:
+
+```console
+Refused ~/code/app/_build: contains prod/rel, which refuse_inside "*/rel" protects
+```
+
+Plonge checks when it measures the cache and again right before deletion.
+Separate the elements of a path with `/`.
+Each element is a name or a [`filepath.Match`](https://pkg.go.dev/path/filepath#Match) pattern,
+and cannot be empty, `.`, or `..`, or contain `\`.
+Plonge does not follow a symlink to a directory on the way to a path,
+and it refuses the match when it cannot read a directory on the way.
+A `refuse_inside` entry in your file replaces the default entry for that name.
 
 A `beside` project file can be a pattern, such as `*.csproj`,
 in the syntax of Go's [`filepath.Match`](https://pkg.go.dev/path/filepath#Match).

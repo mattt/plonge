@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -172,6 +173,30 @@ func TestBesidePatterns(t *testing.T) {
 	_, err = Load(writeRules(t, "[beside]\nout = [\"[a\"]\n"))
 	if err == nil || !strings.Contains(err.Error(), "invalid project file pattern") {
 		t.Errorf("bad pattern: err = %v", err)
+	}
+}
+
+func TestRefuseInside(t *testing.T) {
+	r, err := Load(writeRules(t, "names = [\"out\"]\n[refuse_inside]\nout = [\"*/rel\", \"keep\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(r.RefuseInside["out"], []string{"*/rel", "keep"}) {
+		t.Errorf("refuse_inside out = %q", r.RefuseInside["out"])
+	}
+	for _, p := range []string{"rel", "*/rel", "a/b/c", "[ab]*/x"} {
+		if !ValidInsidePath(p) {
+			t.Errorf("ValidInsidePath(%q) = false", p)
+		}
+	}
+	for _, p := range []string{"", "/rel", "rel/", "a//b", "./rel", "../rel", "a/../b", "[a/rel", `a\b`} {
+		if ValidInsidePath(p) {
+			t.Errorf("ValidInsidePath(%q) = true", p)
+		}
+		body := "[refuse_inside]\nout = [" + strconv.Quote(p) + "]\n"
+		if _, err := Load(writeRules(t, body)); err == nil || !strings.Contains(err.Error(), "refuse_inside out: invalid path") {
+			t.Errorf("Load(%q): err = %v", p, err)
+		}
 	}
 }
 

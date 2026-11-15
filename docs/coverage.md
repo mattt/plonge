@@ -165,7 +165,8 @@ Project cache names are exact directory names.
 Every match must be inside a scanned root, ignored by Git,
 and contain no tracked files.
 Plonge refuses a match that is or holds a Git repository at any depth,
-as the [README](../README.md#caches-that-hold-a-git-repository) describes.
+as the [README](../README.md#caches-that-hold-a-git-repository) describes,
+and a match that holds an entry at one of its rule's `refuse_inside` paths.
 A listed project file must be in the cache directory's parent directory.
 A project file written as a pattern, such as `*.csproj`, matches any name of that form.
 No project file is required unless the table names one.

@@ -4,6 +4,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 type inode struct{ dev, ino uint64 }
@@ -26,7 +28,8 @@ func Sizes(dirs []string) []int64 {
 }
 
 // Measure sizes the candidates of each root and refuses the ones
-// that hold a Git repository, in the same walk.
+// that hold a Git repository, in the same walk,
+// or that hold an entry at a refuse_inside path.
 // It moves a refused candidate from Candidates to Refused,
 // and returns one size slice per root, in the order of the remaining candidates.
 func Measure(roots []Root) [][]int64 {
@@ -41,7 +44,9 @@ func Measure(roots []Root) [][]int64 {
 	reasons := make([]string, len(jobs))
 	parallel(len(jobs), func(k int) {
 		c := roots[jobs[k].root].Candidates[jobs[k].cand]
-		bytes[k], reasons[k] = walkCache(c.Path, true, true)
+		if reasons[k] = insideRefusal(c); reasons[k] == "" {
+			bytes[k], reasons[k] = walkCache(c.Path, true, true)
+		}
 	})
 	sizes := make([][]int64, len(roots))
 	k := 0
@@ -67,6 +72,48 @@ func Measure(roots []Root) [][]int64 {
 func gitRefusal(dir string) string {
 	_, reason := walkCache(dir, false, true)
 	return reason
+}
+
+// insideRefusal returns why c must not be deleted because it holds an entry
+// at one of its refuse_inside paths, or "" when it holds none.
+// It does not follow symlinks to directories, and it refuses c
+// when it cannot read a directory that a path passes through.
+func insideRefusal(c Candidate) string {
+	for _, p := range c.refuse {
+		found, err := matchInside(c.Path, strings.Split(p, "/"))
+		if err != nil {
+			return "cannot check for " + p + ": " + err.Error()
+		}
+		if found != "" {
+			return "contains " + found + ", which refuse_inside " + strconv.Quote(p) + " protects"
+		}
+	}
+	return ""
+}
+
+// matchInside returns the first entry below dir, as a slash-separated path
+// relative to dir, whose path elements match elems, or "" when none does.
+func matchInside(dir string, elems []string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if ok, _ := filepath.Match(elems[0], e.Name()); !ok {
+			continue
+		}
+		if len(elems) == 1 {
+			return e.Name(), nil
+		}
+		if !e.IsDir() {
+			continue
+		}
+		rest, err := matchInside(filepath.Join(dir, e.Name()), elems[1:])
+		if err != nil || rest != "" {
+			return e.Name() + "/" + rest, err
+		}
+	}
+	return "", nil
 }
 
 // walkCache walks dir without following symlinks.
