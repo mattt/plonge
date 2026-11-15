@@ -345,3 +345,15 @@ func TestInRepository(t *testing.T) {
 		t.Error("no error for a missing directory")
 	}
 }
+
+func TestInRepositoryIgnoresInheritedDiscoveryLimits(t *testing.T) {
+	isolateGit(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, repo, map[string]string{"cache/tracked": "x"})
+	t.Setenv("GIT_CEILING_DIRECTORIES", repo)
+	t.Setenv("GIT_DISCOVERY_ACROSS_FILESYSTEM", "0")
+	got, err := InRepository(context.Background(), filepath.Join(repo, "cache"))
+	if err != nil || !got {
+		t.Errorf("InRepository = %v, %v; want true", got, err)
+	}
+}

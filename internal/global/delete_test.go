@@ -237,3 +237,20 @@ func TestDeleteContentsRefusesWithoutHome(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteContentsIgnoresInheritedGitCeiling(t *testing.T) {
+	r, tmp, _, _ := deleteSetup(t)
+	repo := filepath.Join(tmp, "repo")
+	addFile(t, filepath.Join(repo, "cache", "tracked"))
+	for _, args := range [][]string{{"init", "-q"}, {"add", "."}, {"-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	t.Setenv("GIT_CEILING_DIRECTORIES", repo)
+	if got := r.refuseDelete(context.Background(), filepath.Join(repo, "cache")); got != "path is in a Git repository" {
+		t.Errorf("reason = %q", got)
+	}
+}

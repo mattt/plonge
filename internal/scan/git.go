@@ -10,7 +10,9 @@ import (
 )
 
 // git runs a Git command in dir and returns its standard output.
-// It removes variables that would point Git at a different repository,
+// It removes variables that would point Git at a different repository
+// or stop it from finding the repository that holds dir,
+// lets Git search across filesystems,
 // and sets GIT_OPTIONAL_LOCKS=0 so that Git does not rewrite the index.
 func git(ctx context.Context, dir string, stdin []byte, args ...string) ([]byte, int, error) {
 	return gitWithEnv(ctx, dir, stdin, nil, args...)
@@ -58,12 +60,13 @@ func gitEnv() []string {
 		case "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
 			"GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE",
 			"GIT_LITERAL_PATHSPECS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS",
-			"GIT_ICASE_PATHSPECS", "GIT_OPTIONAL_LOCKS":
+			"GIT_ICASE_PATHSPECS", "GIT_OPTIONAL_LOCKS",
+			"GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM":
 			continue
 		}
 		env = append(env, kv)
 	}
-	return append(env, "GIT_OPTIONAL_LOCKS=0")
+	return append(env, "GIT_OPTIONAL_LOCKS=0", "GIT_DISCOVERY_ACROSS_FILESYSTEM=1")
 }
 
 // splitNUL splits NUL-terminated Git output.
