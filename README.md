@@ -245,7 +245,7 @@ A rule for a cache without a cleanup command,
 or whose command also removes user state,
 can delete the contents of its path instead,
 as `zig-global-cache` does for Zig,
-and as the Deno, Cargo, `hex-packages`, and `rebar3-hex` rules do.
+and as the Deno, Cargo, Gradle, Maven, `hex-packages`, and `rebar3-hex` rules do.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -295,6 +295,8 @@ Neither kind guarantees that the whole reported size will be freed.
 | `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
 | `hex-packages` | clear | Built-in deletion of the contents of `~/.hex/packages` |
 | `rebar3-hex` | clear | Built-in deletion of the contents of `~/.cache/rebar3/hex` |
+| `gradle-caches` | clear | Built-in deletion of the contents of `caches` in the Gradle user home |
+| `maven-repository` | clear | Built-in deletion of the contents of `~/.m2/repository`, refused when it holds an artifact that `mvn install` put there |
 
 Plonge runs a tool through `mise exec --`
 when `mise which` finds it from your home directory,
@@ -515,12 +517,24 @@ They delete only the package folders,
 and keep the Hex configuration and the `rebar3` that `rebar3 local install` makes.
 A package cache moved by `HEX_HOME`, `MIX_XDG`, or `REBAR_CACHE_DIR`
 is not covered; replace the rule with that `path` to use it.
-Plonge makes read-only entries writable first and does not follow symlinks.
+The default `gradle-caches` rule deletes the contents of `caches`
+in `$GRADLE_USER_HOME`, or in `~/.gradle` when the variable is not set.
+It keeps `gradle.properties`, `init.d`, the wrapper's Gradle distributions,
+and provisioned JDKs.
+The default `maven-repository` rule deletes the contents of `~/.m2/repository`
+and keeps `settings.xml` and the other files in `~/.m2`.
+Maven has no command that prints the repository's path without a plugin,
+so a repository moved by `localRepository` or `maven.repo.local`
+is not covered; replace the rule with that `path` to use it.
+Both rules need `java`, not `gradle` or `mvn`,
+because many projects run these tools only through `gradlew` or `mvnw`.
+A build that runs at the same time can fail.
+
 A `delete_contents` rule can list `refuse_names`,
 names of files or directories that hold data a download cannot restore:
 
 ```toml
-refuse_names = ["keep.xml"]
+refuse_names = ["maven-metadata-local.xml"]
 ```
 
 Plonge skips the rule when its path holds an entry with one of these names
@@ -528,9 +542,16 @@ at any depth, and names the first one that it finds.
 It also skips the rule when it cannot read a directory in the path,
 which could hide one.
 It checks when it lists the rule and again right before it deletes.
+`mvn install` and `install:install-file` write `maven-metadata-local.xml`
+for each artifact that they put in the repository,
+and an artifact from `install-file` may exist nowhere else,
+so `maven-repository` uses `refuse_names` and Plonge refuses that repository.
+To clean it, delete the installed artifacts that you can build again,
+or replace the rule without `refuse_names`.
 
 A `delete_contents` rule must have kind `clear`,
 so it runs only with `clean --global --include-clear --apply`.
+Plonge makes read-only entries writable first and does not follow symlinks.
 It cannot have `clean` or `targets`; it can have a `check`.
 `refuse_names` is allowed only on a `delete_contents` rule.
 The action reads `delete contents of <path> (built in)`.

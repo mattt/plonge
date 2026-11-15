@@ -526,6 +526,190 @@ func TestCargoRulesFollowCargoHome(t *testing.T) {
 	}
 }
 
+// TestGradleCachesFollowGradleUserHome resolves gradle-caches from
+// GRADLE_USER_HOME, or from ~/.gradle when it is not set, deletes only the
+// contents of caches, and keeps the configuration beside it.
+func TestGradleCachesFollowGradleUserHome(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  func(r Runner, tmp string) (userHome, value string)
+	}{
+		{"default", func(r Runner, _ string) (string, string) { return filepath.Join(r.Home, ".gradle"), "" }},
+		{"GRADLE_USER_HOME", func(_ Runner, tmp string) (string, string) {
+			dir := filepath.Join(tmp, "gradle-home")
+			return dir, dir
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, tmp, _, _ := deleteSetup(t)
+			bin := filepath.SplitList(os.Getenv("PATH"))[0]
+			log := filepath.Join(tmp, "java.log")
+			addTool(t, bin, "java", fmt.Sprintf(`echo "$*" >> %q`, log))
+			userHome, value := tc.env(r, tmp)
+			t.Setenv("GRADLE_USER_HOME", value)
+			// The default user home must not be touched when the variable moves it.
+			other := filepath.Join(r.Home, ".gradle", "caches", "modules-2", "x.jar")
+			if value != "" {
+				addFile(t, other)
+			}
+			kept := []string{
+				filepath.Join(userHome, "gradle.properties"),
+				filepath.Join(userHome, "init.d", "cleanup.gradle"),
+				filepath.Join(userHome, "wrapper", "dists", "gradle-9.9.1-bin", "x.zip"),
+				filepath.Join(userHome, "jdks", "jdk-21", "release"),
+			}
+			for _, p := range kept {
+				addFile(t, p)
+			}
+			caches := filepath.Join(userHome, "caches")
+			addFile(t, filepath.Join(caches, "modules-2", "files-2.1", "g", "a", "1.0", "h", "a-1.0.jar"))
+			addFile(t, filepath.Join(caches, "9.9.1", "kotlin-dsl", "x"))
+			ctx := context.Background()
+			entries := r.List(ctx, []rules.Global{defaultRule(t, "gradle-caches")})
+			if e := entries[0]; e.Skipped != "" || e.Path != caches || e.Kind != rules.KindClear ||
+				e.Command != r.deleteAction(caches) {
+				t.Fatalf("entry = %+v", e)
+			}
+			if res := r.Clean(ctx, entries, Options{Apply: true}); res.Outcomes[0].Status != Skipped {
+				t.Errorf("without --include-clear: %+v", res)
+			}
+			res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+			if o := res.Outcomes[0]; o.Status != Ran {
+				t.Errorf("outcome = %+v", o)
+			}
+			if ents, err := os.ReadDir(caches); err != nil || len(ents) != 0 {
+				t.Errorf("caches entries = %v, err = %v", ents, err)
+			}
+			if value != "" {
+				kept = append(kept, other)
+			}
+			for _, p := range kept {
+				if _, err := os.Stat(p); err != nil {
+					t.Errorf("%s: %v", p, err)
+				}
+			}
+			if _, err := os.Stat(log); err == nil {
+				t.Error("java ran")
+			}
+		})
+	}
+	t.Run("relative GRADLE_USER_HOME", func(t *testing.T) {
+		r, _, _, _ := deleteSetup(t)
+		bin := filepath.SplitList(os.Getenv("PATH"))[0]
+		addTool(t, bin, "java", "exit 9")
+		addFile(t, filepath.Join(r.Home, ".gradle", "caches", "x"))
+		t.Setenv("GRADLE_USER_HOME", "gradle-home")
+		e := r.List(context.Background(), []rules.Global{defaultRule(t, "gradle-caches")})[0]
+		if !strings.Contains(e.Skipped, "not an absolute path") || e.Command != "" {
+			t.Errorf("entry = %+v", e)
+		}
+	})
+}
+
+// TestMavenRepositoryRefusesInstalledArtifacts deletes the contents of
+// ~/.m2/repository when it holds only downloads, keeps the settings beside it,
+// and refuses a repository that holds an artifact that mvn install put there,
+// when it lists the rule and again right before it deletes.
+func TestMavenRepositoryRefusesInstalledArtifacts(t *testing.T) {
+	setup := func(t *testing.T) (Runner, string, []string, string) {
+		r, tmp, _, _ := deleteSetup(t)
+		bin := filepath.SplitList(os.Getenv("PATH"))[0]
+		log := filepath.Join(tmp, "java.log")
+		addTool(t, bin, "java", fmt.Sprintf(`echo "$*" >> %q`, log))
+		repo := filepath.Join(r.Home, ".m2", "repository")
+		ga := filepath.Join(repo, "org", "example", "lib")
+		addFile(t, filepath.Join(ga, "1.0", "lib-1.0.jar"))
+		addFile(t, filepath.Join(ga, "1.0", "_remote.repositories"))
+		addFile(t, filepath.Join(ga, "maven-metadata-central.xml"))
+		addFile(t, filepath.Join(repo, ".locks", "x.lock"))
+		kept := []string{
+			filepath.Join(r.Home, ".m2", "settings.xml"),
+			filepath.Join(r.Home, ".m2", "settings-security.xml"),
+			filepath.Join(r.Home, ".m2", "toolchains.xml"),
+		}
+		for _, p := range kept {
+			addFile(t, p)
+		}
+		return r, repo, kept, log
+	}
+	installed := filepath.Join("com", "corp", "driver", "maven-metadata-local.xml")
+	ctx := context.Background()
+
+	t.Run("downloads only", func(t *testing.T) {
+		r, repo, kept, log := setup(t)
+		entries := r.List(ctx, []rules.Global{defaultRule(t, "maven-repository")})
+		if e := entries[0]; e.Skipped != "" || e.Path != repo || e.Kind != rules.KindClear ||
+			e.Command != "delete contents of ~/.m2/repository (built in)" {
+			t.Fatalf("entry = %+v", e)
+		}
+		res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+		if o := res.Outcomes[0]; o.Status != Ran {
+			t.Errorf("outcome = %+v", o)
+		}
+		if ents, err := os.ReadDir(repo); err != nil || len(ents) != 0 {
+			t.Errorf("repository entries = %v, err = %v", ents, err)
+		}
+		for _, p := range kept {
+			if _, err := os.Stat(p); err != nil {
+				t.Errorf("%s: %v", p, err)
+			}
+		}
+		if _, err := os.Stat(log); err == nil {
+			t.Error("java ran")
+		}
+	})
+
+	want := "contains com/corp/driver/maven-metadata-local.xml, which refuse_names \"maven-metadata-local.xml\" protects"
+	t.Run("installed artifact", func(t *testing.T) {
+		r, repo, _, _ := setup(t)
+		addFile(t, filepath.Join(repo, installed))
+		entries := r.List(ctx, []rules.Global{defaultRule(t, "maven-repository")})
+		if e := entries[0]; e.Skipped != want || e.Command != "" {
+			t.Fatalf("entry = %+v", e)
+		}
+		res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+		if o := res.Outcomes[0]; o.Status != Skipped || o.Reason != want {
+			t.Errorf("outcome = %+v", o)
+		}
+		if _, err := os.Stat(filepath.Join(repo, "org", "example", "lib", "1.0", "lib-1.0.jar")); err != nil {
+			t.Error(err)
+		}
+	})
+
+	t.Run("installed after listing", func(t *testing.T) {
+		r, repo, _, _ := setup(t)
+		entries := r.List(ctx, []rules.Global{defaultRule(t, "maven-repository")})
+		if e := entries[0]; e.Skipped != "" {
+			t.Fatalf("entry = %+v", e)
+		}
+		addFile(t, filepath.Join(repo, installed))
+		res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+		if o := res.Outcomes[0]; o.Status != Skipped || o.Reason != want {
+			t.Errorf("outcome = %+v", o)
+		}
+		if _, err := os.Stat(filepath.Join(repo, installed)); err != nil {
+			t.Error(err)
+		}
+	})
+
+	t.Run("unreadable directory", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root can read any directory")
+		}
+		r, repo, _, _ := setup(t)
+		locked := filepath.Join(repo, "com", "corp")
+		addFile(t, filepath.Join(locked, "x"))
+		if err := os.Chmod(locked, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+		e := r.List(ctx, []rules.Global{defaultRule(t, "maven-repository")})[0]
+		if !strings.HasPrefix(e.Skipped, "cannot check for maven-metadata-local.xml: ") || e.Command != "" {
+			t.Errorf("entry = %+v", e)
+		}
+	})
+}
+
 // TestDefaultBEAMPackageRules deletes the contents of the Hex and Rebar3
 // package caches without running the tools, and keeps the folders beside them.
 func TestDefaultBEAMPackageRules(t *testing.T) {
