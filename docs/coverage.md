@@ -298,7 +298,8 @@ For every row:
 - `clean --global` shows global cleanup actions instead of project caches.
   Add `--apply` to run eligible prune actions.
   It does not use project activity or Git checks,
-  except that a `delete_contents` rule refuses a path in a Git repository.
+  except that a `delete_contents` rule refuses a path
+  that is in or holds a Git repository.
 - `--include-clear` requires `clean --global` and adds clear actions.
   It still deletes nothing without `--apply`.
 
@@ -450,7 +451,7 @@ Such a rule must be a clear rule, so it runs only with
 `clean --global --include-clear --apply`.
 Plonge skips it when the path is not absolute; is `/`, the home directory,
 or contains the home directory; is or resolves through a symlink;
-is in a Git repository; or does not exist.
+is in a Git repository or holds one at any depth; or does not exist.
 The default `zig-global-cache`, `rubygems-cache`, `hex-packages`, `rebar3-hex`,
 `gradle-caches`, and `maven-repository` rules,
 the Deno rules, and the Cargo rules use `delete_contents`.

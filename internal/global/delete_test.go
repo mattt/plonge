@@ -345,3 +345,108 @@ func TestDeleteContentsRefuseNames(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// gitRun runs git with args in dir and fails the test on an error.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// commitRepo makes a Git repository at dir with one commit of a file.
+func commitRepo(t *testing.T, dir string) {
+	t.Helper()
+	addFile(t, filepath.Join(dir, "work"))
+	gitRun(t, dir, "init", "-q")
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+}
+
+// TestDeleteContentsRefusesNestedRepositories skips a rule whose path holds
+// a Git repository at any depth, when it lists the rule, and deletes nothing.
+func TestDeleteContentsRefusesNestedRepositories(t *testing.T) {
+	cases := map[string]struct {
+		make func(t *testing.T, cache string)
+		want string
+	}{
+		"repository with a commit": {
+			func(t *testing.T, cache string) { commitRepo(t, filepath.Join(cache, "deps", "dep")) },
+			"contains a Git repository at deps/dep",
+		},
+		".git file": {
+			func(t *testing.T, cache string) {
+				addFile(t, filepath.Join(cache, "wt", "work"))
+				if err := os.WriteFile(filepath.Join(cache, "wt", ".git"), []byte("gitdir: ../elsewhere\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			"contains a Git repository at wt",
+		},
+		"bare repository": {
+			func(t *testing.T, cache string) { gitRun(t, cache, "init", "-q", "--bare", "bare.git") },
+			"contains a Git directory at bare.git",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			r, _, cache, _ := deleteSetup(t)
+			tc.make(t, cache)
+			ctx := context.Background()
+			entries := r.List(ctx, []rules.Global{deleteRule(cache)})
+			if e := entries[0]; e.Skipped != tc.want || e.Command != "" || e.Bytes != 0 {
+				t.Fatalf("entry = %+v, want skipped %q", e, tc.want)
+			}
+			res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+			if o := res.Outcomes[0]; o.Status != Skipped || o.Reason != tc.want || o.FreedBytes != 0 {
+				t.Errorf("outcome = %+v", o)
+			}
+			if _, err := os.Stat(filepath.Join(cache, "blob")); err != nil {
+				t.Errorf("deleted the cache of a refused rule: %v", err)
+			}
+		})
+	}
+}
+
+// TestDeleteContentsRefusesUnreadableDirectory skips a rule whose path holds
+// a directory that plonge cannot read, because it could hide a repository.
+func TestDeleteContentsRefusesUnreadableDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read every directory")
+	}
+	r, _, cache, _ := deleteSetup(t)
+	hidden := filepath.Join(cache, "hidden")
+	addFile(t, filepath.Join(hidden, "f"))
+	if err := os.Chmod(hidden, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(hidden, 0o755) })
+	e := r.List(context.Background(), []rules.Global{deleteRule(cache)})[0]
+	if !strings.HasPrefix(e.Skipped, "cannot check for Git repositories: ") || e.Command != "" {
+		t.Errorf("entry = %+v", e)
+	}
+}
+
+// TestDeleteContentsChecksForRepositoryBeforeDeleting skips a rule whose path
+// gets a Git repository between the listing and the deletion.
+func TestDeleteContentsChecksForRepositoryBeforeDeleting(t *testing.T) {
+	r, _, cache, _ := deleteSetup(t)
+	ctx := context.Background()
+	entries := r.List(ctx, []rules.Global{deleteRule(cache)})
+	if entries[0].Skipped != "" {
+		t.Fatalf("entry = %+v", entries[0])
+	}
+	commitRepo(t, filepath.Join(cache, "clone"))
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	want := "contains a Git repository at clone"
+	if o := res.Outcomes[0]; o.Status != Skipped || o.Reason != want || o.FreedBytes != 0 {
+		t.Errorf("outcome = %+v, want skipped %q", o, want)
+	}
+	for _, p := range []string{"blob", "clone/work", "clone/.git/HEAD"} {
+		if _, err := os.Stat(filepath.Join(cache, p)); err != nil {
+			t.Errorf("deleted %s: %v", p, err)
+		}
+	}
+}

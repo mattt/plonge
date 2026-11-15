@@ -191,6 +191,7 @@ Global cleanup does not check project activity. A clear rule requires
 --include-clear because it can remove cached data still in use.
 A rule with delete_contents deletes what is in its path, after checks
 that the path is not the home directory, a symlink, or in a Git repository,
+that it holds no Git repository at any depth,
 and that it holds no entry named in the rule's refuse_names.
 
 Options:

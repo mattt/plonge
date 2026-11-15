@@ -59,8 +59,8 @@ _build = ["*/rel", "*/lib/*/src"]
 # For a cache with no cleanup command, delete_contents = true replaces clean:
 # plonge deletes what is in path and keeps the directory. It needs kind clear,
 # and plonge refuses a path that is not absolute; is /, the home directory,
-# or contains it; is or resolves through a symlink; is in a Git repository;
-# or does not exist.
+# or contains it; is or resolves through a symlink; is in a Git repository
+# or holds one at any depth, as a project cache can; or does not exist.
 
 # Plonge measures the installs directory that mise uses:
 # $MISE_INSTALLS_DIR, or installs in the data directory from "mise doctor --json".

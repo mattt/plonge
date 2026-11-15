@@ -45,7 +45,7 @@ func Verify(ctx context.Context, root string, c Candidate) (reason string, err e
 	}
 	// The enclosing repository does not see a repository inside the candidate,
 	// so look for one before deleting its commits and uncommitted work.
-	if reason := gitRefusal(c.Path); reason != "" {
+	if reason := GitRefusal(c.Path); reason != "" {
 		return reason, nil
 	}
 	if reason := insideRefusal(c); reason != "" {
