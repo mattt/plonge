@@ -60,6 +60,12 @@ type Global struct {
 	ID   string `toml:"id"`
 	Tool string `toml:"tool"` // the command that must be available
 	Path string `toml:"path"` // a command that prints the path, or a fixed path
+	// PathEnv names an environment variable that holds a tool's directory,
+	// such as CARGO_HOME. When it is set and not empty, plonge uses its value,
+	// joined with PathEnvSubdir, in place of the fixed Path.
+	PathEnv string `toml:"path_env"`
+	// PathEnvSubdir is a relative path inside the directory that PathEnv gives.
+	PathEnvSubdir string `toml:"path_env_subdir"`
 	// PathLabel, when set, selects the last line of the path command's output
 	// that contains the label followed by ": ", and takes the path after it.
 	PathLabel string `toml:"path_label"`
@@ -194,6 +200,9 @@ func (g Global) validate() error {
 	if err := g.validatePathKeys(); err != nil {
 		return err
 	}
+	if err := g.validatePathEnv(); err != nil {
+		return err
+	}
 	if g.DeleteContents {
 		if err := g.validateDelete(); err != nil {
 			return err
@@ -238,6 +247,39 @@ func (g Global) validatePathKeys() error {
 		return fmt.Errorf("global rule %q: path_zon_field %q is not a field name", g.ID, g.PathZONField)
 	}
 	return nil
+}
+
+// validatePathEnv checks path_env and path_env_subdir.
+// The variable replaces a fixed path, which stays as the default,
+// and the subdirectory must stay inside the directory that the variable gives.
+func (g Global) validatePathEnv() error {
+	switch {
+	case g.PathEnv == "" && g.PathEnvSubdir != "":
+		return fmt.Errorf("global rule %q: path_env_subdir needs path_env", g.ID)
+	case g.PathEnv == "":
+		return nil
+	case !validEnvName(g.PathEnv):
+		return fmt.Errorf("global rule %q: path_env %q is not an environment variable name", g.ID, g.PathEnv)
+	case !g.fixedPath():
+		return fmt.Errorf("global rule %q: path_env needs a fixed path as its default", g.ID)
+	case g.PathEnvSubdir != "" && (!filepath.IsLocal(g.PathEnvSubdir) || filepath.Clean(g.PathEnvSubdir) == "."):
+		return fmt.Errorf("global rule %q: path_env_subdir %q must be a relative path inside the directory", g.ID, g.PathEnvSubdir)
+	}
+	return nil
+}
+
+// validEnvName reports whether name is a portable environment variable name:
+// letters, digits, and underscores, not starting with a digit.
+func validEnvName(name string) bool {
+	for i, c := range name {
+		switch {
+		case c == '_', 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z':
+		case '0' <= c && c <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return name != ""
 }
 
 // validateDelete checks a rule whose contents plonge deletes.

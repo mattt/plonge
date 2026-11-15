@@ -94,6 +94,25 @@ path = "go env GOCACHE"
 clean = "go clean -cache"
 kind = "clear"
 
+# Cargo 1.88 and later delete global cache files that they have not used
+# for 1 to 3 months, as cache.auto-clean-frequency sets. The cargo clean gc
+# command that cleans on request is unstable, so plonge deletes the contents
+# of registry in the Cargo home: $CARGO_HOME, or ~/.cargo when it is
+# not set. Cargo has no stable command that prints the Cargo home.
+# registry holds the crate index, downloaded .crate files, and their sources,
+# which a later build downloads again.
+# git is left out: its checkouts are working trees, and an edit there is lost.
+# The rule leaves out bin, config.toml, credentials.toml, and the records of
+# cargo install in the Cargo home.
+[[global]]
+id = "cargo-registry"
+tool = "cargo"
+path = "~/.cargo/registry"
+path_env = "CARGO_HOME"
+path_env_subdir = "registry"
+delete_contents = true
+kind = "clear"
+
 [[global]]
 id = "npm"
 tool = "npm"

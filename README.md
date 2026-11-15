@@ -245,7 +245,7 @@ A rule for a cache without a cleanup command,
 or whose command also removes user state,
 can delete the contents of its path instead,
 as `zig-global-cache` does for Zig,
-and as the Deno, `hex-packages`, and `rebar3-hex` rules do.
+and as the Deno, Cargo, `hex-packages`, and `rebar3-hex` rules do.
 `plonge scan --global` adds each rule's path, size, kind, and cleanup action.
 
 ```console
@@ -279,6 +279,7 @@ Neither kind guarantees that the whole reported size will be freed.
 | `pnpm` | prune | `pnpm store prune` |
 | `go-modules` | clear | `go clean -modcache` |
 | `go-build` | clear | `go clean -cache` |
+| `cargo-registry` | clear | Built-in deletion of the contents of `registry` in the Cargo home |
 | `npm` | clear | `npm cache clean --force` |
 | `bun` | clear | `bun pm cache prune` (Bun 1.4.4 or later) |
 | `deno-remote`, `deno-npm`, `deno-gen` | clear | Built-in deletion of the contents of Deno's module, npm, and TypeScript caches |
@@ -396,6 +397,32 @@ or has a value that is not a nonempty string.
 A rule can set only one of `path_label`, `path_field`, and `path_zon_field`,
 and only with a `path` command.
 
+A fixed `path` can give way to an environment variable
+that holds the tool's directory.
+`path_env` names the variable,
+and `path_env_subdir` is a relative path inside the directory it names:
+
+```toml
+path = "~/.cargo/registry"
+path_env = "CARGO_HOME"
+path_env_subdir = "registry"
+```
+
+When the variable is set and not empty, Plonge uses its value
+joined with `path_env_subdir`, here `$CARGO_HOME/registry`;
+otherwise it uses `path`.
+Plonge reads the variable from its own environment,
+not from the environment that `mise exec` gives the tool.
+It skips the rule when the value is not an absolute path.
+`path_env_subdir` cannot start with `/` or leave the directory with `..`.
+
+Cargo's command that cleans its global cache, `cargo clean gc`, is unstable,
+so the `cargo-registry` rule deletes the contents
+of `registry` in the Cargo home: `$CARGO_HOME`, or `~/.cargo`.
+It keeps `git`, whose checkouts are working trees that a user can edit,
+and `bin`, `config.toml`, `credentials.toml`, and the records of `cargo install`.
+Cargo 1.88 and later also delete unused files in these folders on their own.
+
 A rule can name a `check`, a command that must not change anything:
 
 ```toml
@@ -508,7 +535,7 @@ so copy the default's `check`, `require`, `refuse`, `checks`, and `targets`
 to keep them.
 For `mise-tools` with `tool = "mise"` and a `clean` command,
 `path` is used only when mise cannot report its installs directory.
-A `delete_contents` rule always uses its own `path`.
+A `delete_contents` rule always uses its own `path`, or its `path_env`.
 
 ## Disk
 

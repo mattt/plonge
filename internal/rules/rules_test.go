@@ -430,3 +430,57 @@ func TestGlobalPathKeysAreExclusive(t *testing.T) {
 		}
 	}
 }
+
+func TestGlobalPathEnvValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\ndelete_contents = true\nkind = \"clear\"\n"
+	cases := []struct {
+		extra, want string
+	}{
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c\"\n", ""},
+		{"path = \"/t/c\"\npath_env = \"T_HOME\"\n", ""},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c/d\"\n", ""},
+		{"path = \"t where\"\npath_env = \"T_HOME\"\n", "path_env needs a fixed path"},
+		{"path = \"~/.t/c\"\npath_env_subdir = \"c\"\n", "path_env_subdir needs path_env"},
+		{"path = \"~/.t/c\"\npath_env = \"T-HOME\"\n", "is not an environment variable name"},
+		{"path = \"~/.t/c\"\npath_env = \"1HOME\"\n", "is not an environment variable name"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"../c\"\n", "must be a relative path inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"/c\"\n", "must be a relative path inside"},
+		{"path = \"~/.t/c\"\npath_env = \"T_HOME\"\npath_env_subdir = \"c/..\"\n", "must be a relative path inside"},
+	}
+	for _, c := range cases {
+		_, err := parse(base+c.extra, "test")
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%q: %v", c.extra, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.extra, err, c.want)
+		}
+	}
+}
+
+// TestCargoRulesKeepCargoHomeState checks that the Cargo rules delete only
+// the registry cache, never the Git cache or the Cargo home itself.
+func TestCargoRulesKeepCargoHomeState(t *testing.T) {
+	want := map[string]string{"cargo-registry": "registry"}
+	for _, g := range Default().Global {
+		// Cargo's Git checkouts are working trees that a user can edit.
+		if g.ID == "cargo-git" {
+			t.Errorf("default rules include cargo-git")
+		}
+		sub, ok := want[g.ID]
+		if !ok {
+			continue
+		}
+		delete(want, g.ID)
+		if g.PathEnv != "CARGO_HOME" || g.PathEnvSubdir != sub || g.Path != "~/.cargo/"+sub ||
+			!g.DeleteContents || g.Kind != KindClear || g.Tool != "cargo" {
+			t.Errorf("%s = %+v", g.ID, g)
+		}
+	}
+	if len(want) > 0 {
+		t.Errorf("missing rules: %v", want)
+	}
+}
