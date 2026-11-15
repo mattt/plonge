@@ -1,6 +1,9 @@
 package disk
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestParseSize(t *testing.T) {
 	tests := []struct {
@@ -41,5 +44,35 @@ func TestFree(t *testing.T) {
 	}
 	if _, err := Free("/nonexistent/plonge-test"); err == nil {
 		t.Error("Free on a missing path gave no error")
+	}
+}
+
+func TestTrack(t *testing.T) {
+	defer func(f func(string) (int64, error)) { free = f }(free)
+	readings := []int64{100, 160}
+	var paths []string
+	free = func(path string) (int64, error) {
+		paths = append(paths, path)
+		n := readings[0]
+		readings = readings[1:]
+		return n, nil
+	}
+	ran := false
+	got := Track("/vol", func() {
+		if len(paths) != 1 {
+			t.Errorf("fn ran after %d readings, want 1", len(paths))
+		}
+		ran = true
+	})
+	want := Change{FreeBefore: 100, FreeAfter: 160, GainedBytes: 60}
+	if !ran || got != want || len(paths) != 2 || paths[0] != "/vol" || paths[1] != "/vol" {
+		t.Errorf("Track = %+v, ran %v, paths %q; want %+v", got, ran, paths, want)
+	}
+
+	free = func(string) (int64, error) { return 0, errors.New("no volume") }
+	ran = false
+	got = Track("/vol", func() { ran = true })
+	if !ran || got != (Change{Error: "no volume"}) {
+		t.Errorf("Track with a failing volume = %+v, ran %v", got, ran)
 	}
 }

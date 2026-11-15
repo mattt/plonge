@@ -10,9 +10,11 @@ import (
 
 type inode struct{ dev, ino uint64 }
 
-// DiskUsage returns the bytes allocated to dir and everything under it,
-// as du counts them: allocated blocks, each hard-linked file once,
-// and symlinks not followed.
+// DiskUsage returns the bytes that deleting dir and everything under it
+// would free, as well as plonge can tell: allocated blocks,
+// each hard-linked file once, and symlinks not followed.
+// On macOS, a file that shares blocks with clones counts only the blocks
+// that it does not share, unless every clone in its family is under dir.
 func DiskUsage(dir string) int64 {
 	n, _ := walkCache(dir, true, false)
 	return n
@@ -134,15 +136,14 @@ func matchInside(dir string, elems []string) (string, error) {
 }
 
 // walkCache walks dir without following symlinks.
-// With measure, it adds up the bytes allocated, as DiskUsage describes.
+// With measure, it adds up the bytes, as DiskUsage describes.
 // With guard, it stops at the first Git repository and returns why dir
 // must not be deleted: a .git entry of any type at any depth,
 // a Git directory (HEAD beside objects and refs) at any depth,
 // or a directory that it cannot read, which could hide either.
 func walkCache(dir string, measure, guard bool) (int64, string) {
-	var total int64
+	var t tally
 	var reason string
-	seen := map[inode]bool{}
 	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if guard {
@@ -160,24 +161,94 @@ func walkCache(dir string, measure, guard bool) (int64, string) {
 				return fs.SkipAll
 			}
 		}
-		if !measure {
-			return nil
+		if measure {
+			t.add(path, d)
 		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		bytes, id, linked := allocated(info)
-		if linked {
-			if seen[id] {
-				return nil
-			}
-			seen[id] = true
-		}
-		total += bytes
 		return nil
 	})
-	return total, reason
+	return t.sum(), reason
+}
+
+// fileSize is what deleting one file would free, as entrySize measures it.
+type fileSize struct {
+	bytes  int64 // the bytes that only this file uses
+	id     inode
+	linked bool // the file has more than one hard link
+	// clones is the number of files in the file's clone family,
+	// itself included, and shared is the bytes that they share.
+	// clones is 0 when the file shares no blocks that plonge can count.
+	family cloneFamily
+	clones uint32
+	shared int64
+}
+
+// cloneFamily identifies files that are clones of one another.
+type cloneFamily struct{ dev, id uint64 }
+
+type family struct {
+	found, clones uint32
+	shared        int64
+}
+
+// tally adds up the sizes of the files in one walk.
+// It counts a hard-linked file once, and the blocks that a clone family
+// shares once, when the walk finds every file in the family.
+type tally struct {
+	total    int64
+	seen     map[inode]bool
+	families map[cloneFamily]*family
+}
+
+func (t *tally) add(path string, d fs.DirEntry) {
+	f, ok := entrySize(path, d)
+	if !ok {
+		return
+	}
+	if f.linked {
+		if t.seen[f.id] {
+			return
+		}
+		if t.seen == nil {
+			t.seen = map[inode]bool{}
+		}
+		t.seen[f.id] = true
+	}
+	t.total += f.bytes
+	if f.clones < 2 || f.shared <= 0 {
+		return
+	}
+	if t.families == nil {
+		t.families = map[cloneFamily]*family{}
+	}
+	fam := t.families[f.family]
+	if fam == nil {
+		fam = &family{clones: f.clones}
+		t.families[f.family] = fam
+	}
+	fam.found++
+	fam.shared = max(fam.shared, f.shared)
+}
+
+// sum returns the total, with the shared blocks of each clone family
+// whose files are all in the walk.
+func (t *tally) sum() int64 {
+	n := t.total
+	for _, fam := range t.families {
+		if fam.found >= fam.clones {
+			n += fam.shared
+		}
+	}
+	return n
+}
+
+// statSize measures a file from its lstat information.
+func statSize(d fs.DirEntry) (fileSize, bool) {
+	info, err := d.Info()
+	if err != nil {
+		return fileSize{}, false
+	}
+	bytes, id, linked := allocated(info)
+	return fileSize{bytes: bytes, id: id, linked: linked}, true
 }
 
 // gitReason returns why the entry at path makes dir a Git repository

@@ -50,6 +50,8 @@ but MCP does not support `--root` or `--no-mise`.
 5. Get the user's approval of the dry run before `--apply`.
    State the selected paths or actions and the estimated space to recover.
    Do not promise that the whole reported size will become free space.
+   A size marked `(whole cache)` is a prune rule's whole cache;
+   say that the tool removes only part of it.
    Keep the approved selection options when you apply the cleanup.
 
    ```console
@@ -57,8 +59,10 @@ but MCP does not support `--root` or `--no-mise`.
    plonge clean --global --apply
    ```
 
-6. Report the estimated space freed and any skipped or failed cleanup.
-   Run `plonge disk` again to check free space on the home directory's volume.
+6. Report the estimated space freed, the change in free space
+   on the home directory's volume that the same output gives,
+   and any skipped or failed cleanup.
+   Other processes can also change free space, so do not call the change exact.
 
 ## Selection options
 
