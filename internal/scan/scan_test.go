@@ -165,9 +165,12 @@ func TestDetect(t *testing.T) {
 			},
 		},
 		{
-			name: "Python build output",
+			name: "Python build and dist output",
 			files: map[string]string{
-				".gitignore":                          "build/\n__pycache__/\n",
+				".gitignore":                          "build/\ndist/\n__pycache__/\n",
+				"lib/dist/pkg-1.0-py3-none-any.whl":   "",
+				"old/dist/pkg-1.0.tar.gz":             "",
+				"docs/dist/x":                         "", // no project file
 				"lib/pyproject.toml":                  "",
 				"lib/build/lib/pkg/m.py":              "",
 				"lib/build/lib/pkg/__pycache__/m.pyc": "", // inside a candidate
@@ -183,6 +186,8 @@ func TestDetect(t *testing.T) {
 			want: map[string]string{
 				"lib/build":           "build beside pyproject.toml",
 				"old/build":           "build beside setup.py",
+				"lib/dist":            "dist beside pyproject.toml",
+				"old/dist":            "dist beside setup.py",
 				"src/pkg/__pycache__": "__pycache__",
 			},
 		},

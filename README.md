@@ -485,7 +485,7 @@ skip = [".cache", ".git", ".hg", ".jj", ".svn"]
 [beside]
 bin = ["*.csproj", "*.fsproj", "*.vbproj"]
 build = ["pyproject.toml", "setup.py"]
-dist = ["package.json"]
+dist = ["package.json", "pyproject.toml", "setup.py"]
 obj = ["*.csproj", "*.fsproj", "*.vbproj"]
 target = ["Cargo.toml", "pom.xml"]
 venv = ["pyproject.toml", "requirements.txt", "setup.py"]
@@ -505,7 +505,6 @@ skip = ["third_party"]
 
 [beside]
 build = ["build.gradle", "build.gradle.kts", "pyproject.toml", "setup.py"]
-dist = ["package.json", "pyproject.toml"]
 ```
 
 This `build` entry adds Gradle projects.

@@ -92,7 +92,7 @@ func TestLoad(t *testing.T) {
 		})
 	}
 	// Loading must not change the defaults.
-	if !slices.Equal(Default().Beside["dist"], []string{"package.json"}) {
+	if !slices.Equal(Default().Beside["dist"], []string{"package.json", "pyproject.toml", "setup.py"}) {
 		t.Error("Load changed the default rules")
 	}
 }
@@ -123,6 +123,9 @@ func TestMatch(t *testing.T) {
 		{"node_modules", nil, "node_modules"},
 		{"dist", nil, ""},
 		{"dist", []string{"package.json"}, "dist beside package.json"},
+		{"dist", []string{"pyproject.toml"}, "dist beside pyproject.toml"},
+		{"dist", []string{"setup.py"}, "dist beside setup.py"},
+		{"dist", []string{"requirements.txt"}, ""},
 		{"target", []string{"pom.xml"}, "target beside pom.xml"},
 		{"target", []string{"package.json"}, ""},
 		{"src", []string{"package.json"}, ""},
