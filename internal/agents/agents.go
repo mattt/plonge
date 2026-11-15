@@ -22,16 +22,26 @@ const (
 	SourcePaseo  = "paseo"
 )
 
-const paseoTimeout = 15 * time.Second
+// paseoTimeout limits each paseo ls call. Tests shorten it.
+var paseoTimeout = 15 * time.Second
 
 // Apply adds agent activity to roots and reports what happened to each source.
-// A source that is missing or fails is skipped.
+// A missing source is skipped, and a Claude source that fails is skipped too.
+// When paseo is on PATH but Plonge cannot read its status,
+// the Paseo source fails and every root is busy,
+// because an agent might work in any of them.
 func Apply(ctx context.Context, roots []scan.Root, home string, now time.Time) []scan.Source {
 	sources := []scan.Source{applyClaude(roots, home)}
-	cwds, source := busyDirs(ctx)
+	cwds, source := busyDirs(ctx, home)
 	sources = append(sources, source)
 	for i := range roots {
-		if roots[i].Skipped == "" && busyIn(roots[i].Path, cwds) {
+		if roots[i].Skipped != "" {
+			continue
+		}
+		switch {
+		case source.Status == scan.SourceFailed:
+			roots[i].Busy = true
+		case busyIn(roots[i].Path, cwds):
 			roots[i].Busy = true
 			roots[i].LastActivity = now
 			roots[i].ActivitySource = SourcePaseo
@@ -40,19 +50,36 @@ func Apply(ctx context.Context, roots []scan.Root, home string, now time.Time) [
 	return sources
 }
 
-// Busy asks Paseo again whether an agent works in root.
-// It returns false when Paseo is missing or fails.
-func Busy(ctx context.Context, root string) bool {
-	cwds, _ := busyDirs(ctx)
-	return busyIn(root, cwds)
+// Busy asks Paseo again whether an agent might work in root.
+// It returns why root is busy, or "" when it is not.
+// Root is busy when Paseo reports an agent there,
+// or when paseo is on PATH but Plonge cannot read its status.
+// Root is not busy when paseo is not on PATH.
+// Paseo writes paths inside home with a leading ~.
+func Busy(ctx context.Context, root, home string) string {
+	cwds, source := busyDirs(ctx, home)
+	switch {
+	case source.Status == scan.SourceFailed:
+		return "Paseo status unknown: " + source.Reason
+	case busyIn(root, cwds):
+		return "Paseo now reports a running or initializing agent in this project"
+	}
+	return ""
 }
 
 func skipped(name, reason string) scan.Source {
 	return scan.Source{Name: name, Status: scan.SourceSkipped, Reason: reason}
 }
 
+func failed(name, reason string) scan.Source {
+	return scan.Source{Name: name, Status: scan.SourceFailed, Reason: reason}
+}
+
 // busyDirs returns the working directories of Paseo agents that are running or starting.
-func busyDirs(ctx context.Context) ([]string, scan.Source) {
+// The source fails when the output is not a JSON array,
+// or when such an agent has no absolute working directory after ~ expansion,
+// because Plonge then cannot tell which projects the agents work in.
+func busyDirs(ctx context.Context, home string) ([]string, scan.Source) {
 	if _, err := exec.LookPath("paseo"); err != nil {
 		return nil, skipped(SourcePaseo, "paseo is not on PATH")
 	}
@@ -60,28 +87,41 @@ func busyDirs(ctx context.Context) ([]string, scan.Source) {
 	defer cancel()
 	// Without --global, paseo ls lists only the current directory's agents.
 	cmd := exec.CommandContext(ctx, "paseo", "ls", "--json", "--global", "--background")
+	// A child process that keeps the output open must not outlast the timeout.
+	cmd.WaitDelay = time.Second
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
 		reason := "paseo ls failed: " + err.Error()
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		if ctx.Err() == context.DeadlineExceeded {
+			reason = fmt.Sprintf("paseo ls did not finish in %v", paseoTimeout)
+		} else if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			reason = "paseo ls failed: " + msg
 		}
-		return nil, skipped(SourcePaseo, reason)
+		return nil, failed(SourcePaseo, reason)
 	}
 	var list []struct {
 		Cwd    string `json:"cwd"`
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(out, &list); err != nil {
-		return nil, skipped(SourcePaseo, fmt.Sprintf("cannot read paseo ls output: %v", err))
+		return nil, failed(SourcePaseo, fmt.Sprintf("cannot read paseo ls output: %v", err))
+	}
+	// JSON null decodes without an error but leaves list nil.
+	if list == nil {
+		return nil, failed(SourcePaseo, "cannot read paseo ls output: not a JSON array")
 	}
 	var cwds []string
 	for _, a := range list {
-		if a.Cwd != "" && (a.Status == "running" || a.Status == "initializing") {
-			cwds = append(cwds, real(a.Cwd))
+		if a.Status != "running" && a.Status != "initializing" {
+			continue
 		}
+		cwd := expandHome(a.Cwd, home)
+		if !filepath.IsAbs(cwd) {
+			return nil, failed(SourcePaseo, fmt.Sprintf("a %s Paseo agent has no absolute working directory: %q", a.Status, a.Cwd))
+		}
+		cwds = append(cwds, real(cwd))
 	}
 	return cwds, scan.Source{Name: SourcePaseo, Status: scan.SourceUsed}
 }
@@ -95,6 +135,22 @@ func busyIn(root string, cwds []string) bool {
 		}
 	}
 	return false
+}
+
+// expandHome replaces a leading ~ or ~/ in path with home.
+// It leaves other paths, including ~user forms, unchanged.
+// With an empty home, it leaves path unchanged, so the path stays relative.
+func expandHome(path, home string) string {
+	if home == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+		return filepath.Join(home, rest)
+	}
+	return path
 }
 
 func real(path string) string {

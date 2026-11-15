@@ -28,9 +28,10 @@ type Options struct {
 	MinSize       int64
 	QuietHours    float64
 	Now           time.Time
-	// StillBusy, when set, asks again whether an agent works in a root.
+	// StillBusy, when set, asks again whether an agent might work in a root.
+	// It returns why the root is busy, or "" when it is not.
 	// Run calls it once per root, before the first deletion there.
-	StillBusy func(root string) bool
+	StillBusy func(root string) string
 }
 
 // Item is one selected cache and what happened to it.
@@ -120,7 +121,7 @@ func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) 
 		}
 		return plan[a].item.Path < plan[b].item.Path
 	})
-	busy := map[string]bool{}
+	busy := map[string]string{}
 	for _, p := range plan {
 		if opts.Apply {
 			if opts.StillBusy != nil {
@@ -128,8 +129,8 @@ func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) 
 					busy[p.root] = opts.StillBusy(p.root)
 				}
 			}
-			if busy[p.root] {
-				p.item.Status, p.item.Reason = Skipped, "Paseo now reports a running or initializing agent in this project"
+			if reason := busy[p.root]; reason != "" {
+				p.item.Status, p.item.Reason = Skipped, reason
 			} else {
 				apply(ctx, &p)
 			}

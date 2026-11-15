@@ -168,9 +168,9 @@ func TestStillBusyStopsDeletion(t *testing.T) {
 	roots, sizes := scanOne(t, root)
 	calls := 0
 	opts := quietOpts(true)
-	opts.StillBusy = func(string) bool { calls++; return true }
+	opts.StillBusy = func(string) string { calls++; return "Paseo status unknown: no daemon" }
 	res := Run(context.Background(), roots, sizes, opts)
-	if calls != 1 || res.Skipped != 2 || res.Items[0].Status != Skipped {
+	if calls != 1 || res.Skipped != 2 || res.Items[0].Status != Skipped || res.Items[0].Reason != "Paseo status unknown: no daemon" {
 		t.Errorf("%d calls, result = %+v", calls, res)
 	}
 	if !exists(filepath.Join(root, "node_modules")) {
