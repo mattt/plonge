@@ -480,6 +480,7 @@ func TestCargoRulesFollowCargoHome(t *testing.T) {
 				addFile(t, other)
 			}
 			kept := []string{
+				filepath.Join(cargoHome, "git", "checkouts", "dep-1", "abc", "Cargo.toml"),
 				filepath.Join(cargoHome, "bin", "cargo-tool"),
 				filepath.Join(cargoHome, "config.toml"),
 				filepath.Join(cargoHome, ".crates.toml"),
@@ -490,10 +491,9 @@ func TestCargoRulesFollowCargoHome(t *testing.T) {
 			addFile(t, filepath.Join(cargoHome, "registry", "cache", "index.crates.io-1", "serde-1.0.0.crate"))
 			addFile(t, filepath.Join(cargoHome, "registry", "src", "index.crates.io-1", "serde-1.0.0", "lib.rs"))
 			addFile(t, filepath.Join(cargoHome, "git", "db", "dep-1", "HEAD"))
-			addFile(t, filepath.Join(cargoHome, "git", "checkouts", "dep-1", "abc", "Cargo.toml"))
 			ctx := context.Background()
-			entries := r.List(ctx, []rules.Global{defaultRule(t, "cargo-registry"), defaultRule(t, "cargo-git")})
-			for i, sub := range []string{"registry", "git"} {
+			entries := r.List(ctx, []rules.Global{defaultRule(t, "cargo-registry")})
+			for i, sub := range []string{"registry"} {
 				e := entries[i]
 				path := filepath.Join(cargoHome, sub)
 				if e.Skipped != "" || e.Path != path || e.Command != r.deleteAction(path) {
@@ -506,7 +506,7 @@ func TestCargoRulesFollowCargoHome(t *testing.T) {
 					t.Errorf("outcome = %+v", o)
 				}
 			}
-			for _, sub := range []string{"registry", "git"} {
+			for _, sub := range []string{"registry"} {
 				if ents, err := os.ReadDir(filepath.Join(cargoHome, sub)); err != nil || len(ents) != 0 {
 					t.Errorf("%s entries = %v, err = %v", sub, ents, err)
 				}

@@ -462,10 +462,14 @@ func TestGlobalPathEnvValidation(t *testing.T) {
 }
 
 // TestCargoRulesKeepCargoHomeState checks that the Cargo rules delete only
-// the registry and Git caches, never the Cargo home itself.
+// the registry cache, never the Git cache or the Cargo home itself.
 func TestCargoRulesKeepCargoHomeState(t *testing.T) {
-	want := map[string]string{"cargo-registry": "registry", "cargo-git": "git"}
+	want := map[string]string{"cargo-registry": "registry"}
 	for _, g := range Default().Global {
+		// Cargo's Git checkouts are working trees that a user can edit.
+		if g.ID == "cargo-git" {
+			t.Errorf("default rules include cargo-git")
+		}
 		sub, ok := want[g.ID]
 		if !ok {
 			continue
