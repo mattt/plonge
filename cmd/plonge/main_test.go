@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mattt/plonge/internal/report"
 )
 
 // binDir is the only directory on PATH during a test.
@@ -682,9 +684,25 @@ func TestRootOutsideGitKeepsProjectsInside(t *testing.T) {
 			if strings.Join(found, "\n") != strings.Join(want, "\n") {
 				t.Errorf("caches = %q, want %q\n%s", found, want, stdout.String())
 			}
-			if args[0] == "scan" && (len(got.SkippedRoots) != 1 || got.SkippedRoots[0].Path != folder) {
+			if len(got.SkippedRoots) != 1 || got.SkippedRoots[0].Path != folder ||
+				got.SkippedRoots[0].Reason != "not in a Git work tree" {
 				t.Errorf("skipped roots = %+v, want only %s", got.SkippedRoots, folder)
 			}
 		})
+	}
+}
+
+// TestCleanTextListsSkippedRoots checks that clean names a root it skipped,
+// so that a --root outside Git does not look like a project with no caches.
+func TestCleanTextListsSkippedRoots(t *testing.T) {
+	home := setup(t)
+	folder, _ := folderOfRepos(t, home)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"clean", "--include-active", "--root", folder}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	want := "Skipped root " + report.Tilde(folder, home) + ": not in a Git work tree\n"
+	if !strings.Contains(stdout.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, stdout.String())
 	}
 }

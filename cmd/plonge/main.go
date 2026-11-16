@@ -177,7 +177,8 @@ const cleanUsage = `Usage: plonge clean [--apply] [--include-active] [--min-size
                     [--root <dir>]... [--no-mise] [--json]
        plonge clean --global [--apply] [--include-clear] [--json]
 
-Clean selects project caches as scan does. Without --apply, it deletes nothing.
+Clean selects project caches as scan does, and lists the roots that it skipped.
+Without --apply, it deletes nothing.
 With --apply, it deletes selected directories that Git ignores, that contain
 no tracked files, and that are not and do not hold a Git repository,
 other than the unchanged dependency clones that SwiftPM can restore.

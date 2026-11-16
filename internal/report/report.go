@@ -31,10 +31,7 @@ type Cache struct {
 }
 
 // SkippedRoot is a root that plonge did not scan.
-type SkippedRoot struct {
-	Path   string `json:"path"`
-	Reason string `json:"reason"`
-}
+type SkippedRoot = scan.SkippedRoot
 
 // Totals sums the caches in the report.
 type Totals struct {
@@ -166,7 +163,7 @@ func WriteTable(w io.Writer, r Report, home string) error {
 	fmt.Fprintf(w, "Total: %s in %s\n", HumanBytes(t.Bytes), plural(t.Caches, "cache"))
 	fmt.Fprintf(w, "Quiet for %s or more: %s in %s\n",
 		hours(r.QuietHours), HumanBytes(t.QuietBytes), plural(t.QuietCaches, "cache"))
-	fmt.Fprintf(w, "Roots: %d scanned, %d skipped\n", r.Roots-len(r.SkippedRoots), len(r.SkippedRoots))
+	writeRoots(w, r.Roots, r.SkippedRoots, home)
 	fmt.Fprintf(w, "Broken mise links: %d\n", r.BrokenLinks)
 	if len(r.Errors) > 0 {
 		fmt.Fprintf(w, "Git errors: %d (caches in those repositories are not listed)\n", len(r.Errors))
@@ -180,6 +177,14 @@ func WriteTable(w io.Writer, r Report, home string) error {
 	}
 	_, err := fmt.Fprintln(w, "Scan deleted nothing.")
 	return err
+}
+
+// writeRoots counts the roots and lists each skipped root with its reason.
+func writeRoots(w io.Writer, roots int, skipped []SkippedRoot, home string) {
+	fmt.Fprintf(w, "Roots: %d scanned, %d skipped\n", roots-len(skipped), len(skipped))
+	for _, s := range skipped {
+		fmt.Fprintf(w, "Skipped root %s: %s\n", Tilde(s.Path, home), s.Reason)
+	}
 }
 
 // writeSources reports the activity sources that were not used.
@@ -351,6 +356,7 @@ func WriteClean(w io.Writer, r clean.Result, home string) error {
 	if r.Failed > 0 {
 		fmt.Fprintf(w, "Failed: %d\n", r.Failed)
 	}
+	writeRoots(w, r.Roots, r.SkippedRoots, home)
 	WriteRefusals(w, r.Refused, home)
 	writeSources(w, r.ActivitySources)
 	var err error
