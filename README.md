@@ -281,16 +281,17 @@ Add it to `~/.claude/settings.json`:
 
 ## Development
 
-The repository pins its tools in `mise.toml`.
+The repository pins its tools and defines its tasks in `mise.toml`.
 
 ```console
 mise install
-mise exec -- make check
+mise run check
 ```
 
-`make build` writes `bin/plonge`.
-`make lint` runs `gofmt -l` and `go vet`.
-`make test` runs the tests with gotestsum.
+`mise run build` writes `bin/plonge`.
+`mise run lint` runs `gofmt -l` and `go vet`.
+`mise run test` runs the tests with gotestsum.
+`mise run check` runs `lint` and `test`.
 
 ## License
 

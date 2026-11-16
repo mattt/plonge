@@ -1,3 +1,29 @@
 [tools]
 go = "1.26.10"
 "aqua:gotestyourself/gotestsum" = "1.13.0"
+
+[tasks.build]
+description = "Build bin/plonge"
+run = "go build -o bin/plonge ./cmd/plonge"
+
+[tasks.lint]
+description = "Check formatting with gofmt and run go vet"
+run = [
+  '''
+out="$(gofmt -l .)"
+if [ -n "$out" ]; then
+  echo "gofmt needed:"
+  echo "$out"
+  exit 1
+fi
+''',
+  "go vet ./...",
+]
+
+[tasks.test]
+description = "Run the tests with gotestsum"
+run = "gotestsum --format pkgname -- ./..."
+
+[tasks.check]
+description = "Run lint and test"
+depends = ["lint", "test"]
