@@ -460,7 +460,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | RubyGems | none | `rubygems-cache` | `delete_contents` of `cache` in the directory that `gem env gemdir` prints; Plonge does not run `gem cleanup`, which uninstalls old gem versions | clear; requires `clean --global --include-clear --apply` to run. Installed gems stay; only the copies of their `.gem` files are deleted. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
 | Swift Package Manager | `.build` | `swiftpm-macos`, `swiftpm-linux` | `swift package purge-cache`, with `--cache-path` and `--scratch-path` set to the measured cache directory | clear; requires `clean --global --include-clear --apply` to run. Each rule applies only on its system. `artifacts` and `prebuilts` remain. |
-| Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. |
+| Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. Refuses a stale directory that holds a Git repository, except unchanged SwiftPM clones in `SourcePackages`, or a directory that it cannot read. |
 
 A global rule can also set `delete_contents` in place of a cleanup command,
 for a cache whose tool has none.
@@ -482,6 +482,14 @@ The Xcode global rule selects only directories whose XML `info.plist`
 names an absolute `WorkspacePath` that no longer exists.
 It keeps directories with missing or unreadable workspace metadata
 and workspaces on unmounted volumes under `/Volumes`.
+It also refuses a stale directory that holds a Git repository at any depth,
+or a directory that it cannot read,
+except the SwiftPM clones in `SourcePackages` that pass the project checks
+for `.build`, other than the checks against `Package.resolved`,
+which is gone with the workspace.
+Without the pins, Plonge cannot tell whether a checkout was at the commit
+that the workspace resolved, or whether a bare clone mirrors the package's URL;
+it can tell only that neither holds work that Git cannot restore.
 The project `DerivedData` rule is different: it uses the project checks,
 without checking Xcode workspace metadata.
 

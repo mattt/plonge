@@ -393,6 +393,27 @@ whose XML `info.plist` names an absolute `WorkspacePath` that no longer exists.
 It keeps a directory without a readable `WorkspacePath`,
 and a directory whose workspace is on a volume that is not mounted.
 
+A stale directory usually holds the package clones that Xcode's SwiftPM keeps
+in `SourcePackages`, which Xcode makes again when the workspace resolves.
+Plonge allows them under the
+[SwiftPM conditions](#swift-package-manager-checkouts),
+except the checks against `Package.resolved`,
+because the workspace that held the pins is gone:
+a bare clone directly in `SourcePackages/repositories`
+can mirror any origin,
+and a checkout directly in `SourcePackages/checkouts`
+can be at any commit that its bare clone holds.
+Plonge refuses a stale directory that holds any other Git repository,
+a clone that fails the other conditions, or a directory that it cannot read.
+It checks again right before it deletes each directory.
+The report lists each refused directory and its reason
+after the rule's action, and in `refused_folders` in JSON output;
+its size is not in the rule's size, and it is not counted in the action:
+
+```console
+Refused ~/Library/Developer/Xcode/DerivedData/App-abc: contains a Git repository at SourcePackages/checkouts/dep that has changed, untracked, or ignored files
+```
+
 You can add a rule, or replace a default with the same `id`,
 in `rules.toml`:
 
