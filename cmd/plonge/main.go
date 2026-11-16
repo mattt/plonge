@@ -307,7 +307,7 @@ func flagGiven(fs *flag.FlagSet, name string) bool {
 }
 
 func runCleanGlobal(opts global.Options, asJSON bool, stdout, stderr io.Writer) int {
-	res, env, err := engine.CleanGlobal(context.Background(), opts)
+	res, env, err := engine.CleanGlobal(context.Background(), engine.GlobalOptions{Options: opts})
 	if err != nil {
 		fmt.Fprintf(stderr, "plonge clean: %v\n", err)
 		return 1

@@ -79,6 +79,10 @@ type CleanOptions struct {
 	Apply         bool
 	IncludeActive bool
 	MinSize       int64
+	// Confirm, when set with Apply, receives the dry-run result
+	// of the same scan before anything is deleted.
+	// An error from it stops the clean before any deletion.
+	Confirm func(dry clean.Result) error
 }
 
 // Clean scans the selected roots and cleans the caches that qualify.
@@ -87,17 +91,21 @@ func Clean(ctx context.Context, opts CleanOptions) (clean.Result, Inventory, err
 	if err != nil {
 		return clean.Result{}, inv, err
 	}
-	var res clean.Result
-	run := func() {
-		res = clean.Run(ctx, inv.Roots, inv.Sizes, clean.Options{
-			Apply:         opts.Apply,
-			IncludeActive: opts.IncludeActive,
-			MinSize:       opts.MinSize,
-			QuietHours:    inv.Rules.QuietHours,
-			Now:           inv.Now,
-			StillBusy:     func(root string) string { return agents.Busy(ctx, root, inv.Env.Home) },
-		})
+	copts := clean.Options{
+		IncludeActive: opts.IncludeActive,
+		MinSize:       opts.MinSize,
+		QuietHours:    inv.Rules.QuietHours,
+		Now:           inv.Now,
 	}
+	if opts.Apply && opts.Confirm != nil {
+		if err := opts.Confirm(clean.Run(ctx, inv.Roots, inv.Sizes, copts)); err != nil {
+			return clean.Result{}, inv, err
+		}
+	}
+	copts.Apply = opts.Apply
+	copts.StillBusy = func(root string) string { return agents.Busy(ctx, root, inv.Env.Home) }
+	var res clean.Result
+	run := func() { res = clean.Run(ctx, inv.Roots, inv.Sizes, copts) }
 	if opts.Apply {
 		change := disk.Track(inv.Env.Home, run)
 		res.HomeVolume = &change
@@ -108,8 +116,17 @@ func Clean(ctx context.Context, opts CleanOptions) (clean.Result, Inventory, err
 	return res, inv, nil
 }
 
+// GlobalOptions choose what CleanGlobal runs.
+type GlobalOptions struct {
+	global.Options
+	// Confirm, when set with Apply, receives the dry-run result
+	// of the same listing before any action runs.
+	// An error from it stops the clean before any action.
+	Confirm func(dry global.Result) error
+}
+
 // CleanGlobal runs the global rules' clean commands, or lists them without Apply.
-func CleanGlobal(ctx context.Context, opts global.Options) (global.Result, mise.Env, error) {
+func CleanGlobal(ctx context.Context, opts GlobalOptions) (global.Result, mise.Env, error) {
 	env := mise.EnvFromOS()
 	rs, err := LoadRules(env)
 	if err != nil {
@@ -117,12 +134,18 @@ func CleanGlobal(ctx context.Context, opts global.Options) (global.Result, mise.
 	}
 	r := global.New(env.Home)
 	entries := r.List(ctx, rs.Global)
+	dry := global.Options{IncludeClear: opts.IncludeClear}
 	if !opts.Apply {
-		return r.Clean(ctx, entries, opts), env, nil
+		return r.Clean(ctx, entries, dry), env, nil
+	}
+	if opts.Confirm != nil {
+		if err := opts.Confirm(r.Clean(ctx, entries, dry)); err != nil {
+			return global.Result{}, env, err
+		}
 	}
 	// The listing runs only lookups and checks, so measure after it.
 	var res global.Result
-	change := disk.Track(env.Home, func() { res = r.Clean(ctx, entries, opts) })
+	change := disk.Track(env.Home, func() { res = r.Clean(ctx, entries, opts.Options) })
 	res.HomeVolume = &change
 	return res, env, nil
 }

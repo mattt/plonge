@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -84,9 +85,14 @@ esac
 
 func connect(t *testing.T) *mcp.ClientSession {
 	t.Helper()
+	return connectServer(t, New())
+}
+
+func connectServer(t *testing.T, server *mcp.Server) *mcp.ClientSession {
+	t.Helper()
 	ctx := context.Background()
 	serverSide, clientSide := mcp.NewInMemoryTransports()
-	if _, err := New().Connect(ctx, serverSide, nil); err != nil {
+	if _, err := server.Connect(ctx, serverSide, nil); err != nil {
 		t.Fatal(err)
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
@@ -116,6 +122,31 @@ func call(t *testing.T, s *mcp.ClientSession, name string, args map[string]any, 
 	return ""
 }
 
+// dryRun runs a dry run with args and returns its preview token.
+func dryRun(t *testing.T, s *mcp.ClientSession, args map[string]any) string {
+	t.Helper()
+	var res struct {
+		Applied bool
+		Token   string `json:"preview_token"`
+	}
+	if msg := call(t, s, "clean", args, &res); msg != "" {
+		t.Fatal(msg)
+	}
+	if res.Applied || res.Token == "" {
+		t.Fatalf("dry run %v = %+v", args, res)
+	}
+	return res.Token
+}
+
+// applyArgs returns args with apply and token added.
+func applyArgs(args map[string]any, token string) map[string]any {
+	out := map[string]any{"apply": true, "preview_token": token}
+	for k, v := range args {
+		out[k] = v
+	}
+	return out
+}
+
 func TestToolDescriptionsAskForApproval(t *testing.T) {
 	env(t)
 	s := connect(t)
@@ -131,7 +162,7 @@ func TestToolDescriptionsAskForApproval(t *testing.T) {
 		t.Fatalf("tools = %v", byName)
 	}
 	clean := byName["clean"]
-	for _, want := range []string{"dry run", "approval", "apply"} {
+	for _, want := range []string{"dry run", "approval", "apply", "preview_token"} {
 		if !strings.Contains(clean.Description, want) {
 			t.Errorf("clean description lacks %q", want)
 		}
@@ -169,17 +200,18 @@ func TestCleanTool(t *testing.T) {
 	var res struct {
 		Applied bool
 		Items   []struct{ Status string }
+		Token   string `json:"preview_token"`
 	}
 	if msg := call(t, s, "clean", map[string]any{}, &res); msg != "" {
 		t.Fatal(msg)
 	}
-	if res.Applied || len(res.Items) != 1 || res.Items[0].Status != "would delete" {
+	if res.Applied || len(res.Items) != 1 || res.Items[0].Status != "would delete" || res.Token == "" {
 		t.Errorf("dry run = %+v", res)
 	}
 	if _, err := os.Stat(cache); err != nil {
 		t.Fatalf("the dry run touched the cache: %v", err)
 	}
-	if msg := call(t, s, "clean", map[string]any{"apply": true}, &res); msg != "" {
+	if msg := call(t, s, "clean", applyArgs(nil, res.Token), &res); msg != "" {
 		t.Fatal(msg)
 	}
 	if !res.Applied || res.Items[0].Status != "deleted" {
@@ -206,7 +238,7 @@ func TestCleanToolKeepsCachesWhenPaseoFails(t *testing.T) {
 		} `json:"not_selected"`
 		Sources []struct{ Name, Status, Reason string } `json:"activity_sources"`
 	}
-	for _, args := range []map[string]any{{}, {"apply": true, "include_active": true}} {
+	for _, args := range []map[string]any{{}, applyArgs(map[string]any{"include_active": true}, dryRun(t, s, map[string]any{"include_active": true}))} {
 		if msg := call(t, s, "clean", args, &res); msg != "" {
 			t.Fatal(msg)
 		}
@@ -230,7 +262,7 @@ func TestCleanToolIncludeActive(t *testing.T) {
 	}
 	s := connect(t)
 	var res struct{ Items []struct{ Status string } }
-	if msg := call(t, s, "clean", map[string]any{"apply": true}, &res); msg != "" {
+	if msg := call(t, s, "clean", applyArgs(nil, dryRun(t, s, nil)), &res); msg != "" {
 		t.Fatal(msg)
 	}
 	if len(res.Items) != 0 {
@@ -261,7 +293,8 @@ func TestCleanToolGlobal(t *testing.T) {
 		}
 		return ""
 	}
-	if msg := call(t, s, "clean", map[string]any{"global": true, "apply": true}, &res); msg != "" {
+	plain := map[string]any{"global": true}
+	if msg := call(t, s, "clean", applyArgs(plain, dryRun(t, s, plain)), &res); msg != "" {
 		t.Fatal(msg)
 	}
 	if status() != "skipped" {
@@ -270,14 +303,14 @@ func TestCleanToolGlobal(t *testing.T) {
 	if _, err := os.Stat(blob); err != nil {
 		t.Fatalf("a clear rule ran: %v", err)
 	}
-	if msg := call(t, s, "clean", map[string]any{"global": true, "include_clear": true}, &res); msg != "" {
+	clear := map[string]any{"global": true, "include_clear": true}
+	if msg := call(t, s, "clean", clear, &res); msg != "" {
 		t.Fatal(msg)
 	}
 	if status() != "would run" {
 		t.Errorf("dry run: %+v", res)
 	}
-	args := map[string]any{"global": true, "apply": true, "include_clear": true}
-	if msg := call(t, s, "clean", args, &res); msg != "" {
+	if msg := call(t, s, "clean", applyArgs(clear, dryRun(t, s, clear)), &res); msg != "" {
 		t.Fatal(msg)
 	}
 	if status() != "ran" || res.FreedBytes < 50_000 {
@@ -297,6 +330,7 @@ func TestCleanToolRejectsBadCombinations(t *testing.T) {
 		{"global": true, "include_active": true},
 		{"global": true, "min_size": "1G"},
 		{"min_size": "lots"},
+		{"preview_token": "x"},
 	} {
 		if msg := call(t, s, "clean", args, &res); msg == "" {
 			t.Errorf("clean(%v) gave no error", args)
@@ -352,5 +386,187 @@ func TestScanToolKeepsProjectsInsideRootOutsideGit(t *testing.T) {
 	}
 	if len(res.Items) != 1 || res.Items[0].Path != filepath.Join(project, "node_modules") {
 		t.Errorf("clean items = %+v", res.Items)
+	}
+}
+
+func TestCleanToolApplyNeedsToken(t *testing.T) {
+	_, project := env(t)
+	s := connect(t)
+	var res any
+	for _, args := range []map[string]any{
+		{"apply": true},
+		{"apply": true, "global": true, "include_clear": true},
+		{"apply": true, "preview_token": "made-up"},
+	} {
+		msg := call(t, s, "clean", args, &res)
+		if msg == "" || !strings.Contains(msg, "preview_token") {
+			t.Errorf("clean(%v) = %q", args, msg)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(project, "node_modules")); err != nil {
+		t.Errorf("apply without a token deleted the cache: %v", err)
+	}
+}
+
+func TestCleanToolTokenDeletesExactlyThePreview(t *testing.T) {
+	home, project := env(t)
+	other := filepath.Join(home, "code", "lib")
+	if out, err := exec.Command("git", "init", "-q", other).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	mkfile(t, filepath.Join(other, "mise.toml"), "")
+	mkfile(t, filepath.Join(other, ".gitignore"), ".venv/\n")
+	mkfile(t, filepath.Join(other, ".venv", "lib.py"), "x")
+	old := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(filepath.Join(other, ".git", "HEAD"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	tracked := filepath.Join(home, "state", "mise", "tracked-configs", "lib")
+	if err := os.Symlink(filepath.Join(other, "mise.toml"), tracked); err != nil {
+		t.Fatal(err)
+	}
+	s := connect(t)
+	token := dryRun(t, s, nil)
+	var res struct {
+		Items []struct{ Path, Status string }
+	}
+	if msg := call(t, s, "clean", applyArgs(nil, token), &res); msg != "" {
+		t.Fatal(msg)
+	}
+	var deleted []string
+	for _, it := range res.Items {
+		if it.Status == "deleted" {
+			deleted = append(deleted, it.Path)
+		}
+	}
+	want := []string{filepath.Join(project, "node_modules"), filepath.Join(other, ".venv")}
+	if len(deleted) != 2 || !slices.Contains(deleted, want[0]) || !slices.Contains(deleted, want[1]) {
+		t.Errorf("deleted %v, want %v", deleted, want)
+	}
+	for _, p := range want {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s is still there: %v", p, err)
+		}
+	}
+	if msg := call(t, s, "clean", applyArgs(nil, token), &res); !strings.Contains(msg, "unknown preview_token") {
+		t.Errorf("second use of the token = %q", msg)
+	}
+}
+
+func TestCleanToolRefusesChangedSelection(t *testing.T) {
+	cases := map[string]func(t *testing.T, home, project string){
+		"cache grew": func(t *testing.T, _, project string) {
+			mkfile(t, filepath.Join(project, "node_modules", "y.js"), strings.Repeat("y", 50_000))
+		},
+		"cache appeared": func(t *testing.T, _, project string) {
+			mkfile(t, filepath.Join(project, ".gitignore"), "node_modules/\n.venv/\n")
+			mkfile(t, filepath.Join(project, ".venv", "lib.py"), "x")
+		},
+		"cache disappeared": func(t *testing.T, _, project string) {
+			if err := os.RemoveAll(filepath.Join(project, "node_modules")); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			home, project := env(t)
+			s := connect(t)
+			token := dryRun(t, s, nil)
+			change(t, home, project)
+			var res any
+			msg := call(t, s, "clean", applyArgs(nil, token), &res)
+			if !strings.Contains(msg, "selection changed") || !strings.Contains(msg, project) {
+				t.Errorf("apply = %q", msg)
+			}
+			if name != "cache disappeared" {
+				if _, err := os.Stat(filepath.Join(project, "node_modules")); err != nil {
+					t.Errorf("the cache was deleted: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestCleanToolRefusesTokenForOtherArguments(t *testing.T) {
+	home, project := env(t)
+	s := connect(t)
+	var res any
+	for _, args := range []map[string]any{
+		{"include_active": true},
+		{"min_size": "1KiB"},
+		{"global": true},
+	} {
+		msg := call(t, s, "clean", applyArgs(args, dryRun(t, s, nil)), &res)
+		if !strings.Contains(msg, "other arguments") {
+			t.Errorf("%v: apply = %q", args, msg)
+		}
+	}
+	global := map[string]any{"global": true}
+	clear := map[string]any{"global": true, "include_clear": true}
+	if msg := call(t, s, "clean", applyArgs(clear, dryRun(t, s, global)), &res); !strings.Contains(msg, "other arguments") {
+		t.Errorf("include_clear: apply = %q", msg)
+	}
+	if _, err := os.Stat(filepath.Join(project, "node_modules")); err != nil {
+		t.Errorf("the cache was deleted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "gocache", "blob")); err != nil {
+		t.Errorf("a global rule ran: %v", err)
+	}
+}
+
+func TestCleanToolRefusesChangedGlobalSelection(t *testing.T) {
+	home, _ := env(t)
+	s := connect(t)
+	clear := map[string]any{"global": true, "include_clear": true}
+	token := dryRun(t, s, clear)
+	// The fake go now reports another cache directory.
+	moved := filepath.Join(home, "gocache2")
+	mkfile(t, filepath.Join(moved, "blob"), "x")
+	gobin := filepath.Join(os.Getenv("PATH"), "go")
+	body, err := os.ReadFile(gobin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = []byte(strings.Replace(string(body), "echo "+fmt.Sprintf("%q", filepath.Join(home, "gocache")), "echo "+fmt.Sprintf("%q", moved), 1))
+	if err := os.WriteFile(gobin, body, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var res any
+	msg := call(t, s, "clean", applyArgs(clear, token), &res)
+	if !strings.Contains(msg, "changed: go-build") {
+		t.Errorf("apply = %q", msg)
+	}
+	if _, err := os.Stat(filepath.Join(home, "gocache", "blob")); err != nil {
+		t.Errorf("the rule ran: %v", err)
+	}
+}
+
+func TestCleanToolTokenExpires(t *testing.T) {
+	_, project := env(t)
+	now := time.Now()
+	s := connectServer(t, newServer(func() time.Time { return now }))
+	token := dryRun(t, s, nil)
+	now = now.Add(previewTTL + time.Second)
+	var res any
+	if msg := call(t, s, "clean", applyArgs(nil, token), &res); !strings.Contains(msg, "expired") {
+		t.Errorf("apply = %q", msg)
+	}
+	if _, err := os.Stat(filepath.Join(project, "node_modules")); err != nil {
+		t.Errorf("the cache was deleted: %v", err)
+	}
+}
+
+func TestPreviewsKeepOnlyTheNewest(t *testing.T) {
+	p := newPreviews(time.Now)
+	first, _ := p.add(cleanArgs{}, selection{})
+	for range maxPreviews {
+		p.add(cleanArgs{}, selection{})
+	}
+	if _, err := p.take(first); err == nil {
+		t.Error("the oldest preview was kept")
+	}
+	if len(p.tokens) != maxPreviews || len(p.order) != maxPreviews {
+		t.Errorf("kept %d tokens, %d in order", len(p.tokens), len(p.order))
 	}
 }
