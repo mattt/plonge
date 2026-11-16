@@ -134,7 +134,7 @@ func guardCache(ctx context.Context, c Candidate, measure bool) (int64, string) 
 // except for the repositories that layout lets through,
 // which checkManaged then checks with Git. The size of a refused dir is 0.
 func guardTree(ctx context.Context, dir string, layout *packageLayout, measure bool) (int64, string) {
-	size, reason, repos := walkCache(dir, measure, true, layout)
+	size, reason, repos := walkCache(dir, nil, measure, true, layout)
 	if reason == "" && len(repos) > 0 {
 		reason = checkManaged(ctx, dir, layout, repos)
 	}

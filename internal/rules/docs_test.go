@@ -29,7 +29,8 @@ func TestDocumentedRules(t *testing.T) {
 					body := example[1]
 					// Field-only snippets describe part of a global rule.
 					// Decode them into Global so unknown fields cannot pass silently.
-					if strings.HasPrefix(body, "path =") || strings.HasPrefix(body, "refuse_names =") {
+					if strings.HasPrefix(body, "path =") || strings.HasPrefix(body, "refuse_names =") ||
+						strings.HasPrefix(body, "keep_names =") {
 						var g Global
 						md, err := toml.Decode(body, &g)
 						if err != nil {

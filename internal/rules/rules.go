@@ -95,6 +95,10 @@ type Global struct {
 	// cannot restore. Plonge skips a delete_contents rule when its path
 	// holds an entry with one of these names at any depth.
 	RefuseNames []string `toml:"refuse_names"`
+	// KeepNames are the names of entries directly in Path that plonge
+	// leaves in place. It does not delete, measure, or check them,
+	// so a Git repository inside one does not refuse the rule.
+	KeepNames []string `toml:"keep_names"`
 
 	// Check is a command that must succeed before the rule runs.
 	// It must not change anything.
@@ -229,6 +233,14 @@ func (g Global) validate() error {
 	for _, n := range g.RefuseNames {
 		if !validName(n) {
 			return fmt.Errorf("global rule %q: refuse_names: invalid name %q", g.ID, n)
+		}
+	}
+	if len(g.KeepNames) > 0 && !g.DeleteContents {
+		return fmt.Errorf("global rule %q: keep_names needs delete_contents", g.ID)
+	}
+	for _, n := range g.KeepNames {
+		if !validName(n) {
+			return fmt.Errorf("global rule %q: keep_names: invalid name %q", g.ID, n)
 		}
 	}
 	if g.DeleteContents {

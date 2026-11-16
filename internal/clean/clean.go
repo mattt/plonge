@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
@@ -188,27 +189,31 @@ func RemoveTree(path string) error {
 	return os.RemoveAll(path)
 }
 
-// RemoveContents deletes everything in dir and keeps dir itself.
+// RemoveContents deletes everything in dir and keeps dir itself,
+// with the entries directly in dir that keep names.
 // Like RemoveTree, it makes the tree writable and tries again
 // when permissions stop the removal, and it does not follow symlinks.
-func RemoveContents(dir string) error {
-	err := removeEntries(dir)
+func RemoveContents(dir string, keep ...string) error {
+	err := removeEntries(dir, keep)
 	if err == nil || !errors.Is(err, fs.ErrPermission) {
 		return err
 	}
 	if info, err := os.Lstat(dir); err == nil && info.IsDir() {
 		addWritable(dir, info)
 	}
-	return removeEntries(dir)
+	return removeEntries(dir, keep)
 }
 
-func removeEntries(dir string) error {
+func removeEntries(dir string, keep []string) error {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
 	var errs []error
 	for _, ent := range ents {
+		if slices.Contains(keep, ent.Name()) {
+			continue
+		}
 		if err := RemoveTree(filepath.Join(dir, ent.Name())); err != nil {
 			errs = append(errs, err)
 		}

@@ -2,7 +2,9 @@ package global
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -385,29 +387,32 @@ func TestDefaultZigRule(t *testing.T) {
 	}
 }
 
+// rubyGemsSetup makes a fake gem whose env gemdir prints a gem directory
+// under a temporary directory, and returns the default rubygems-cache rule.
+// The fake records its calls in log.
+func rubyGemsSetup(t *testing.T) (r Runner, gemdir, log string, rule rules.Global) {
+	t.Helper()
+	r, tmp, _, _ := deleteSetup(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	gemdir = filepath.Join(tmp, "gems", "4.0.0")
+	log = filepath.Join(tmp, "gem.log")
+	addTool(t, bin, "gem", fmt.Sprintf(`echo "$*" >> %q; [ "$*" = "env gemdir" ] && echo %q`, log, gemdir))
+	return r, gemdir, log, defaultRule(t, "rubygems-cache")
+}
+
 // TestDefaultRubyGemsRule finds RubyGems' cache below the gem directory
 // that a fake gem env gemdir prints, and deletes only its contents.
 func TestDefaultRubyGemsRule(t *testing.T) {
-	r, tmp, _, _ := deleteSetup(t)
-	bin := filepath.SplitList(os.Getenv("PATH"))[0]
-	gemdir := filepath.Join(tmp, "gems", "4.0.0")
+	r, gemdir, log, rule := rubyGemsSetup(t)
 	cache := filepath.Join(gemdir, "cache")
 	installed := filepath.Join(gemdir, "gems", "rack-3.1.0", "lib", "rack.rb")
 	addFile(t, filepath.Join(cache, "rack-3.1.0.gem"))
 	addFile(t, installed)
-	log := filepath.Join(tmp, "gem.log")
-	addTool(t, bin, "gem", fmt.Sprintf(`echo "$*" >> %q; [ "$*" = "env gemdir" ] && echo %q`, log, gemdir))
-	var rule rules.Global
-	for _, g := range rules.Default().Global {
-		if g.ID == "rubygems-cache" {
-			rule = g
-		}
-	}
 	ctx := context.Background()
 	entries := r.List(ctx, []rules.Global{rule})
 	e := entries[0]
 	if e.Skipped != "" || e.Path != cache || e.Kind != "clear" ||
-		e.Command != "delete contents of "+cache+" (built in)" {
+		e.Command != "delete contents of "+cache+" except bundler (built in)" {
 		t.Fatalf("entry = %+v", e)
 	}
 	if res := r.Clean(ctx, entries, Options{Apply: true}); res.Outcomes[0].Status == Ran {
@@ -426,6 +431,96 @@ func TestDefaultRubyGemsRule(t *testing.T) {
 	data, err := os.ReadFile(log)
 	if err != nil || strings.TrimSpace(string(data)) != "env gemdir" {
 		t.Errorf("gem calls = %q, err = %v", data, err)
+	}
+}
+
+// bundlerGitClone makes a repository with one commit and clones it bare
+// into dir, as Bundler clones a gem's Git source into its cache.
+func bundlerGitClone(t *testing.T, dir string) {
+	t.Helper()
+	src := filepath.Join(t.TempDir(), "rack")
+	commitRepo(t, src)
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, filepath.Dir(dir), "clone", "--bare", "--no-hardlinks", "--quiet", "--", src, dir)
+}
+
+// TestRubyGemsRuleKeepsBundlerGitClones deletes the .gem files in the gem
+// cache and leaves cache/bundler, where Bundler keeps a bare clone of each
+// gem's Git source, which can hold commits that no remote has any longer.
+func TestRubyGemsRuleKeepsBundlerGitClones(t *testing.T) {
+	r, gemdir, _, rule := rubyGemsSetup(t)
+	cache := filepath.Join(gemdir, "cache")
+	gem := filepath.Join(cache, "rack-3.1.0.gem")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gem, make([]byte, 100_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	clone := filepath.Join(cache, "bundler", "git", "rack-0123456789abcdef0123456789abcdef01234567")
+	bundlerGitClone(t, clone)
+	// The kept directory is left out of the size.
+	if err := os.WriteFile(filepath.Join(cache, "bundler", "big"), make([]byte, 1_000_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	entries := r.List(ctx, []rules.Global{rule})
+	e := entries[0]
+	if e.Skipped != "" || e.Bytes < 100_000 || e.Bytes >= 1_000_000 {
+		t.Fatalf("entry = %+v", e)
+	}
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	if o := res.Outcomes[0]; o.Status != Ran || o.FreedBytes < 100_000 {
+		t.Errorf("outcome = %+v", o)
+	}
+	if _, err := os.Lstat(gem); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("kept the .gem file: %v", err)
+	}
+	gitRun(t, clone, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+}
+
+// TestRubyGemsRuleRefusesOtherRepositories skips the rule when a Git
+// repository is in the gem cache anywhere other than cache/bundler,
+// even one that looks like Bundler's bare clones.
+func TestRubyGemsRuleRefusesOtherRepositories(t *testing.T) {
+	cases := map[string]struct {
+		make func(t *testing.T, cache string)
+		want string
+	}{
+		"repository": {
+			func(t *testing.T, cache string) { commitRepo(t, filepath.Join(cache, "work")) },
+			"contains a Git repository at work",
+		},
+		"bare clone outside cache/bundler": {
+			func(t *testing.T, cache string) {
+				bundlerGitClone(t, filepath.Join(cache, "git", "rack-0123456789abcdef0123456789abcdef01234567"))
+			},
+			"contains a Git directory at git/rack-0123456789abcdef0123456789abcdef01234567",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			r, gemdir, _, rule := rubyGemsSetup(t)
+			cache := filepath.Join(gemdir, "cache")
+			gem := filepath.Join(cache, "rack-3.1.0.gem")
+			addFile(t, gem)
+			bundlerGitClone(t, filepath.Join(cache, "bundler", "git", "rack-0123456789abcdef0123456789abcdef01234567"))
+			tc.make(t, cache)
+			ctx := context.Background()
+			entries := r.List(ctx, []rules.Global{rule})
+			if e := entries[0]; e.Skipped != tc.want || e.Command != "" {
+				t.Fatalf("entry = %+v, want skipped %q", e, tc.want)
+			}
+			res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+			if o := res.Outcomes[0]; o.Status != Skipped || o.FreedBytes != 0 {
+				t.Errorf("outcome = %+v", o)
+			}
+			if _, err := os.Stat(gem); err != nil {
+				t.Errorf("deleted the cache of a refused rule: %v", err)
+			}
+		})
 	}
 }
 
@@ -565,7 +660,7 @@ func TestCargoRulesFollowCargoHome(t *testing.T) {
 			for i, sub := range []string{"registry"} {
 				e := entries[i]
 				path := filepath.Join(cargoHome, sub)
-				if e.Skipped != "" || e.Path != path || e.Command != r.deleteAction(path) {
+				if e.Skipped != "" || e.Path != path || e.Command != r.deleteAction(path, nil) {
 					t.Fatalf("%s = %+v", sub, e)
 				}
 			}
@@ -636,7 +731,7 @@ func TestGradleCachesFollowGradleUserHome(t *testing.T) {
 			ctx := context.Background()
 			entries := r.List(ctx, []rules.Global{defaultRule(t, "gradle-caches")})
 			if e := entries[0]; e.Skipped != "" || e.Path != caches || e.Kind != rules.KindClear ||
-				e.Command != r.deleteAction(caches) {
+				e.Command != r.deleteAction(caches, nil) {
 				t.Fatalf("entry = %+v", e)
 			}
 			if res := r.Clean(ctx, entries, Options{Apply: true}); res.Outcomes[0].Status != Skipped {
