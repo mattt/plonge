@@ -218,6 +218,9 @@ func TestXcodeRefusesFoldersWithWork(t *testing.T) {
 	unrelated, _ := staleWithClones(t, r.Home, root, "Unrelated")
 	commitRepo(t, filepath.Join(unrelated, "Build", "Intermediates.noindex", "notes"))
 
+	linked, _ := staleWithClones(t, r.Home, root, "Linked")
+	linkedGitDir(t, filepath.Join(linked, "SourcePackages", "repositories", "linked"))
+
 	unreadable := derivedFolder(t, root, "Unreadable-abc", fmt.Sprintf(plistFormat, filepath.Join(r.Home, "Unreadable.xcworkspace")))
 	locked := filepath.Join(unreadable, "Build", "Locked")
 	if err := os.Mkdir(locked, 0o000); err != nil {
@@ -243,6 +246,7 @@ func TestXcodeRefusesFoldersWithWork(t *testing.T) {
 		detached:   "contains a Git repository at SourcePackages/checkouts/dep that has commits that only its HEAD, local branches, tags, or reflogs hold",
 		attached:   "contains a Git repository at SourcePackages/checkouts/dep that has commits that only its HEAD, local branches, tags, or reflogs hold",
 		unrelated:  "contains a Git repository at Build/Intermediates.noindex/notes",
+		linked:     "contains a Git directory at SourcePackages/repositories/linked",
 		unreadable: "cannot check for Git repositories: ",
 	}
 	if len(e.RefusedFolders) != len(want) {
@@ -275,7 +279,8 @@ func TestXcodeRefusesFoldersWithWork(t *testing.T) {
 
 // TestXcodeRechecksRepositoriesBeforeDeleting adds a repository to a stale
 // folder after the listing, an untracked file to the clones of another one,
-// and a commit at HEAD to a third, and deletes only a fourth.
+// a commit at HEAD to a third, and a linked worktree's Git directory
+// to a fourth, and deletes only a fifth.
 // The outcome's size and action count only the folder that it deleted.
 func TestXcodeRechecksRepositoriesBeforeDeleting(t *testing.T) {
 	bin := t.TempDir()
@@ -286,11 +291,12 @@ func TestXcodeRechecksRepositoriesBeforeDeleting(t *testing.T) {
 	cloned, checkout := staleWithClones(t, r.Home, root, "Cloned")
 	committed, committedCheckout := staleWithClones(t, r.Home, root, "Committed")
 	accepted, _ := staleWithClones(t, r.Home, root, "Accepted")
+	linked, _ := staleWithClones(t, r.Home, root, "Linked")
 
 	ctx := context.Background()
 	entries := r.List(ctx, nil)
 	listed := entries[0]
-	if !strings.Contains(listed.Command, "delete 4 stale") || len(listed.RefusedFolders) != 0 {
+	if !strings.Contains(listed.Command, "delete 5 stale") || len(listed.RefusedFolders) != 0 {
 		t.Fatalf("entry = %+v", listed)
 	}
 	commitRepo(t, filepath.Join(plain, "Build", "repo"))
@@ -298,11 +304,12 @@ func TestXcodeRechecksRepositoriesBeforeDeleting(t *testing.T) {
 		t.Fatal(err)
 	}
 	commitAtHead(t, committedCheckout, false)
+	linkedGitDir(t, filepath.Join(linked, "SourcePackages", "repositories", "linked"))
 	acceptedBytes := scan.DiskUsage(accepted)
 
 	res := r.Clean(ctx, entries, Options{Apply: true})
 	o := res.Outcomes[0]
-	if o.Status != Ran || len(o.RefusedFolders) != 3 {
+	if o.Status != Ran || len(o.RefusedFolders) != 4 {
 		t.Errorf("outcome = %+v", o)
 	}
 	if !strings.Contains(o.Command, "delete 1 stale") || o.Bytes != acceptedBytes || res.FreedBytes != acceptedBytes {
@@ -316,13 +323,13 @@ func TestXcodeRechecksRepositoriesBeforeDeleting(t *testing.T) {
 	if want := fmt.Sprintf(`"bytes":%d,"command":"delete 1 stale`, acceptedBytes); !strings.Contains(buf.String(), want) {
 		t.Errorf("JSON %s lacks %s", buf.String(), want)
 	}
-	if e := entries[0]; len(e.RefusedFolders) != 0 || e.Command != listed.Command || e.Bytes != listed.Bytes || len(e.stale) != 4 {
+	if e := entries[0]; len(e.RefusedFolders) != 0 || e.Command != listed.Command || e.Bytes != listed.Bytes || len(e.stale) != 5 {
 		t.Errorf("the listed entry changed: %+v", e)
 	}
 	if _, err := os.Stat(accepted); !os.IsNotExist(err) {
 		t.Errorf("the accepted folder is still there: %v", err)
 	}
-	for _, folder := range []string{plain, cloned, committed} {
+	for _, folder := range []string{plain, cloned, committed, linked} {
 		if _, err := os.Stat(filepath.Join(folder, "Build", "blob")); err != nil {
 			t.Errorf("%s lost its files: %v", filepath.Base(folder), err)
 		}

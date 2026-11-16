@@ -67,6 +67,33 @@ func newRepo(t *testing.T, dir string, files map[string]string) {
 	run(t, dir, "commit", "-q", "--allow-empty", "-m", "init")
 }
 
+// linkedGitDir copies the Git directory of a real linked worktree to dst.
+// Git keeps that directory in the main repository's .git/worktrees,
+// with HEAD, commondir, and gitdir but no objects of its own.
+func linkedGitDir(t *testing.T, dst string) {
+	t.Helper()
+	main := filepath.Join(t.TempDir(), "main")
+	newRepo(t, main, map[string]string{"work.txt": "keep"})
+	run(t, main, "worktree", "add", "-q", "--detach", filepath.Join(filepath.Dir(main), "wt"))
+	src := filepath.Join(main, ".git", "worktrees", "wt")
+	if isDir(filepath.Join(src, "objects")) {
+		t.Fatalf("%s has its own objects", src)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func remove(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func found(root Root) map[string]string {
 	m := map[string]string{}
 	for _, c := range root.Candidates {
@@ -631,6 +658,42 @@ func TestMeasureRefusesGitRepositories(t *testing.T) {
 			},
 			reason: "contains a Git directory at mirror.git",
 		},
+		{
+			name: "linked worktree's Git directory",
+			setup: func(t *testing.T, root string) {
+				linkedGitDir(t, filepath.Join(root, "node_modules", "pkg", "wt"))
+			},
+			reason: "contains a Git directory at pkg/wt",
+		},
+		{
+			name: "Git directory with commondir only",
+			setup: func(t *testing.T, root string) {
+				wt := filepath.Join(root, "node_modules", "wt")
+				linkedGitDir(t, wt)
+				remove(t, filepath.Join(wt, "gitdir"))
+			},
+			reason: "contains a Git directory at wt",
+		},
+		{
+			name: "Git directory with gitdir only",
+			setup: func(t *testing.T, root string) {
+				wt := filepath.Join(root, "node_modules", "wt")
+				linkedGitDir(t, wt)
+				remove(t, filepath.Join(wt, "commondir"))
+			},
+			reason: "contains a Git directory at wt",
+		},
+		{
+			name: "cache that is a linked worktree's Git directory",
+			setup: func(t *testing.T, root string) {
+				build := filepath.Join(root, "build")
+				if err := os.RemoveAll(build); err != nil {
+					t.Fatal(err)
+				}
+				linkedGitDir(t, build)
+			},
+			reason: "is a Git directory",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -802,6 +865,27 @@ func TestVerifyRefusesInsidePath(t *testing.T) {
 	}
 }
 
+// TestVerifyRefusesLinkedGitDir refuses a cache that gets a linked
+// worktree's Git directory after the scan.
+func TestVerifyRefusesLinkedGitDir(t *testing.T) {
+	isolateGit(t)
+	root := filepath.Join(t.TempDir(), "repo")
+	newRepo(t, root, map[string]string{".gitignore": "node_modules/\n", "package.json": "{}"})
+	write(t, filepath.Join(root, "node_modules", "x", "index.js"), "")
+
+	roots := []Root{Detect(context.Background(), root, rules.Default())}
+	Measure(context.Background(), roots)
+	if len(roots[0].Candidates) != 1 {
+		t.Fatalf("candidates %+v, refused %+v", roots[0].Candidates, roots[0].Refused)
+	}
+	c := roots[0].Candidates[0]
+	linkedGitDir(t, filepath.Join(c.Path, "x", "wt"))
+	reason, err := Verify(context.Background(), root, c)
+	if err != nil || reason != "contains a Git directory at x/wt" {
+		t.Errorf("reason %q, err %v", reason, err)
+	}
+}
+
 // pathRuleRepo makes a repository with a cache that the path rule "out/gen"
 // matches, and returns rules in which refuse_inside protects keep in it.
 func pathRuleRepo(t *testing.T) (r rules.Rules, root, cache string) {
@@ -926,5 +1010,21 @@ func TestWalkKeepsOnlyTopLevelNames(t *testing.T) {
 	write(t, filepath.Join(dir, "other", "bundler", ".git", "HEAD"), "x")
 	if got := GitRefusal(dir, "bundler"); got != "contains a Git repository at other/bundler" {
 		t.Errorf("GitRefusal with a nested name = %q", got)
+	}
+}
+
+// TestWalkKeepsLinkedGitDirInKeptName lets a linked worktree's Git directory
+// in a kept entry through, and refuses one anywhere else.
+func TestWalkKeepsLinkedGitDirInKeptName(t *testing.T) {
+	isolateGit(t)
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "a.gem"), "x")
+	linkedGitDir(t, filepath.Join(dir, "bundler", "git", "wt"))
+	if got := GitRefusal(dir, "bundler"); got != "" {
+		t.Errorf("GitRefusal with keep = %q", got)
+	}
+	linkedGitDir(t, filepath.Join(dir, "gems", "wt"))
+	if got := GitRefusal(dir, "bundler"); got != "contains a Git directory at gems/wt" {
+		t.Errorf("GitRefusal outside the kept entry = %q", got)
 	}
 }

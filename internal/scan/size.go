@@ -153,11 +153,13 @@ func matchInside(dir string, elems []string) (string, error) {
 // With measure, it adds up the bytes, as DiskUsage describes.
 // With guard, it stops at the first Git repository and returns why dir
 // must not be deleted: a .git entry of any type at any depth,
-// a Git directory (HEAD beside objects and refs) at any depth,
+// a Git directory at any depth, which is HEAD beside objects and refs
+// or beside a commondir or gitdir entry, as sharesGitDir describes,
 // or a directory that it cannot read, which could hide either.
 // With a layout, it does not refuse the repositories that SwiftPM manages:
 // a .git directory directly in a checkout, and a Git directory directly
-// in repositories. It returns them so that the caller can check them with Git.
+// in repositories, unless either one shares another Git directory.
+// It returns them so that the caller can check them with Git.
 func walkCache(dir string, keep []string, measure, guard bool, layout *packageLayout) (int64, string, []managedRepo) {
 	var t tally
 	var reason string
@@ -293,6 +295,12 @@ func gitReason(dir, path string, d fs.DirEntry, layout *packageLayout, repos *[]
 			return ""
 		}
 		parent := filepath.Dir(path)
+		// A Git directory that shares another one's objects and refs,
+		// such as a linked worktree's, may have neither of its own.
+		// SwiftPM makes no such directory, so the walk never lets one through.
+		if sharesGitDir(parent) {
+			return repoReason(dir, parent, "a Git directory")
+		}
 		if isDir(filepath.Join(parent, "objects")) && isDir(filepath.Join(parent, "refs")) {
 			// The walk reaches a checkout's .git directory only after
 			// it has let the checkout through.
@@ -309,6 +317,16 @@ func gitReason(dir, path string, d fs.DirEntry, layout *packageLayout, repos *[]
 	return ""
 }
 
+// sharesGitDir reports whether gitDir, a directory that holds HEAD,
+// has a commondir or gitdir entry of any type.
+// Git's repository layout documentation (gitrepository-layout, Git 2.56.0)
+// says that commondir names the repository that holds the objects and refs
+// that gitDir lacks, and that gitdir in a linked worktree's Git directory
+// names the worktree's .git file.
+func sharesGitDir(gitDir string) bool {
+	return exists(filepath.Join(gitDir, "commondir")) || exists(filepath.Join(gitDir, "gitdir"))
+}
+
 func repoReason(dir, repo, what string) string {
 	if repo == dir {
 		return "is " + what
@@ -318,6 +336,11 @@ func repoReason(dir, repo, what string) string {
 		rel = repo
 	}
 	return "contains " + what + " at " + filepath.ToSlash(rel)
+}
+
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 func isDir(path string) bool {

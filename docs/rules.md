@@ -142,7 +142,13 @@ A missing or unreadable transcript directory is reported as a skipped source.
 An ignored cache can contain a dependency cloned from Git,
 with commits or edits that the enclosing repository cannot see.
 Plonge refuses a cache with a `.git` entry of any type at any depth,
-or a Git directory (`HEAD` beside `objects` and `refs`), such as a bare clone.
+or a Git directory at any depth.
+A Git directory holds `HEAD` beside `objects` and `refs`, as a bare clone does,
+or beside a `commondir` or `gitdir` entry, as a linked worktree's
+Git directory in `.git/worktrees/<name>` does.
+Git's repository layout documentation (`gitrepository-layout`) describes
+these files: such a directory can share its objects and refs
+with another repository and have none of its own.
 It also refuses a cache with a directory it cannot read,
 because that directory could hide a repository.
 It checks while measuring the cache and again before deletion,
@@ -193,7 +199,9 @@ Plonge does not refuse these repositories when SwiftPM can make them again:
 
 Plonge refuses the `.build` directory for any other Git repository in it,
 including a repository inside a checkout, such as a submodule,
-and the reason names the path:
+and a Git directory with a `commondir` or `gitdir` entry,
+such as the Git directory of a checkout's linked worktree.
+The reason names the path:
 
 ```console
 Refused ~/code/app/.build: contains a Git repository at checkouts/swift-nio that has changed, untracked, or ignored files

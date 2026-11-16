@@ -346,7 +346,8 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 			setup: func(t *testing.T, p swiftPackage) {
 				run(t, p.checkout, "worktree", "add", "-q", "--detach", filepath.Join(filepath.Dir(p.root), "wt"))
 			},
-			reason: checkout + "that has linked worktrees",
+			// The walk finds the worktree's Git directory before Git checks the checkout.
+			reason: "contains a Git directory at checkouts/dep/.git/worktrees/wt",
 		},
 		{
 			name: "worktree-style .git file in checkouts",
@@ -381,7 +382,21 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 			setup: func(t *testing.T, p swiftPackage) {
 				run(t, p.mirror, "worktree", "add", "-q", "--detach", filepath.Join(filepath.Dir(p.root), "wt"))
 			},
-			reason: "contains a Git directory at repositories/dep-95d00fdd that has linked worktrees",
+			reason: "contains a Git directory at repositories/dep-95d00fdd/worktrees/wt",
+		},
+		{
+			name: "linked worktree's Git directory in repositories",
+			setup: func(t *testing.T, p swiftPackage) {
+				linkedGitDir(t, filepath.Join(p.cache, "repositories", "linked"))
+			},
+			reason: "contains a Git directory at repositories/linked",
+		},
+		{
+			name: "checkout whose .git directory has commondir",
+			setup: func(t *testing.T, p swiftPackage) {
+				write(t, filepath.Join(p.checkout, ".git", "commondir"), p.mirror+"\n")
+			},
+			reason: "contains a Git directory at checkouts/dep/.git",
 		},
 		{
 			name: "clone that is not bare in repositories",
