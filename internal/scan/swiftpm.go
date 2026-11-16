@@ -17,8 +17,10 @@ import (
 // and a bare clone in repositories/<name>; "swift package resolve"
 // and "xcodebuild -resolvePackageDependencies" make both again.
 type packageLayout struct {
-	dir      string // the directory that holds checkouts and repositories
-	resolved string // the Package.resolved file beside Package.swift
+	dir string // the directory that holds checkouts and repositories
+	// resolved is the Package.resolved file beside Package.swift,
+	// or "" when there is no pin file to check the clones against.
+	resolved string
 }
 
 // swiftPMLayout returns the layout of c when c is a SwiftPM cache:
@@ -70,15 +72,44 @@ type managedRepo struct {
 // except for the repositories that SwiftPM manages in a SwiftPM cache,
 // which checkManaged then checks with Git.
 func guardCache(ctx context.Context, c Candidate, measure bool) (int64, string) {
-	layout := swiftPMLayout(c)
-	size, reason, repos := walkCache(c.Path, measure, true, layout)
+	return guardTree(ctx, c.Path, swiftPMLayout(c), measure)
+}
+
+// guardTree measures dir, with measure, and returns why dir must not be deleted,
+// or "" when it may be.
+// It refuses a Git repository at any depth, as walkCache does,
+// except for the repositories that layout lets through,
+// which checkManaged then checks with Git. The size of a refused dir is 0.
+func guardTree(ctx context.Context, dir string, layout *packageLayout, measure bool) (int64, string) {
+	size, reason, repos := walkCache(dir, measure, true, layout)
 	if reason == "" && len(repos) > 0 {
-		reason = checkManaged(ctx, c.Path, layout, repos)
+		reason = checkManaged(ctx, dir, layout, repos)
 	}
 	if reason != "" {
 		size = 0
 	}
 	return size, reason
+}
+
+// GuardDerivedData measures each folder in dirs, with measure,
+// and returns at the same index why the folder must not be deleted, or "".
+// Each folder is one that Xcode keeps for a workspace in
+// ~/Library/Developer/Xcode/DerivedData, and the caller has found
+// that its workspace no longer exists, so there is no Package.resolved
+// to check its SwiftPM clones against.
+// It refuses a Git repository at any depth and a directory that it cannot read,
+// as walkCache describes, except for the clones that Xcode's SwiftPM keeps
+// in SourcePackages, which it checks as checkManaged describes,
+// without the pin checks.
+// The size of a refused folder is 0.
+func GuardDerivedData(ctx context.Context, dirs []string, measure bool) ([]int64, []string) {
+	sizes := make([]int64, len(dirs))
+	reasons := make([]string, len(dirs))
+	parallel(len(dirs), func(i int) {
+		layout := &packageLayout{dir: filepath.Join(dirs[i], "SourcePackages")}
+		sizes[i], reasons[i] = guardTree(ctx, dirs[i], layout, measure)
+	})
+	return sizes, reasons
 }
 
 // pin is what Package.resolved records for one package.
@@ -98,14 +129,18 @@ type mirror struct {
 // It checks the bare clones first, as checkMirror describes,
 // because a checkout trusts only the tags that its bare clone also holds,
 // then each checkout, as checkCheckout describes.
+// When the layout has no Package.resolved, it skips the checks against pins.
 func checkManaged(ctx context.Context, dir string, layout *packageLayout, repos []managedRepo) string {
-	pins, err := readPins(layout.resolved)
-	if err != nil {
-		what := "a Git repository"
-		if repos[0].bare {
-			what = "a Git directory"
+	var pins map[string]pin
+	if layout.resolved != "" {
+		var err error
+		if pins, err = readPins(layout.resolved); err != nil {
+			what := "a Git repository"
+			if repos[0].bare {
+				what = "a Git directory"
+			}
+			return repoReason(dir, repos[0].path, what) + ", and Package.resolved cannot be read: " + err.Error()
 		}
-		return repoReason(dir, repos[0].path, what) + ", and Package.resolved cannot be read: " + err.Error()
 	}
 	var mirrors []mirror
 	for _, r := range repos {
@@ -122,7 +157,7 @@ func checkManaged(ctx context.Context, dir string, layout *packageLayout, repos 
 		if r.bare {
 			continue
 		}
-		if why := checkCheckout(ctx, r.path, pins[filepath.Base(r.path)].revision, mirrors); why != "" {
+		if why := checkCheckout(ctx, r.path, pins, mirrors); why != "" {
 			return repoReason(dir, r.path, "a Git repository") + " " + why
 		}
 	}
@@ -132,7 +167,8 @@ func checkManaged(ctx context.Context, dir string, layout *packageLayout, repos 
 // checkMirror returns the bare clone at gitDir, or why it is not one
 // that SwiftPM can make again.
 // It must be bare, have no linked worktrees, and have one remote, origin,
-// set up as a mirror of a location that a pin in Package.resolved names.
+// set up as a mirror of a location that a pin in Package.resolved names,
+// unless pins is nil, which skips that check.
 // No commit may be held only by its reflogs.
 // Every ref in such a mirror came from a fetch or a push,
 // and a push leaves no record in a bare repository,
@@ -166,7 +202,7 @@ func checkMirror(ctx context.Context, gitDir string, pins map[string]pin) (mirro
 	if err != nil {
 		return fail(err)
 	}
-	if !pinned(url, pins) {
+	if pins != nil && !pinned(url, pins) {
 		return mirror{}, "whose origin no pin in Package.resolved names"
 	}
 	out, _, err = g("rev-list", "-n", "1", "--reflog", "--not", "--all")
@@ -287,13 +323,14 @@ func sameLocation(url, location string) bool {
 
 // checkCheckout returns why the checkout at dir has work that
 // "swift package resolve" would not restore, or "".
-// revision is the one that Package.resolved pins for it, or "" when none does.
+// Its HEAD must be the revision that pins holds for its identity,
+// the name of dir, unless pins is nil, which skips that check.
 // Its one remote, origin, must be one of mirrors.
 // A commit counts as one that SwiftPM can restore only when HEAD,
 // a ref in refs/remotes/origin, or a tag with the same object in the mirror
 // holds it. A tag that only the checkout has, a local branch, or a reflog
 // does not count, and a push from the checkout to the mirror refuses it.
-func checkCheckout(ctx context.Context, dir, revision string, mirrors []mirror) string {
+func checkCheckout(ctx context.Context, dir string, pins map[string]pin, mirrors []mirror) string {
 	gitDir := filepath.Join(dir, ".git")
 	if why := worktreesReason(gitDir); why != "" {
 		return why
@@ -316,8 +353,11 @@ func checkCheckout(ctx context.Context, dir, revision string, mirrors []mirror) 
 	if err != nil {
 		return fail(err)
 	}
-	if revision == "" || strings.TrimSpace(string(out)) != strings.ToLower(revision) {
-		return "whose HEAD is not a commit that Package.resolved pins for it"
+	if pins != nil {
+		revision := pins[filepath.Base(dir)].revision
+		if revision == "" || strings.TrimSpace(string(out)) != strings.ToLower(revision) {
+			return "whose HEAD is not a commit that Package.resolved pins for it"
+		}
 	}
 
 	// Set every option that would hide a change, in case configuration changes it.
@@ -409,6 +449,7 @@ func worktreesReason(gitDir string) string {
 
 // readPins returns what a Package.resolved file pins for each package identity.
 // It reads versions 2 and 3, which key pins by identity.
+// The map is never nil, so that checkMirror and checkCheckout check against it.
 func readPins(path string) (map[string]pin, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
