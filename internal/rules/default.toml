@@ -379,10 +379,16 @@ refuse_names = ["maven-metadata-local.xml"]
 # directory and, without --all-platforms, fails for a gem whose copy is gone.
 # gem env gemdir prints the gem directory of one Ruby, the one that gem runs
 # from the home directory; other Ruby versions keep their own caches.
+# Bundler keeps a bare clone of each gem's Git source in cache/bundler/git.
+# A clone can hold commits that its remote no longer has,
+# and bundle clean removes the clones that the current bundle does not use,
+# so the rule keeps cache/bundler. Any other Git repository in the cache
+# still refuses the rule.
 [[global]]
 id = "rubygems-cache"
 tool = "gem"
 path = "gem env gemdir"
 path_subdir = "cache"
 delete_contents = true
+keep_names = ["bundler"]
 kind = "clear"
