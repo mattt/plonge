@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -92,6 +93,19 @@ func TestDryRunDeletesNothing(t *testing.T) {
 		if it.Status != WouldDelete || !exists(it.Path) {
 			t.Errorf("item %+v: exists %v", it, exists(it.Path))
 		}
+	}
+}
+
+func TestRunListsSkippedRoots(t *testing.T) {
+	root := repoWith(t)
+	roots, sizes := scanOne(t, root)
+	plain := t.TempDir()
+	roots = append(roots, scan.Root{Path: plain, Skipped: "not in a Git work tree"})
+	sizes = append(sizes, nil)
+	res := Run(context.Background(), roots, sizes, quietOpts(false))
+	want := []scan.SkippedRoot{{Path: plain, Reason: "not in a Git work tree"}}
+	if res.Roots != 2 || !reflect.DeepEqual(res.SkippedRoots, want) || res.Selected.Caches != 2 {
+		t.Errorf("roots %d, skipped %+v, selected %d", res.Roots, res.SkippedRoots, res.Selected.Caches)
 	}
 }
 
