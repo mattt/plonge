@@ -283,6 +283,8 @@ func TestPathLabel(t *testing.T) {
 	addTool(t, bin, "relative", `echo "store: cache"`)
 	addTool(t, bin, "twice", fmt.Sprintf(`echo "store: %s"; echo "store: %s/"; echo "store: /other"`, cache, cache))
 	addTool(t, bin, "same", fmt.Sprintf(`echo "store: %s"; echo "info : store: %s/"`, cache, cache))
+	addTool(t, bin, "emptyfirst", fmt.Sprintf(`echo "store: "; echo "store: %s"`, cache))
+	addTool(t, bin, "emptylast", fmt.Sprintf(`echo "store: %s"; echo "info : store:  "`, cache))
 	r := runner(t)
 	entries := r.List(context.Background(), []rules.Global{
 		{ID: "labeled", Tool: "labeled", Path: "labeled list", PathLabel: "store", Clean: "labeled c", Kind: rules.KindClear},
@@ -291,6 +293,8 @@ func TestPathLabel(t *testing.T) {
 		{ID: "relative", Tool: "relative", Path: "relative list", PathLabel: "store", Clean: "relative c", Kind: rules.KindClear},
 		{ID: "twice", Tool: "twice", Path: "twice list", PathLabel: "store", Clean: "twice c", Kind: rules.KindClear},
 		{ID: "same", Tool: "same", Path: "same list", PathLabel: "store", Clean: "same c", Kind: rules.KindClear},
+		{ID: "emptyfirst", Tool: "emptyfirst", Path: "emptyfirst list", PathLabel: "store", Clean: "emptyfirst c", Kind: rules.KindClear},
+		{ID: "emptylast", Tool: "emptylast", Path: "emptylast list", PathLabel: "store", Clean: "emptylast c", Kind: rules.KindClear},
 	})
 	for _, e := range entries[:2] {
 		if e.Skipped != "" || e.Path != cache || e.Bytes < 10 {
@@ -308,6 +312,12 @@ func TestPathLabel(t *testing.T) {
 	}
 	if e := entries[5]; e.Skipped != "" || e.Path != cache {
 		t.Errorf("same = %+v", e)
+	}
+	// A labeled line with no path is rejected wherever it appears.
+	for _, e := range entries[6:] {
+		if !strings.Contains(e.Skipped, `no path after "store: "`) || e.Command != "" {
+			t.Errorf("%s = %+v", e.ID, e)
+		}
 	}
 }
 

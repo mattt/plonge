@@ -232,7 +232,8 @@ func jsonField(out, name string) (string, error) {
 
 // labeledPath returns the text after "label: " on the lines of out
 // that contain it, so that a prefix such as "info : " is allowed.
-// It fails when no line has the label, or when two lines give different paths,
+// It fails when no line has the label, when a line has the label but no path,
+// or when two lines give different paths,
 // because plonge cannot tell which one the tool means.
 func labeledPath(out, label string) (string, error) {
 	var path string
@@ -242,6 +243,9 @@ func labeledPath(out, label string) (string, error) {
 			continue
 		}
 		p = strings.TrimSpace(p)
+		if p == "" {
+			return "", fmt.Errorf("printed no path after %q", label+": ")
+		}
 		if path != "" && filepath.Clean(p) != filepath.Clean(path) {
 			return "", fmt.Errorf("printed more than one path for %q", label+": ")
 		}

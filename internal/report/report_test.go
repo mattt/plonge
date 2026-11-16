@@ -121,6 +121,7 @@ func TestWriteTable(t *testing.T) {
 		"Total: 9.0 KiB in 3 caches",
 		"Quiet for 24h or more: 4.0 KiB in 1 cache",
 		"Roots: 2 scanned, 1 skipped",
+		"Skipped root ~/plain: not in a Git work tree",
 		"Broken mise links: 3",
 		"Git errors: 1",
 	} {
@@ -280,6 +281,19 @@ func TestWholeCacheLabel(t *testing.T) {
 	}
 	if got.Outcomes[0]["whole_cache"] != true || got.Outcomes[1]["whole_cache"] != nil {
 		t.Errorf("JSON outcomes = %v", got.Outcomes)
+	}
+}
+
+func TestWriteCleanListsSkippedRoots(t *testing.T) {
+	var buf bytes.Buffer
+	res := clean.Result{Roots: 3, SkippedRoots: []SkippedRoot{{Path: "/home/u/plain", Reason: "not in a Git work tree"}}}
+	if err := WriteClean(&buf, res, "/home/u"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Roots: 2 scanned, 1 skipped\n", "Skipped root ~/plain: not in a Git work tree\n"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("clean output lacks %q:\n%s", want, buf.String())
+		}
 	}
 }
 

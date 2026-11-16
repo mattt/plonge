@@ -33,6 +33,12 @@ type Refusal struct {
 	Reason  string `json:"reason"`
 }
 
+// SkippedRoot is a root that plonge did not scan, and why.
+type SkippedRoot struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
 // Root is the result of scanning one project root.
 type Root struct {
 	Path       string
