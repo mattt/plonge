@@ -187,6 +187,21 @@ On macOS, a prune rule for Xcode selects only build directories
 whose workspace no longer exists,
 and refuses one that holds a Git repository with edits or local commits.
 
+The `tmpdir` prune rule deletes old entries in your temporary directory,
+`$TMPDIR` or `/tmp`, on macOS and Linux.
+It selects a file or folder directly in that directory
+only when it and everything in it last changed at least 24 hours ago;
+`tmpdir_age_hours` in your rules file changes that period.
+It leaves alone names that the system manages, such as `com.apple.*`
+and `systemd-private-*`.
+It refuses an entry that is a symlink, belongs to another user,
+holds a socket or a recent file, holds a Git repository,
+or that `lsof` reports as open or as a process's working directory.
+`lsof` cannot see a program that will use a path later
+without holding it open now,
+so read the [limits of this rule](docs/rules.md#temporary-directory)
+before you apply it.
+
 See the [rule reference](docs/rules.md#global-caches) for every global action,
 its path, and its checks.
 The [coverage table](docs/coverage.md) explains tool-specific limits.
