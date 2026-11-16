@@ -54,6 +54,12 @@ func (r Runner) xcodeEntry(ctx context.Context) (Entry, bool) {
 	return e, true
 }
 
+// Folders returns the folders that the Xcode rule would delete,
+// or nil for every other rule.
+func (e Entry) Folders() []string {
+	return slices.Clone(e.stale)
+}
+
 // xcodeCommand is the Command of the Xcode rule when it deletes n folders.
 func xcodeCommand(n int) string {
 	return fmt.Sprintf("delete %d stale DerivedData directories (built in)", n)
