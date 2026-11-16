@@ -223,7 +223,7 @@ This was checked with Swift 6.4.2 and Xcode 27.2 on macOS,
 with a dependency in a temporary Git repository;
 `git status` in the checkout showed no files after `swift build`.
 Plonge lets these clones through only under the conditions in the
-[README](../README.md#swift-package-manager-checkouts).
+[rule reference](rules.md#swift-package-manager-checkouts).
 
 The Mix and Rebar3 rules follow Elixir **1.20.5** and Rebar3 **3.28.0**,
 the current stable releases.
@@ -298,8 +298,8 @@ Both rules are `clear`, because they also delete packages that projects use.
 
 ## How to read the tables
 
-The [README](../README.md#try-a-safe-run) defines roots, projects, caches,
-and the quiet, active, and busy states.
+The [README](../README.md#find-caches) explains roots, projects, and caches.
+Its [cleanup guide](../README.md#delete-project-caches) explains activity selection.
 For every row:
 
 - `scan` reports matching project caches and deletes nothing.
@@ -323,10 +323,10 @@ or exact paths of directory names such as `vendor/bundle`.
 Every match must be inside a scanned root, ignored by Git,
 and contain no tracked files.
 Plonge refuses a match that is or holds a Git repository at any depth,
-as the [README](../README.md#caches-that-hold-a-git-repository) describes,
+as the [rule reference](rules.md#caches-that-hold-a-git-repository) describes,
 except for unchanged Swift Package Manager clones in `.build` or `DerivedData`
 beside `Package.swift`
-([README](../README.md#swift-package-manager-checkouts)),
+([rule reference](rules.md#swift-package-manager-checkouts)),
 and a match that holds an entry at one of its rule's `refuse_inside` paths.
 A listed project file must be in the cache directory's parent directory,
 or for a path, in the directory that holds the path's first name.
@@ -476,7 +476,7 @@ the Deno rules, and the Cargo rules use `delete_contents`.
 A `delete_contents` rule can also list `refuse_names`:
 Plonge skips the rule when its path holds an entry with one of those names
 at any depth, or a directory that it cannot read.
-See the [README](../README.md#global-caches) for the rule format.
+See the [rule reference](rules.md#global-caches) for the rule format.
 
 The Xcode global rule selects only directories whose XML `info.plist`
 names an absolute `WorkspacePath` that no longer exists.
