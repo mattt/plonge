@@ -252,7 +252,28 @@ with the same rules as the command line.
 The tools find projects through mise and do not accept roots.
 Their descriptions tell agents to show the dry run
 and get your approval before `apply`.
-The server does not enforce that approval.
+
+A `clean` dry run returns a `preview_token`,
+and `apply` requires that token with the same arguments as the dry run.
+Plonge scans again before it deletes anything.
+If the new selection is different from the dry run,
+it deletes nothing and returns an error that lists the differences.
+For project caches, the selection is the paths
+with their rules, projects, sizes, and modification times.
+For global caches, it is the rules that would run,
+with their paths, actions, and the items that they remove;
+global cache sizes are left out because every build can change them.
+The paths and actions that pass are still subject to every safety check
+that `clean --apply` runs.
+
+The server keeps the previews in memory, at most 16 at a time.
+A token works for one `apply` call
+and expires 30 minutes after its dry run,
+because the dry run that you approved is probably out of date by then.
+A restart of the server invalidates every token.
+The token ties `apply` to one dry run,
+but the server cannot tell whether you saw or approved that dry run.
+The command-line `clean --apply` does not use tokens.
 
 To add the server to Claude Code:
 
