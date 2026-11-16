@@ -18,18 +18,21 @@ import (
 // and "xcodebuild -resolvePackageDependencies" make both again.
 type packageLayout struct {
 	dir string // the directory that holds checkouts and repositories
-	// resolved is the Package.resolved file beside Package.swift,
+	// resolved is the Package.resolved file that pins the clones,
 	// or "" when there is no pin file to check the clones against.
 	resolved string
+	// pinsName names resolved in a reason, relative to the project folder.
+	pinsName string
+	// unpinned, when not "", is why no one Package.resolved pins the clones.
+	// checkManaged then refuses any clone.
+	unpinned string
 }
 
 // swiftPMLayout returns the layout of c when c is a SwiftPM cache:
-// .build beside Package.swift, or DerivedData beside Package.swift,
+// .build beside Package.swift, or DerivedData beside Package.swift
+// or beside an Xcode workspace or project,
 // which holds the same layout in SourcePackages.
 // It returns nil for any other cache.
-// A DerivedData folder beside an Xcode project or workspace is left out,
-// because its pins are in a file inside the project or workspace,
-// and a folder can hold several of them.
 func swiftPMLayout(c Candidate) *packageLayout {
 	var sub string
 	switch c.key {
@@ -40,12 +43,62 @@ func swiftPMLayout(c Candidate) *packageLayout {
 		return nil
 	}
 	project := filepath.Dir(c.Path)
-	if _, err := os.Lstat(filepath.Join(project, "Package.swift")); err != nil {
+	dir := filepath.Join(c.Path, sub)
+	if _, err := os.Lstat(filepath.Join(project, "Package.swift")); err == nil {
+		return &packageLayout{
+			dir:      dir,
+			resolved: filepath.Join(project, "Package.resolved"),
+			pinsName: "Package.resolved",
+		}
+	}
+	if sub == "" {
+		return nil
+	}
+	return xcodeLayout(project, dir)
+}
+
+// xcodeLayout returns the layout of a DerivedData folder, whose clones
+// are in dir, beside the Xcode workspaces and projects in project,
+// or nil when project has neither.
+// Xcode keeps a workspace's pins in
+// <name>.xcworkspace/xcshareddata/swiftpm/Package.resolved
+// and a project's pins in the workspace inside it, in
+// <name>.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved.
+// One workspace takes precedence over any projects.
+// With more than one workspace, or no workspace and more than one project,
+// plonge cannot tell which one the folder belongs to,
+// so the layout refuses every clone.
+func xcodeLayout(project, dir string) *packageLayout {
+	entries, err := os.ReadDir(project)
+	if err != nil {
+		return &packageLayout{dir: dir, unpinned: "its folder cannot be read for Xcode projects: " + err.Error()}
+	}
+	var workspaces, projects []string
+	for _, e := range entries {
+		switch filepath.Ext(e.Name()) {
+		case ".xcworkspace":
+			workspaces = append(workspaces, e.Name())
+		case ".xcodeproj":
+			projects = append(projects, e.Name())
+		}
+	}
+	var pinsName string
+	switch {
+	case len(workspaces) > 1:
+		return &packageLayout{dir: dir, unpinned: "its folder holds more than one Xcode workspace, so no one Package.resolved pins it"}
+	case len(workspaces) == 1:
+		pinsName = filepath.Join(workspaces[0], "xcshareddata", "swiftpm", "Package.resolved")
+	case len(projects) > 1:
+		return &packageLayout{dir: dir, unpinned: "its folder holds more than one Xcode project and no workspace, so no one Package.resolved pins it"}
+	case len(projects) == 1:
+		pinsName = filepath.Join(projects[0], "project.xcworkspace", "xcshareddata", "swiftpm", "Package.resolved")
+	default:
 		return nil
 	}
 	return &packageLayout{
-		dir:      filepath.Join(c.Path, sub),
-		resolved: filepath.Join(project, "Package.resolved"),
+		dir:      dir,
+		resolved: filepath.Join(project, pinsName),
+		pinsName: filepath.ToSlash(pinsName),
 	}
 }
 
@@ -131,15 +184,21 @@ type mirror struct {
 // then each checkout, as checkCheckout describes.
 // When the layout has no Package.resolved, it skips the checks against pins.
 func checkManaged(ctx context.Context, dir string, layout *packageLayout, repos []managedRepo) string {
+	first := func() string {
+		what := "a Git repository"
+		if repos[0].bare {
+			what = "a Git directory"
+		}
+		return repoReason(dir, repos[0].path, what)
+	}
+	if layout.unpinned != "" {
+		return first() + ", and " + layout.unpinned
+	}
 	var pins map[string]pin
 	if layout.resolved != "" {
 		var err error
 		if pins, err = readPins(layout.resolved); err != nil {
-			what := "a Git repository"
-			if repos[0].bare {
-				what = "a Git directory"
-			}
-			return repoReason(dir, repos[0].path, what) + ", and Package.resolved cannot be read: " + err.Error()
+			return first() + ", and " + layout.pinsName + " cannot be read: " + err.Error()
 		}
 	}
 	var mirrors []mirror
