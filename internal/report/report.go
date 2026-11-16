@@ -196,8 +196,8 @@ func writeSources(w io.Writer, sources []scan.Source) {
 	}
 }
 
-// WriteRefusals lists the caches that plonge does not report or delete
-// because they are or hold a Git repository.
+// WriteRefusals lists the caches, or the folders of a global rule,
+// that plonge does not report or delete because they are or hold a Git repository.
 func WriteRefusals(w io.Writer, refused []scan.Refusal, home string) {
 	for _, r := range refused {
 		fmt.Fprintf(w, "Refused %s: %s\n", Tilde(r.Path, home), r.Reason)
@@ -246,6 +246,7 @@ func writeGlobal(w io.Writer, entries []global.Entry, home string) error {
 			writeRefused(w, e)
 		}
 		writeTargets(w, e)
+		WriteRefusals(w, e.RefusedFolders, home)
 	}
 	_, err := fmt.Fprintf(w, "Global total: %s in %s\n", HumanBytes(total), plural(n, "rule"))
 	return err
@@ -300,6 +301,7 @@ func WriteGlobalClean(w io.Writer, r global.Result, home string) error {
 			writeRefused(w, o.Entry)
 		}
 		writeTargets(w, o.Entry)
+		WriteRefusals(w, o.RefusedFolders, home)
 	}
 	fmt.Fprintln(w)
 	if r.Failed > 0 {

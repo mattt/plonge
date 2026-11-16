@@ -176,7 +176,8 @@ the Cargo rule leaves Git checkouts alone,
 the Deno rules leave localStorage and REPL history alone,
 and the Maven rule refuses a repository with locally installed artifacts.
 On macOS, a prune rule for Xcode selects only build directories
-whose workspace no longer exists.
+whose workspace no longer exists,
+and refuses one that holds a Git repository with edits or local commits.
 
 See the [rule reference](docs/rules.md#global-caches) for every global action,
 its path, and its checks.

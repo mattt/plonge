@@ -195,6 +195,44 @@ func TestWriteGlobalRefusedAndTargets(t *testing.T) {
 	}
 }
 
+// TestWriteGlobalRefusedFolders lists the folders that a rule keeps
+// as refusals in the scan and clean output, and in JSON.
+func TestWriteGlobalRefusedFolders(t *testing.T) {
+	e := global.Entry{ID: "xcode-derived-data", Command: "delete 0 stale DerivedData directories (built in)",
+		RefusedFolders: []scan.Refusal{{Path: "/home/DD/App-abc", Rule: "xcode-derived-data", Reason: "contains a Git repository at Build/x"}}}
+	want := "Refused ~/DD/App-abc: contains a Git repository at Build/x\n"
+	var buf bytes.Buffer
+	if err := writeGlobal(&buf, []global.Entry{e}, "/home"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("scan: missing %q in:\n%s", want, buf.String())
+	}
+	res := global.Result{Applied: true, Outcomes: []global.Outcome{{Entry: e, Status: global.Ran}}}
+	buf.Reset()
+	if err := WriteGlobalClean(&buf, res, "/home"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("clean: missing %q in:\n%s", want, buf.String())
+	}
+	buf.Reset()
+	if err := WriteJSON(&buf, res); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Outcomes []struct {
+			RefusedFolders []scan.Refusal `json:"refused_folders"`
+		} `json:"outcomes"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Outcomes) != 1 || len(got.Outcomes[0].RefusedFolders) != 1 || got.Outcomes[0].RefusedFolders[0] != e.RefusedFolders[0] {
+		t.Errorf("JSON = %s", buf.String())
+	}
+}
+
 func TestWholeCacheLabel(t *testing.T) {
 	entries := []global.Entry{
 		{ID: "uv", Kind: "prune", Bytes: 3 << 30, Command: "uv cache prune", WholeCache: true},

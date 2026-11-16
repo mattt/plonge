@@ -44,6 +44,10 @@ type Entry struct {
 	// It is false for a clear rule, for a rule whose targets give Bytes,
 	// and for the Xcode rule, whose Bytes is the size of the folders that it deletes.
 	WholeCache bool `json:"whole_cache,omitempty"`
+	// RefusedFolders are the folders that the rule would remove
+	// but keeps because they are or hold a Git repository, with the reason.
+	// They are not in Bytes or Command. Only the Xcode rule sets them.
+	RefusedFolders []scan.Refusal `json:"refused_folders,omitempty"`
 
 	argv   []string
 	guards []*guard
@@ -298,7 +302,7 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 		e := &entries[i]
 		e.WholeCache = e.Skipped == "" && e.Kind == rules.KindPrune && !e.targeted
 	}
-	if e, ok := r.xcodeEntry(); ok {
+	if e, ok := r.xcodeEntry(ctx); ok {
 		entries = append(entries, e)
 	}
 	return entries
