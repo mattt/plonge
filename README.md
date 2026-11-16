@@ -69,6 +69,7 @@ plonge scan --no-mise --root .
 `--root` can be repeated, and `clean` takes both options too.
 A root must be inside a Git work tree.
 Plonge skips a root outside one,
+lists it in the `scan` and `clean` reports with the reason,
 and does not search a parent folder for repositories.
 The report calls each root a project.
 
