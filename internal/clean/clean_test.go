@@ -397,3 +397,22 @@ func TestContinuesAfterError(t *testing.T) {
 		t.Error("plonge stopped after the error")
 	}
 }
+
+// TestRemoveContentsKeepsNamedEntries leaves the entries directly in dir
+// that keep names, and deletes an entry with the same name deeper down.
+func TestRemoveContentsKeepsNamedEntries(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cache")
+	write(t, filepath.Join(dir, "bundler", "git", "f"), "x")
+	write(t, filepath.Join(dir, "a.gem"), "x")
+	write(t, filepath.Join(dir, "other", "bundler", "f"), "x")
+	if err := RemoveContents(dir, "bundler"); err != nil {
+		t.Fatal(err)
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil || len(ents) != 1 || ents[0].Name() != "bundler" {
+		t.Errorf("entries = %v, err = %v", ents, err)
+	}
+	if !exists(filepath.Join(dir, "bundler", "git", "f")) {
+		t.Error("deleted a kept entry")
+	}
+}

@@ -359,7 +359,7 @@ A clear rule's size is the size of its cache, without the mark.
 | `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
 | `hex-packages` | clear | Built-in deletion of the contents of `~/.hex/packages` |
 | `rebar3-hex` | clear | Built-in deletion of the contents of `~/.cache/rebar3/hex` |
-| `rubygems-cache` | clear | Built-in deletion of the contents of RubyGems' gem cache |
+| `rubygems-cache` | clear | Built-in deletion of the contents of RubyGems' gem cache, except Bundler's clones of Git sources in `bundler` |
 | `gradle-caches` | clear | Built-in deletion of the contents of `caches` in the Gradle user home |
 | `maven-repository` | clear | Built-in deletion of the contents of `~/.m2/repository`, refused when it holds an artifact that `mvn install` put there |
 
@@ -653,11 +653,24 @@ so `maven-repository` uses `refuse_names` and Plonge refuses that repository.
 To clean it, delete the installed artifacts that you can build again,
 or replace the rule without `refuse_names`.
 
+A `delete_contents` rule can also list `keep_names`,
+names of entries directly in its path that Plonge leaves in place:
+
+```toml
+keep_names = ["bundler"]
+```
+
+Plonge does not delete, measure, or check a kept entry,
+so a Git repository inside it does not refuse the rule.
+A name matches only directly in the path:
+an entry with the same name deeper down is deleted and checked as usual.
+The action reads `delete contents of <path> except <names> (built in)`.
+
 A `delete_contents` rule must have kind `clear`,
 so it runs only with `clean --global --include-clear --apply`.
 Plonge makes read-only entries writable first and does not follow symlinks.
 It cannot have `clean` or `targets`; it can have a `check`.
-`refuse_names` is allowed only on a `delete_contents` rule.
+`refuse_names` and `keep_names` are allowed only on a `delete_contents` rule.
 The action reads `delete contents of <path> (built in)`.
 Plonge skips the rule, and reports why, when the path is not absolute;
 is `/`, the home directory, or a directory that contains the home directory,
@@ -681,6 +694,11 @@ which a project can still need, so Plonge does not run it.
 After a clear, `gem pristine` downloads a missing copy.
 `bundle cache` reports a missing gem file for a gem whose copy is gone;
 with `--all-platforms`, it can download the gem instead.
+Bundler keeps a bare clone of each gem's Git source in `cache/bundler/git`,
+and a clone can hold commits that its remote no longer has,
+so the rule has `keep_names = ["bundler"]` and leaves `cache/bundler` in place.
+`bundle clean` removes the clones that the current bundle does not use.
+Plonge still refuses the rule when a Git repository is anywhere else in the cache.
 The rule reaches only the Ruby that `gem` runs from your home directory;
 each Ruby version has its own gem directory.
 

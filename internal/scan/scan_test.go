@@ -978,3 +978,53 @@ func TestDetectBEAMBuild(t *testing.T) {
 		t.Errorf("refused %v, want %v", reasons, wantRefused)
 	}
 }
+
+// TestWalkKeepsOnlyTopLevelNames leaves a kept entry directly in the
+// directory out of the size and the Git check, and still refuses a
+// repository in an entry with the same name deeper down.
+func TestWalkKeepsOnlyTopLevelNames(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "a.gem"), "x")
+	write(t, filepath.Join(dir, "bundler", "git", "clone", "HEAD"), "ref: refs/heads/main\n")
+	for _, sub := range []string{"objects", "refs"} {
+		if err := os.MkdirAll(filepath.Join(dir, "bundler", "git", "clone", sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bundler", "big"), make([]byte, 1_000_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := GitRefusal(dir); got != "contains a Git directory at bundler/git/clone" {
+		t.Errorf("GitRefusal without keep = %q", got)
+	}
+	if got := GitRefusal(dir, "bundler"); got != "" {
+		t.Errorf("GitRefusal with keep = %q", got)
+	}
+	if got := DiskUsage(dir, "bundler"); got >= 1_000_000 {
+		t.Errorf("DiskUsage with keep = %d counts the kept entry", got)
+	}
+	sizes, reasons := GuardedSizes([]string{dir}, []bool{true}, [][]string{{"bundler"}})
+	if reasons[0] != "" || sizes[0] >= 1_000_000 {
+		t.Errorf("GuardedSizes = %v, %q", sizes, reasons)
+	}
+	write(t, filepath.Join(dir, "other", "bundler", ".git", "HEAD"), "x")
+	if got := GitRefusal(dir, "bundler"); got != "contains a Git repository at other/bundler" {
+		t.Errorf("GitRefusal with a nested name = %q", got)
+	}
+}
+
+// TestWalkKeepsLinkedGitDirInKeptName lets a linked worktree's Git directory
+// in a kept entry through, and refuses one anywhere else.
+func TestWalkKeepsLinkedGitDirInKeptName(t *testing.T) {
+	isolateGit(t)
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "a.gem"), "x")
+	linkedGitDir(t, filepath.Join(dir, "bundler", "git", "wt"))
+	if got := GitRefusal(dir, "bundler"); got != "" {
+		t.Errorf("GitRefusal with keep = %q", got)
+	}
+	linkedGitDir(t, filepath.Join(dir, "gems", "wt"))
+	if got := GitRefusal(dir, "bundler"); got != "contains a Git directory at gems/wt" {
+		t.Errorf("GitRefusal outside the kept entry = %q", got)
+	}
+}

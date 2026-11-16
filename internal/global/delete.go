@@ -19,9 +19,14 @@ import (
 // so plonge deletes what is in the rule's path itself.
 // It keeps the directory and refuses a path that could hold more than a cache,
 // including a path that is or holds a Git repository at any depth.
+// It also keeps the entries that the rule's keep_names lists,
+// and does not look inside them.
 
 // deleteAction is the Command of a rule that deletes the contents of path.
-func (r Runner) deleteAction(path string) string {
+func (r Runner) deleteAction(path string, keep []string) string {
+	if len(keep) > 0 {
+		return fmt.Sprintf("delete contents of %s except %s (built in)", r.tilde(path), strings.Join(keep, ", "))
+	}
 	return fmt.Sprintf("delete contents of %s (built in)", r.tilde(path))
 }
 
@@ -86,10 +91,11 @@ func (r Runner) refuseDelete(ctx context.Context, path string) string {
 // must not delete its contents: the first entry with one of names,
 // or a directory that it cannot read, which could hide one.
 // It returns "" when names is empty or dir holds none of them.
+// It does not look inside the entries directly in dir that keep names.
 // A project rule's refuse_inside paths match only at fixed positions below
 // a match; a name here can be at any depth, such as the metadata file below
 // a Maven group ID, whose number of directories varies.
-func refuseNames(dir string, names []string) string {
+func refuseNames(dir string, names, keep []string) string {
 	if len(names) == 0 {
 		return ""
 	}
@@ -98,6 +104,12 @@ func refuseNames(dir string, names []string) string {
 		if err != nil {
 			reason = "cannot check for " + strings.Join(names, ", ") + ": " + err.Error()
 			return fs.SkipAll
+		}
+		if path != dir && filepath.Dir(path) == filepath.Clean(dir) && slices.Contains(keep, d.Name()) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if path != dir && slices.Contains(names, d.Name()) {
 			rel, _ := filepath.Rel(dir, path)
@@ -113,19 +125,19 @@ func refuseNames(dir string, names []string) string {
 func (r Runner) applyDelete(ctx context.Context, o *Outcome) {
 	reason := r.refuseDelete(ctx, o.Path)
 	if reason == "" {
-		reason = refuseNames(o.Path, o.refuseNames)
+		reason = refuseNames(o.Path, o.refuseNames, o.keepNames)
 	}
 	if reason == "" {
 		// Git checked only the path and its parents; a repository below the path
 		// is not part of their work tree, so walk the path for one.
-		reason = scan.GitRefusal(o.Path)
+		reason = scan.GitRefusal(o.Path, o.keepNames...)
 	}
 	if reason != "" {
 		o.Status, o.Reason = Skipped, reason
 		return
 	}
-	err := clean.RemoveContents(o.Path)
-	o.FreedBytes = max(0, o.Bytes-usage(o.Path))
+	err := clean.RemoveContents(o.Path, o.keepNames...)
+	o.FreedBytes = max(0, o.Bytes-usage(o.Path, o.keepNames...))
 	if err != nil {
 		o.Status, o.Reason = Failed, err.Error()
 		return

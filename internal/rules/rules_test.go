@@ -586,3 +586,21 @@ func TestGlobalRefuseNamesValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestGlobalKeepNamesValidation(t *testing.T) {
+	const base = "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"~/c\"\nkind = \"clear\"\n"
+	f, err := parse(base+"delete_contents = true\nkeep_names = [\"bundler\"]\n", "test")
+	if err != nil || !slices.Equal(f.Global[0].KeepNames, []string{"bundler"}) {
+		t.Errorf("keep_names = %+v, %v", f.Global, err)
+	}
+	for extra, want := range map[string]string{
+		"clean = \"t gc\"\nkeep_names = [\"bundler\"]\n":   "keep_names needs delete_contents",
+		"delete_contents = true\nkeep_names = [\"a/b\"]\n": `keep_names: invalid name "a/b"`,
+		"delete_contents = true\nkeep_names = [\".\"]\n":   `keep_names: invalid name "."`,
+		"delete_contents = true\nkeep_names = [\"\"]\n":    `keep_names: invalid name ""`,
+	} {
+		if _, err := parse(base+extra, "test"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: error %v, want %q", extra, err, want)
+		}
+	}
+}
