@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"runtime/debug"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/mattt/plonge/internal/clean"
 	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/engine"
 	"github.com/mattt/plonge/internal/global"
@@ -19,6 +22,8 @@ import (
 const scanDescription = `Report the caches that developer tools and coding agents leave on disk, with their sizes, projects, and last activity. It deletes nothing. A project is a root directory recorded by mise. With global, it also lists caches outside projects and each rule's cleanup action. Show the sizes to the user before you suggest a cleanup.`
 
 const cleanDescription = `Delete caches. This is a dry run unless apply is true. Always call it first without apply, show the dry run to the user, and get the user's approval before you call it with apply: true.
+
+A dry run returns preview_token. apply requires that token and the same include_active, min_size, global, and include_clear as the dry run. It scans again and deletes nothing unless the new selection is the one in the dry run: the same cache paths with the same sizes and modification times, or the same global rules with the same paths and actions. If the selection changed, the error lists the differences; show them to the user and run a new dry run. A token works for one apply call and expires 30 minutes after its dry run. The server cannot tell whether the user approved; only call apply after the user approves the dry run that returned the token.
 
 A quiet project has known activity at least quiet_hours old (default: 24 hours). Active projects have newer or unknown activity; include_active selects them too. min_size (such as "100MiB") leaves out smaller caches. A busy project has a running or initializing Paseo agent and is excluded. If paseo is on PATH but its status cannot be read, the paseo entry in activity_sources has status "failed" and every project is busy, so nothing is deleted; tell the user the reason. If paseo is not on PATH, the busy check provides no protection.
 
@@ -31,11 +36,30 @@ type scanInput struct {
 }
 
 type cleanInput struct {
-	Apply         bool   `json:"apply,omitempty" jsonschema:"delete; only after the user approves the dry run"`
+	Apply         bool   `json:"apply,omitempty" jsonschema:"delete; only after the user approves the dry run; requires preview_token"`
+	PreviewToken  string `json:"preview_token,omitempty" jsonschema:"with apply, the preview_token of the approved dry run"`
 	IncludeActive bool   `json:"include_active,omitempty" jsonschema:"also select active projects; exclude busy projects; requires global to be false"`
 	MinSize       string `json:"min_size,omitempty" jsonschema:"skip project caches smaller than this size, such as 100MiB; requires global to be false"`
 	Global        bool   `json:"global,omitempty" jsonschema:"work only on caches outside projects"`
 	IncludeClear  bool   `json:"include_clear,omitempty" jsonschema:"with global, also select clear rules, which can remove cached data still in use"`
+}
+
+func (in cleanInput) args() cleanArgs {
+	return cleanArgs{IncludeActive: in.IncludeActive, MinSize: in.MinSize, Global: in.Global, IncludeClear: in.IncludeClear}
+}
+
+// cleanPreview is a project dry run with its token.
+type cleanPreview struct {
+	clean.Result
+	PreviewToken   string    `json:"preview_token"`
+	PreviewExpires time.Time `json:"preview_expires"`
+}
+
+// globalPreview is a global dry run with its token.
+type globalPreview struct {
+	global.Result
+	PreviewToken   string    `json:"preview_token"`
+	PreviewExpires time.Time `json:"preview_expires"`
 }
 
 type diskInput struct{}
@@ -54,6 +78,12 @@ func version() string {
 
 // New returns a server with the scan, clean, and disk tools.
 func New() *mcp.Server {
+	return newServer(time.Now)
+}
+
+// newServer returns a server whose preview tokens use the clock now.
+func newServer(now func() time.Time) *mcp.Server {
+	c := &cleaner{previews: newPreviews(now)}
 	s := mcp.NewServer(&mcp.Implementation{Name: "plonge", Version: version()}, nil)
 	destructive := true
 	mcp.AddTool(s, &mcp.Tool{
@@ -65,7 +95,7 @@ func New() *mcp.Server {
 		Name:        "clean",
 		Description: cleanDescription,
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: &destructive},
-	}, handleClean)
+	}, c.handleClean)
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "disk",
 		Description: diskDescription,
@@ -95,36 +125,71 @@ func handleScan(ctx context.Context, _ *mcp.CallToolRequest, in scanInput) (*mcp
 	return jsonResult(inv.Report)
 }
 
-func handleClean(ctx context.Context, _ *mcp.CallToolRequest, in cleanInput) (*mcp.CallToolResult, any, error) {
+// cleaner serves the clean tool and keeps its preview tokens.
+type cleaner struct {
+	previews *previews
+}
+
+func (c *cleaner) handleClean(ctx context.Context, _ *mcp.CallToolRequest, in cleanInput) (*mcp.CallToolResult, any, error) {
+	var floor int64
 	if in.Global {
 		if in.IncludeActive || in.MinSize != "" {
 			return nil, nil, errors.New("include_active and min_size do not apply with global")
 		}
-		res, _, err := engine.CleanGlobal(ctx, global.Options{Apply: in.Apply, IncludeClear: in.IncludeClear})
+	} else {
+		if in.IncludeClear {
+			return nil, nil, errors.New("include_clear needs global")
+		}
+		if in.MinSize != "" {
+			var err error
+			if floor, err = disk.ParseSize(in.MinSize); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	args := in.args()
+	var approved selection
+	if in.Apply {
+		p, err := c.previews.take(in.PreviewToken)
 		if err != nil {
 			return nil, nil, err
 		}
-		return jsonResult(res)
+		if p.args != args {
+			return nil, nil, fmt.Errorf("the preview_token is for a dry run with other arguments (%s), but apply has %s; "+
+				"call clean without apply with these arguments again", p.args, args)
+		}
+		approved = p.sel
+	} else if in.PreviewToken != "" {
+		return nil, nil, errors.New("preview_token needs apply")
 	}
-	if in.IncludeClear {
-		return nil, nil, errors.New("include_clear needs global")
-	}
-	var floor int64
-	if in.MinSize != "" {
-		var err error
-		if floor, err = disk.ParseSize(in.MinSize); err != nil {
+	if in.Global {
+		res, _, err := engine.CleanGlobal(ctx, engine.GlobalOptions{
+			Options: global.Options{Apply: in.Apply, IncludeClear: in.IncludeClear},
+			Confirm: func(dry global.Result) error { return approved.check(globalSelection(dry)) },
+		})
+		if err != nil {
 			return nil, nil, err
 		}
+		if in.Apply {
+			return jsonResult(res)
+		}
+		token, expires := c.previews.add(args, globalSelection(res))
+		return jsonResult(globalPreview{Result: res, PreviewToken: token, PreviewExpires: expires})
 	}
 	res, _, err := engine.Clean(ctx, engine.CleanOptions{
 		Apply:         in.Apply,
 		IncludeActive: in.IncludeActive,
 		MinSize:       floor,
+		Confirm:       func(dry clean.Result) error { return approved.check(projectSelection(dry)) },
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	return jsonResult(res)
+	if in.Apply {
+		return jsonResult(res)
+	}
+	token, expires := c.previews.add(args, projectSelection(res))
+	return jsonResult(cleanPreview{Result: res, PreviewToken: token, PreviewExpires: expires})
 }
 
 func handleDisk(_ context.Context, _ *mcp.CallToolRequest, _ diskInput) (*mcp.CallToolResult, any, error) {
