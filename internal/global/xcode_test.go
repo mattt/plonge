@@ -1,13 +1,17 @@
 package global
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mattt/plonge/internal/scan"
 )
 
 const plistFormat = `<?xml version="1.0" encoding="UTF-8"?>
@@ -159,6 +163,18 @@ func staleWithClones(t *testing.T, home, root, name string) (folder, checkout st
 	return folder, checkout
 }
 
+// commitAtHead makes a commit in checkout and leaves HEAD at it,
+// on a new local branch when attached, or detached otherwise.
+func commitAtHead(t *testing.T, checkout string, attached bool) {
+	t.Helper()
+	if attached {
+		gitRun(t, checkout, "switch", "-q", "-c", "work")
+	}
+	addFile(t, filepath.Join(checkout, "head-work"))
+	gitRun(t, checkout, "add", ".")
+	gitRun(t, checkout, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "work")
+}
+
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -194,6 +210,11 @@ func TestXcodeRefusesFoldersWithWork(t *testing.T) {
 	gitRun(t, checkout, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "local")
 	gitRun(t, checkout, "checkout", "-q", "--detach", head)
 
+	detached, checkout := staleWithClones(t, r.Home, root, "Detached")
+	commitAtHead(t, checkout, false)
+	attached, checkout := staleWithClones(t, r.Home, root, "Attached")
+	commitAtHead(t, checkout, true)
+
 	unrelated, _ := staleWithClones(t, r.Home, root, "Unrelated")
 	commitRepo(t, filepath.Join(unrelated, "Build", "Intermediates.noindex", "notes"))
 
@@ -218,7 +239,9 @@ func TestXcodeRefusesFoldersWithWork(t *testing.T) {
 	}
 	want := map[string]string{
 		modified:   "contains a Git repository at SourcePackages/checkouts/dep that has changed, untracked, or ignored files",
-		committed:  "contains a Git repository at SourcePackages/checkouts/dep that has commits that only its local branches, tags, or reflogs hold",
+		committed:  "contains a Git repository at SourcePackages/checkouts/dep that has commits that only its HEAD, local branches, tags, or reflogs hold",
+		detached:   "contains a Git repository at SourcePackages/checkouts/dep that has commits that only its HEAD, local branches, tags, or reflogs hold",
+		attached:   "contains a Git repository at SourcePackages/checkouts/dep that has commits that only its HEAD, local branches, tags, or reflogs hold",
 		unrelated:  "contains a Git repository at Build/Intermediates.noindex/notes",
 		unreadable: "cannot check for Git repositories: ",
 	}
@@ -243,10 +266,17 @@ func TestXcodeRefusesFoldersWithWork(t *testing.T) {
 			t.Errorf("%s lost its files: %v", filepath.Base(folder), err)
 		}
 	}
+	for _, folder := range []string{detached, attached} {
+		if _, err := os.Stat(filepath.Join(folder, "SourcePackages", "checkouts", "dep", "head-work")); err != nil {
+			t.Errorf("%s lost its commit at HEAD: %v", filepath.Base(folder), err)
+		}
+	}
 }
 
 // TestXcodeRechecksRepositoriesBeforeDeleting adds a repository to a stale
-// folder after the listing, and to the clones of another one.
+// folder after the listing, an untracked file to the clones of another one,
+// and a commit at HEAD to a third, and deletes only a fourth.
+// The outcome's size and action count only the folder that it deleted.
 func TestXcodeRechecksRepositoriesBeforeDeleting(t *testing.T) {
 	bin := t.TempDir()
 	withGit(t, bin)
@@ -254,28 +284,50 @@ func TestXcodeRechecksRepositoriesBeforeDeleting(t *testing.T) {
 	root := filepath.Join(r.Home, "Library", "Developer", "Xcode", "DerivedData")
 	plain := derivedFolder(t, root, "Plain-abc", fmt.Sprintf(plistFormat, filepath.Join(r.Home, "Plain.xcworkspace")))
 	cloned, checkout := staleWithClones(t, r.Home, root, "Cloned")
+	committed, committedCheckout := staleWithClones(t, r.Home, root, "Committed")
+	accepted, _ := staleWithClones(t, r.Home, root, "Accepted")
 
 	ctx := context.Background()
 	entries := r.List(ctx, nil)
-	if e := entries[0]; !strings.Contains(e.Command, "delete 2 stale") || len(e.RefusedFolders) != 0 {
-		t.Fatalf("entry = %+v", e)
+	listed := entries[0]
+	if !strings.Contains(listed.Command, "delete 4 stale") || len(listed.RefusedFolders) != 0 {
+		t.Fatalf("entry = %+v", listed)
 	}
 	commitRepo(t, filepath.Join(plain, "Build", "repo"))
 	if err := os.WriteFile(filepath.Join(checkout, "untracked"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	commitAtHead(t, committedCheckout, false)
+	acceptedBytes := scan.DiskUsage(accepted)
 
 	res := r.Clean(ctx, entries, Options{Apply: true})
 	o := res.Outcomes[0]
-	if o.Status != Ran || res.FreedBytes != 0 || len(o.RefusedFolders) != 2 {
+	if o.Status != Ran || len(o.RefusedFolders) != 3 {
 		t.Errorf("outcome = %+v", o)
 	}
-	if len(entries[0].RefusedFolders) != 0 {
-		t.Errorf("the listed entry changed: %+v", entries[0].RefusedFolders)
+	if !strings.Contains(o.Command, "delete 1 stale") || o.Bytes != acceptedBytes || res.FreedBytes != acceptedBytes {
+		t.Errorf("outcome command %q, bytes %d, freed %d; want 1 folder of %d bytes",
+			o.Command, o.Bytes, res.FreedBytes, acceptedBytes)
 	}
-	for _, folder := range []string{plain, cloned} {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(o); err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf(`"bytes":%d,"command":"delete 1 stale`, acceptedBytes); !strings.Contains(buf.String(), want) {
+		t.Errorf("JSON %s lacks %s", buf.String(), want)
+	}
+	if e := entries[0]; len(e.RefusedFolders) != 0 || e.Command != listed.Command || e.Bytes != listed.Bytes || len(e.stale) != 4 {
+		t.Errorf("the listed entry changed: %+v", e)
+	}
+	if _, err := os.Stat(accepted); !os.IsNotExist(err) {
+		t.Errorf("the accepted folder is still there: %v", err)
+	}
+	for _, folder := range []string{plain, cloned, committed} {
 		if _, err := os.Stat(filepath.Join(folder, "Build", "blob")); err != nil {
 			t.Errorf("%s lost its files: %v", filepath.Base(folder), err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(committedCheckout, "head-work")); err != nil {
+		t.Errorf("the commit at HEAD is gone: %v", err)
 	}
 }

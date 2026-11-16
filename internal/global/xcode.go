@@ -50,8 +50,13 @@ func (r Runner) xcodeEntry(ctx context.Context) (Entry, bool) {
 		e.stale = append(e.stale, folder)
 		e.Bytes += sizes[i]
 	}
-	e.Command = fmt.Sprintf("delete %d stale DerivedData directories (built in)", len(e.stale))
+	e.Command = xcodeCommand(len(e.stale))
 	return e, true
+}
+
+// xcodeCommand is the Command of the Xcode rule when it deletes n folders.
+func xcodeCommand(n int) string {
+	return fmt.Sprintf("delete %d stale DerivedData directories (built in)", n)
 }
 
 // staleFolder reports whether a DerivedData folder's workspace is gone.
@@ -109,11 +114,15 @@ func (e *Entry) refuseFolder(folder, reason string) {
 // applyXcode deletes the stale folders, checking each one again first.
 // A folder that now holds a Git repository with work that Git cannot restore
 // is refused and kept, and the other folders are still deleted.
+// The outcome's size, action, and folders are rebuilt from the folders
+// that pass this final check, and its size is what they held right before.
 func applyXcode(ctx context.Context, o *Outcome) {
 	// The outcome shares its slices with the listed entry; do not write to them.
 	o.RefusedFolders = slices.Clone(o.RefusedFolders)
+	listed := o.stale
+	o.stale, o.Bytes = []string{}, 0
 	var failures []string
-	for _, folder := range o.stale {
+	for _, folder := range listed {
 		info, err := os.Lstat(folder)
 		if err != nil || !info.IsDir() || !staleFolder(folder) {
 			continue
@@ -123,11 +132,14 @@ func applyXcode(ctx context.Context, o *Outcome) {
 			continue
 		}
 		before := scan.DiskUsage(folder)
+		o.stale = append(o.stale, folder)
+		o.Bytes += before
 		if err := clean.RemoveTree(folder); err != nil {
 			failures = append(failures, err.Error())
 		}
 		o.FreedBytes += max(0, before-scan.DiskUsage(folder))
 	}
+	o.Command = xcodeCommand(len(o.stale))
 	if len(failures) > 0 {
 		o.Status, o.Reason = Failed, strings.Join(failures, "; ")
 		return

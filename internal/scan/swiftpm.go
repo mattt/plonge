@@ -326,9 +326,10 @@ func sameLocation(url, location string) bool {
 // Its HEAD must be the revision that pins holds for its identity,
 // the name of dir, unless pins is nil, which skips that check.
 // Its one remote, origin, must be one of mirrors.
-// A commit counts as one that SwiftPM can restore only when HEAD,
-// a ref in refs/remotes/origin, or a tag with the same object in the mirror
-// holds it. A tag that only the checkout has, a local branch, or a reflog
+// A commit counts as one that SwiftPM can restore only when
+// a ref in refs/remotes/origin, a tag with the same object in the mirror,
+// or, when HEAD is at its pin, HEAD holds it.
+// Without pins, HEAD itself must be a commit that those refs hold. A tag that only the checkout has, a local branch, or a reflog
 // does not count, and a push from the checkout to the mirror refuses it.
 func checkCheckout(ctx context.Context, dir string, pins map[string]pin, mirrors []mirror) string {
 	gitDir := filepath.Join(dir, ".git")
@@ -420,7 +421,12 @@ func checkCheckout(ctx context.Context, dir string, pins map[string]pin, mirrors
 	if err != nil {
 		return fail(err)
 	}
-	args := []string{"rev-list", "-n", "1", "--all", "--reflog", "--not", "HEAD", "--glob=refs/remotes/origin/*"}
+	// --all includes HEAD, so without a pin a commit at HEAD that only
+	// the checkout holds is found, whether HEAD is detached or not.
+	args := []string{"rev-list", "-n", "1", "--all", "--reflog", "--not", "--glob=refs/remotes/origin/*"}
+	if pins != nil {
+		args = append(args, "HEAD")
+	}
 	for name, oid := range tags {
 		if m.tags[name] == oid {
 			args = append(args, oid)
@@ -431,6 +437,9 @@ func checkCheckout(ctx context.Context, dir string, pins map[string]pin, mirrors
 		return fail(err)
 	}
 	if len(out) > 0 {
+		if pins == nil {
+			return "that has commits that only its HEAD, local branches, tags, or reflogs hold"
+		}
 		return "that has commits that only its local branches, tags, or reflogs hold"
 	}
 	return ""
