@@ -122,6 +122,35 @@ func (p swiftPackage) localCommit(t *testing.T) string {
 	return c
 }
 
+// useXcode replaces Package.swift with the Xcode workspaces and projects
+// in bundles, such as App.xcodeproj, and moves Package.resolved
+// to pins, relative to the project, or deletes it when pins is "".
+func (p swiftPackage) useXcode(t *testing.T, pins string, bundles ...string) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(p.root, "Package.swift")); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range bundles {
+		if err := os.MkdirAll(filepath.Join(p.root, b), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolved := filepath.Join(p.root, "Package.resolved")
+	if pins == "" {
+		if err := os.Remove(resolved); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	dst := filepath.Join(p.root, pins)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(resolved, dst); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // measureOne detects and measures the one cache in root.
 // It returns the candidate, when Measure kept it, and the refusal reason.
 func measureOne(t *testing.T, root string) (*Candidate, string) {
@@ -148,6 +177,9 @@ func measureOne(t *testing.T, root string) (*Candidate, string) {
 func TestMeasureSwiftPMCheckouts(t *testing.T) {
 	isolateGit(t)
 	const checkout = "contains a Git repository at checkouts/dep "
+	const derived = "contains a Git repository at SourcePackages/checkouts/dep"
+	const projectPins = "App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+	const workspacePins = "App.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 	tests := []struct {
 		name   string
 		cache  string // the cache name; .build when empty
@@ -163,10 +195,98 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 			name:  "DerivedData beside an Xcode project",
 			cache: "DerivedData",
 			setup: func(t *testing.T, p swiftPackage) {
-				if err := os.Remove(filepath.Join(p.root, "Package.swift")); err != nil {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+			},
+		},
+		{
+			name:  "DerivedData beside an Xcode workspace",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, workspacePins, "App.xcworkspace")
+			},
+		},
+		{
+			name:  "DerivedData beside a workspace and a project, pinned by the workspace",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, workspacePins, "App.xcworkspace", "App.xcodeproj")
+			},
+		},
+		{
+			name:  "DerivedData beside a workspace and a project, pinned by the project",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcworkspace", "App.xcodeproj")
+			},
+			reason: derived + ", and " + workspacePins + " cannot be read",
+		},
+		{
+			name:  "DerivedData beside two Xcode projects",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj", "Other.xcodeproj")
+			},
+			reason: derived + ", and its folder holds more than one Xcode project and no workspace",
+		},
+		{
+			name:  "DerivedData beside two Xcode workspaces",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, workspacePins, "App.xcworkspace", "Other.xcworkspace", "App.xcodeproj")
+			},
+			reason: derived + ", and its folder holds more than one Xcode workspace",
+		},
+		{
+			name:  "DerivedData beside an Xcode project without Package.resolved",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, "", "App.xcodeproj")
+			},
+			reason: derived + ", and " + projectPins + " cannot be read",
+		},
+		{
+			name:  "DerivedData beside an Xcode project with a changed checkout",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+				write(t, filepath.Join(p.checkout, "Sources", "Dep", "Dep.swift"), "public let x = 3\n")
+			},
+			reason: derived + " that has changed, untracked, or ignored files",
+		},
+		{
+			name:  "DerivedData beside an Xcode project whose pins leave out the checkout",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+				if err := os.Rename(p.checkout, filepath.Join(filepath.Dir(p.checkout), "other")); err != nil {
 					t.Fatal(err)
 				}
-				write(t, filepath.Join(p.root, "App.xcodeproj", "project.pbxproj"), "")
+			},
+			reason: "contains a Git repository at SourcePackages/checkouts/other whose HEAD is not a commit that Package.resolved pins for it",
+		},
+		{
+			name:  "DerivedData beside an Xcode project with a linked Git directory in repositories",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+				linkedGitDir(t, filepath.Join(p.cache, "SourcePackages", "repositories", "linked"))
+			},
+			reason: "contains a Git directory at SourcePackages/repositories/linked",
+		},
+		{
+			name:  "DerivedData beside an Xcode project with a checkout whose .git directory has commondir",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+				write(t, filepath.Join(p.checkout, ".git", "commondir"), p.mirror+"\n")
+			},
+			reason: "contains a Git directory at SourcePackages/checkouts/dep/.git",
+		},
+		{
+			name:  "DerivedData beside neither Package.swift nor an Xcode project",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, "")
 			},
 			reason: "contains a Git repository at SourcePackages/checkouts/dep",
 		},
