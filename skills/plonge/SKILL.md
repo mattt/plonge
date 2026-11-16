@@ -77,7 +77,9 @@ Get approval for these options as part of the dry run:
 
 Project activity is based on Git HEAD timestamps, Claude transcripts,
 and Paseo status, not on uncommitted edits or running builds.
-If Paseo is missing or fails, its busy check provides no protection.
+If `paseo` is not on PATH, the busy check cannot see Paseo agents and gives no protection.
+If `paseo` is on PATH but its status cannot be read, every project counts as busy,
+so `clean` deletes no project caches until Paseo works again.
 Do not clean caches in a project that you know is busy.
 
 Do not use another deletion command to bypass a skipped path or rule.
