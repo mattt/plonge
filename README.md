@@ -173,6 +173,7 @@ or a path in or containing a Git repository,
 and they protect data that a download cannot restore.
 For example, 
 the Cargo rule leaves Git checkouts alone,
+the RubyGems rule leaves Bundler's clones of Git sources alone,
 the Deno rules leave localStorage and REPL history alone,
 and the Maven rule refuses a repository with locally installed artifacts.
 On macOS, a prune rule for Xcode selects only build directories

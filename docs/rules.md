@@ -351,7 +351,7 @@ A clear rule's size is the size of its cache, without the mark.
 | `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
 | `hex-packages` | clear | Built-in deletion of the contents of `~/.hex/packages` |
 | `rebar3-hex` | clear | Built-in deletion of the contents of `~/.cache/rebar3/hex` |
-| `rubygems-cache` | clear | Built-in deletion of the contents of RubyGems' gem cache |
+| `rubygems-cache` | clear | Built-in deletion of the contents of RubyGems' gem cache, except Bundler's clones of Git sources in `bundler` |
 | `gradle-caches` | clear | Built-in deletion of the contents of `caches` in the Gradle user home |
 | `maven-repository` | clear | Built-in deletion of the contents of `~/.m2/repository`, refused when it holds an artifact that `mvn install` put there |
 
@@ -686,6 +686,11 @@ which a project can still need, so Plonge does not run it.
 After a clear, `gem pristine` downloads a missing copy.
 `bundle cache` reports a missing gem file for a gem whose copy is gone;
 with `--all-platforms`, it can download the gem instead.
+Bundler keeps a bare clone of each gem's Git source in `cache/bundler/git`,
+and a clone can hold commits that its remote no longer has,
+so the rule has `keep_names = ["bundler"]` and leaves `cache/bundler` in place.
+`bundle clean` removes the clones that the current bundle does not use.
+Plonge still refuses the rule when a Git repository is anywhere else in the cache.
 The rule reaches only the Ruby that `gem` runs from your home directory;
 each Ruby version has its own gem directory.
 
