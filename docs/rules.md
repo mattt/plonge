@@ -645,11 +645,24 @@ so `maven-repository` uses `refuse_names` and Plonge refuses that repository.
 To clean it, delete the installed artifacts that you can build again,
 or replace the rule without `refuse_names`.
 
+A `delete_contents` rule can also list `keep_names`,
+names of entries directly in its path that Plonge leaves in place:
+
+```toml
+keep_names = ["bundler"]
+```
+
+Plonge does not delete, measure, or check a kept entry,
+so a Git repository inside it does not refuse the rule.
+A name matches only directly in the path:
+an entry with the same name deeper down is deleted and checked as usual.
+The action reads `delete contents of <path> except <names> (built in)`.
+
 A `delete_contents` rule must have kind `clear`,
 so it runs only with `clean --global --include-clear --apply`.
 Plonge makes read-only entries writable first and does not follow symlinks.
 It cannot have `clean` or `targets`; it can have a `check`.
-`refuse_names` is allowed only on a `delete_contents` rule.
+`refuse_names` and `keep_names` are allowed only on a `delete_contents` rule.
 The action reads `delete contents of <path> (built in)`.
 Plonge skips the rule, and reports why, when the path is not absolute;
 is `/`, the home directory, or a directory that contains the home directory,

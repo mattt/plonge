@@ -385,24 +385,27 @@ func TestDefaultZigRule(t *testing.T) {
 	}
 }
 
+// rubyGemsSetup makes a fake gem whose env gemdir prints a gem directory
+// under a temporary directory, and returns the default rubygems-cache rule.
+// The fake records its calls in log.
+func rubyGemsSetup(t *testing.T) (r Runner, gemdir, log string, rule rules.Global) {
+	t.Helper()
+	r, tmp, _, _ := deleteSetup(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	gemdir = filepath.Join(tmp, "gems", "4.0.0")
+	log = filepath.Join(tmp, "gem.log")
+	addTool(t, bin, "gem", fmt.Sprintf(`echo "$*" >> %q; [ "$*" = "env gemdir" ] && echo %q`, log, gemdir))
+	return r, gemdir, log, defaultRule(t, "rubygems-cache")
+}
+
 // TestDefaultRubyGemsRule finds RubyGems' cache below the gem directory
 // that a fake gem env gemdir prints, and deletes only its contents.
 func TestDefaultRubyGemsRule(t *testing.T) {
-	r, tmp, _, _ := deleteSetup(t)
-	bin := filepath.SplitList(os.Getenv("PATH"))[0]
-	gemdir := filepath.Join(tmp, "gems", "4.0.0")
+	r, gemdir, log, rule := rubyGemsSetup(t)
 	cache := filepath.Join(gemdir, "cache")
 	installed := filepath.Join(gemdir, "gems", "rack-3.1.0", "lib", "rack.rb")
 	addFile(t, filepath.Join(cache, "rack-3.1.0.gem"))
 	addFile(t, installed)
-	log := filepath.Join(tmp, "gem.log")
-	addTool(t, bin, "gem", fmt.Sprintf(`echo "$*" >> %q; [ "$*" = "env gemdir" ] && echo %q`, log, gemdir))
-	var rule rules.Global
-	for _, g := range rules.Default().Global {
-		if g.ID == "rubygems-cache" {
-			rule = g
-		}
-	}
 	ctx := context.Background()
 	entries := r.List(ctx, []rules.Global{rule})
 	e := entries[0]
@@ -565,7 +568,7 @@ func TestCargoRulesFollowCargoHome(t *testing.T) {
 			for i, sub := range []string{"registry"} {
 				e := entries[i]
 				path := filepath.Join(cargoHome, sub)
-				if e.Skipped != "" || e.Path != path || e.Command != r.deleteAction(path) {
+				if e.Skipped != "" || e.Path != path || e.Command != r.deleteAction(path, nil) {
 					t.Fatalf("%s = %+v", sub, e)
 				}
 			}
@@ -636,7 +639,7 @@ func TestGradleCachesFollowGradleUserHome(t *testing.T) {
 			ctx := context.Background()
 			entries := r.List(ctx, []rules.Global{defaultRule(t, "gradle-caches")})
 			if e := entries[0]; e.Skipped != "" || e.Path != caches || e.Kind != rules.KindClear ||
-				e.Command != r.deleteAction(caches) {
+				e.Command != r.deleteAction(caches, nil) {
 				t.Fatalf("entry = %+v", e)
 			}
 			if res := r.Clean(ctx, entries, Options{Apply: true}); res.Outcomes[0].Status != Skipped {

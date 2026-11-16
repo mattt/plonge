@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -16,14 +17,15 @@ type inode struct{ dev, ino uint64 }
 // each hard-linked file once, and symlinks not followed.
 // On macOS, a file that shares blocks with clones counts only the blocks
 // that it does not share, unless every clone in its family is under dir.
-func DiskUsage(dir string) int64 {
-	n, _, _ := walkCache(dir, true, false, nil)
+// It leaves out the entries directly in dir that keep names.
+func DiskUsage(dir string, keep ...string) int64 {
+	n, _, _ := walkCache(dir, keep, true, false, nil)
 	return n
 }
 
 // Sizes measures each directory with at most Workers walks at a time.
 func Sizes(dirs []string) []int64 {
-	sizes, _ := GuardedSizes(dirs, nil)
+	sizes, _ := GuardedSizes(dirs, nil, nil)
 	return sizes
 }
 
@@ -32,12 +34,18 @@ func Sizes(dirs []string) []int64 {
 // a Git repository, as GitRefusal describes, and returns the reason
 // at the same index; the size of a refused directory is 0.
 // A nil guard checks no directory.
-func GuardedSizes(dirs []string, guard []bool) ([]int64, []string) {
+// Each walk leaves out the entries directly in dirs[i] that keep[i] names;
+// keep can be nil.
+func GuardedSizes(dirs []string, guard []bool, keep [][]string) ([]int64, []string) {
 	sizes := make([]int64, len(dirs))
 	reasons := make([]string, len(dirs))
 	parallel(len(dirs), func(i int) {
 		g := guard != nil && guard[i]
-		sizes[i], reasons[i], _ = walkCache(dirs[i], true, g, nil)
+		var k []string
+		if keep != nil {
+			k = keep[i]
+		}
+		sizes[i], reasons[i], _ = walkCache(dirs[i], k, true, g, nil)
 		if reasons[i] != "" {
 			sizes[i] = 0
 		}
@@ -91,8 +99,9 @@ func Measure(ctx context.Context, roots []Root) [][]int64 {
 // because it is or holds a Git repository, or "" when it does not.
 // It refuses a .git entry of any type or a Git directory at any depth,
 // and a directory that it cannot read, as walkCache describes.
-func GitRefusal(dir string) string {
-	_, reason, _ := walkCache(dir, false, true, nil)
+// It does not look inside the entries directly in dir that keep names.
+func GitRefusal(dir string, keep ...string) string {
+	_, reason, _ := walkCache(dir, keep, false, true, nil)
 	return reason
 }
 
@@ -139,6 +148,8 @@ func matchInside(dir string, elems []string) (string, error) {
 }
 
 // walkCache walks dir without following symlinks.
+// It leaves out the entries directly in dir that keep names,
+// which the caller does not delete.
 // With measure, it adds up the bytes, as DiskUsage describes.
 // With guard, it stops at the first Git repository and returns why dir
 // must not be deleted: a .git entry of any type at any depth,
@@ -147,7 +158,7 @@ func matchInside(dir string, elems []string) (string, error) {
 // With a layout, it does not refuse the repositories that SwiftPM manages:
 // a .git directory directly in a checkout, and a Git directory directly
 // in repositories. It returns them so that the caller can check them with Git.
-func walkCache(dir string, measure, guard bool, layout *packageLayout) (int64, string, []managedRepo) {
+func walkCache(dir string, keep []string, measure, guard bool, layout *packageLayout) (int64, string, []managedRepo) {
 	var t tally
 	var reason string
 	var repos []managedRepo
@@ -158,6 +169,12 @@ func walkCache(dir string, measure, guard bool, layout *packageLayout) (int64, s
 				return fs.SkipAll
 			}
 			if d != nil && d.IsDir() && path != dir {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if len(keep) > 0 && path != dir && filepath.Dir(path) == filepath.Clean(dir) && slices.Contains(keep, d.Name()) {
+			if d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
