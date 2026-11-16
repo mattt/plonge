@@ -365,6 +365,26 @@ func commitRepo(t *testing.T, dir string) {
 	gitRun(t, dir, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
 }
 
+// linkedGitDir copies the Git directory of a real linked worktree to dst.
+// Git keeps that directory in the main repository's .git/worktrees,
+// with HEAD, commondir, and gitdir but no objects of its own.
+func linkedGitDir(t *testing.T, dst string) {
+	t.Helper()
+	main := filepath.Join(t.TempDir(), "main")
+	commitRepo(t, main)
+	gitRun(t, main, "worktree", "add", "-q", "--detach", filepath.Join(filepath.Dir(main), "wt"))
+	src := filepath.Join(main, ".git", "worktrees", "wt")
+	if _, err := os.Lstat(filepath.Join(src, "objects")); err == nil {
+		t.Fatalf("%s has its own objects", src)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestDeleteContentsRefusesNestedRepositories skips a rule whose path holds
 // a Git repository at any depth, when it lists the rule, and deletes nothing.
 func TestDeleteContentsRefusesNestedRepositories(t *testing.T) {
@@ -388,6 +408,10 @@ func TestDeleteContentsRefusesNestedRepositories(t *testing.T) {
 		"bare repository": {
 			func(t *testing.T, cache string) { gitRun(t, cache, "init", "-q", "--bare", "bare.git") },
 			"contains a Git directory at bare.git",
+		},
+		"linked worktree's Git directory": {
+			func(t *testing.T, cache string) { linkedGitDir(t, filepath.Join(cache, "deps", "wt")) },
+			"contains a Git directory at deps/wt",
 		},
 	}
 	for name, tc := range cases {
@@ -445,6 +469,28 @@ func TestDeleteContentsChecksForRepositoryBeforeDeleting(t *testing.T) {
 		t.Errorf("outcome = %+v, want skipped %q", o, want)
 	}
 	for _, p := range []string{"blob", "clone/work", "clone/.git/HEAD"} {
+		if _, err := os.Stat(filepath.Join(cache, p)); err != nil {
+			t.Errorf("deleted %s: %v", p, err)
+		}
+	}
+}
+
+// TestDeleteContentsChecksForLinkedGitDirBeforeDeleting skips a rule whose path
+// gets a linked worktree's Git directory between the listing and the deletion.
+func TestDeleteContentsChecksForLinkedGitDirBeforeDeleting(t *testing.T) {
+	r, _, cache, _ := deleteSetup(t)
+	ctx := context.Background()
+	entries := r.List(ctx, []rules.Global{deleteRule(cache)})
+	if entries[0].Skipped != "" {
+		t.Fatalf("entry = %+v", entries[0])
+	}
+	linkedGitDir(t, filepath.Join(cache, "wt"))
+	res := r.Clean(ctx, entries, Options{Apply: true, IncludeClear: true})
+	want := "contains a Git directory at wt"
+	if o := res.Outcomes[0]; o.Status != Skipped || o.Reason != want || o.FreedBytes != 0 {
+		t.Errorf("outcome = %+v, want skipped %q", o, want)
+	}
+	for _, p := range []string{"blob", "wt/HEAD", "wt/commondir"} {
 		if _, err := os.Stat(filepath.Join(cache, p)); err != nil {
 			t.Errorf("deleted %s: %v", p, err)
 		}
