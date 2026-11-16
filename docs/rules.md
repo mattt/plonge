@@ -453,6 +453,7 @@ with `path_label = "global-packages"`, Plonge uses the text after
 `global-packages: ` on the last line that contains it,
 so a line such as `info : global-packages: /path/` gives `/path/`.
 Plonge skips the rule when no line has the label,
+when a line has the label but no path,
 or when two lines with the label give different paths.
 A `delete_contents` rule can also use `path_label`;
 the labeled path gets the same checks as any other path.
