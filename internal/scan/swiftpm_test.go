@@ -265,6 +265,24 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 			reason: "contains a Git repository at SourcePackages/checkouts/other whose HEAD is not a commit that Package.resolved pins for it",
 		},
 		{
+			name:  "DerivedData beside an Xcode project with a linked Git directory in repositories",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+				linkedGitDir(t, filepath.Join(p.cache, "SourcePackages", "repositories", "linked"))
+			},
+			reason: "contains a Git directory at SourcePackages/repositories/linked",
+		},
+		{
+			name:  "DerivedData beside an Xcode project with a checkout whose .git directory has commondir",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+				write(t, filepath.Join(p.checkout, ".git", "commondir"), p.mirror+"\n")
+			},
+			reason: "contains a Git directory at SourcePackages/checkouts/dep/.git",
+		},
+		{
 			name:  "DerivedData beside neither Package.swift nor an Xcode project",
 			cache: "DerivedData",
 			setup: func(t *testing.T, p swiftPackage) {
