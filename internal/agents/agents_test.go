@@ -66,7 +66,11 @@ func TestPaseoBusy(t *testing.T) {
 [{"cwd":"~/running/pkg","status":"running"},
  {"cwd":"~/link","status":"initializing"},
  {"cwd":"~/idle","status":"idle"},
- {"cwd":"","status":"idle"}]
+ {"cwd":"","status":"idle"},
+ {"cwd":"~/idle","status":"error"},
+ {"cwd":"~/idle","status":"closed"},
+ {"status":"closed"},
+ {"cwd":null,"status":"idle","extra":{"a":[1]}}]
 EOF`)
 	now := time.Now()
 	old := now.Add(-72 * time.Hour)
@@ -128,6 +132,19 @@ func TestPaseoFailed(t *testing.T) {
 		{"missing cwd", `echo '[{"status":"initializing"}]'`, "no absolute working directory"},
 		{"relative cwd", `echo '[{"cwd":"code/app","status":"running"}]'`, "no absolute working directory"},
 		{"other user", `echo '[{"cwd":"~other/app","status":"running"}]'`, "no absolute working directory"},
+		// An entry that Plonge cannot read might be a running agent,
+		// so it fails the source even when the other entries are harmless.
+		{"null entry", `echo '[{"cwd":"/","status":"idle"},null]'`, "Paseo agent 2 of 2 is not a JSON object"},
+		{"string entry", `echo '["running"]'`, "Paseo agent 1 of 1 is not a JSON object"},
+		{"array entry", `echo '[[]]'`, "is not a JSON object"},
+		{"no status", `echo '[{"cwd":"/"}]'`, "Paseo agent 1 of 1 has no status"},
+		{"null status", `echo '[{"cwd":"/","status":null}]'`, "has a status that is not a string"},
+		{"number status", `echo '[{"cwd":"/","status":1}]'`, "has a status that is not a string"},
+		{"capital key", `echo '[{"cwd":"/","Status":"idle"}]'`, "has no status"},
+		{"empty status", `echo '[{"cwd":"/","status":""}]'`, `has an unknown status ""`},
+		{"unknown status", `echo '[{"cwd":"/","status":"paused"}]'`, `has an unknown status "paused"`},
+		{"long status", `echo '[{"cwd":"/","status":"` + strings.Repeat("x", 100) + `"}]'`, `"` + strings.Repeat("x", 40) + `..."`},
+		{"number cwd", `echo '[{"cwd":1,"status":"idle"}]'`, "has a cwd that is not a string"},
 		// exec makes the timeout kill the sleep itself.
 		{"times out", `exec /bin/sleep 5`, "did not finish"},
 	}

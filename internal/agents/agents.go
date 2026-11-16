@@ -75,9 +75,23 @@ func failed(name, reason string) scan.Source {
 	return scan.Source{Name: name, Status: scan.SourceFailed, Reason: reason}
 }
 
+// paseoStatuses lists the agent statuses that Paseo 0.15.4 defines
+// in the agent status schema of its daemon protocol:
+// "initializing", "idle", "running", "error", and "closed".
+// The value tells whether an agent with that status might work in its directory.
+var paseoStatuses = map[string]bool{
+	"initializing": true,
+	"running":      true,
+	"idle":         false,
+	"error":        false,
+	"closed":       false,
+}
+
 // busyDirs returns the working directories of Paseo agents that are running or starting.
 // The source fails when the output is not a JSON array,
-// or when such an agent has no absolute working directory after ~ expansion,
+// when an entry is not a JSON object, has no string status, or has a status
+// that paseoStatuses does not list,
+// or when a running or starting agent has no absolute working directory after ~ expansion,
 // because Plonge then cannot tell which projects the agents work in.
 func busyDirs(ctx context.Context, home string) ([]string, scan.Source) {
 	if _, err := exec.LookPath("paseo"); err != nil {
@@ -101,10 +115,7 @@ func busyDirs(ctx context.Context, home string) ([]string, scan.Source) {
 		}
 		return nil, failed(SourcePaseo, reason)
 	}
-	var list []struct {
-		Cwd    string `json:"cwd"`
-		Status string `json:"status"`
-	}
+	var list []json.RawMessage
 	if err := json.Unmarshal(out, &list); err != nil {
 		return nil, failed(SourcePaseo, fmt.Sprintf("cannot read paseo ls output: %v", err))
 	}
@@ -113,17 +124,63 @@ func busyDirs(ctx context.Context, home string) ([]string, scan.Source) {
 		return nil, failed(SourcePaseo, "cannot read paseo ls output: not a JSON array")
 	}
 	var cwds []string
-	for _, a := range list {
-		if a.Status != "running" && a.Status != "initializing" {
+	for i, raw := range list {
+		status, cwd, problem := readAgent(raw)
+		if problem != "" {
+			return nil, failed(SourcePaseo, fmt.Sprintf("Paseo agent %d of %d %s", i+1, len(list), problem))
+		}
+		if !paseoStatuses[status] {
 			continue
 		}
-		cwd := expandHome(a.Cwd, home)
-		if !filepath.IsAbs(cwd) {
-			return nil, failed(SourcePaseo, fmt.Sprintf("a %s Paseo agent has no absolute working directory: %q", a.Status, a.Cwd))
+		path := expandHome(cwd, home)
+		if !filepath.IsAbs(path) {
+			return nil, failed(SourcePaseo, fmt.Sprintf("a %s Paseo agent has no absolute working directory: %q", status, cwd))
 		}
-		cwds = append(cwds, real(cwd))
+		cwds = append(cwds, real(path))
 	}
 	return cwds, scan.Source{Name: SourcePaseo, Status: scan.SourceUsed}
+}
+
+// readAgent reads the status and working directory of one paseo ls entry.
+// It returns a problem, such as "has no status", when Plonge cannot use the entry.
+// Keys must match exactly, so a "Status" key does not count as "status".
+// A missing or null cwd reads as "".
+func readAgent(raw json.RawMessage) (status, cwd, problem string) {
+	var fields map[string]json.RawMessage
+	// A JSON null decodes without an error but leaves fields nil.
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return "", "", "is not a JSON object"
+	}
+	rawStatus, ok := fields["status"]
+	if !ok {
+		return "", "", "has no status"
+	}
+	if !isJSONString(rawStatus) || json.Unmarshal(rawStatus, &status) != nil {
+		return "", "", "has a status that is not a string"
+	}
+	if _, known := paseoStatuses[status]; !known {
+		return "", "", fmt.Sprintf("has an unknown status %q", shorten(status, 40))
+	}
+	if rawCwd, ok := fields["cwd"]; ok && !bytes.Equal(bytes.TrimSpace(rawCwd), []byte("null")) {
+		if !isJSONString(rawCwd) || json.Unmarshal(rawCwd, &cwd) != nil {
+			return "", "", "has a cwd that is not a string"
+		}
+	}
+	return status, cwd, ""
+}
+
+// isJSONString reports whether raw holds a JSON string, rather than null or another type.
+func isJSONString(raw json.RawMessage) bool {
+	raw = bytes.TrimSpace(raw)
+	return len(raw) > 0 && raw[0] == '"'
+}
+
+// shorten cuts s to at most n runes, so that a reason stays short.
+func shorten(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "..."
+	}
+	return s
 }
 
 // busyIn reports whether a directory in cwds is at or below root.
