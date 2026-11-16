@@ -59,6 +59,8 @@ type Entry struct {
 	deleteContents bool
 	// refuseNames are the rule's refuse_names.
 	refuseNames []string
+	// keepNames are the rule's keep_names, which plonge leaves in Path.
+	keepNames []string
 }
 
 // Runner resolves tools and runs them from the home directory,
@@ -280,12 +282,12 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 			e.Skipped = err.Error()
 		case g.DeleteContents:
 			e.deleteContents = true
-			e.refuseNames = g.RefuseNames
+			e.refuseNames, e.keepNames = g.RefuseNames, g.KeepNames
 			if e.Skipped = r.refuseDelete(ctx, path); e.Skipped == "" {
-				e.Skipped = refuseNames(path, e.refuseNames)
+				e.Skipped = refuseNames(path, e.refuseNames, e.keepNames)
 			}
 			if e.Skipped == "" {
-				e.Command = r.deleteAction(path)
+				e.Command = r.deleteAction(path, e.keepNames)
 			}
 		default:
 			e.argv, e.Command = command(t, g.Clean)
@@ -312,21 +314,24 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 	return entries
 }
 
-// usage measures path, which may be a symlink to the cache directory.
-func usage(path string) int64 {
+// usage measures path, which may be a symlink to the cache directory,
+// without the entries directly in it that keep names.
+func usage(path string, keep ...string) int64 {
 	if p, err := filepath.EvalSymlinks(path); err == nil {
 		path = p
 	}
-	return scan.DiskUsage(path)
+	return scan.DiskUsage(path, keep...)
 }
 
 // measure sizes each entry that is not skipped.
 // The walk of a delete_contents path also looks for a Git repository
 // below it, and skips the entry when it finds one,
 // because the deletion would lose that repository's commits and changes.
+// The walk leaves out the entries that the rule keeps.
 func measure(entries []Entry) {
 	var dirs []string
 	var guard []bool
+	var keep [][]string
 	var index []int
 	for i, e := range entries {
 		switch {
@@ -337,6 +342,7 @@ func measure(entries []Entry) {
 				if info, err := os.Lstat(p); err == nil && info.IsDir() {
 					dirs = append(dirs, p)
 					guard = append(guard, false)
+					keep = append(keep, nil)
 					index = append(index, i)
 				}
 			}
@@ -344,11 +350,12 @@ func measure(entries []Entry) {
 			if p, err := filepath.EvalSymlinks(e.Path); err == nil {
 				dirs = append(dirs, p)
 				guard = append(guard, e.deleteContents)
+				keep = append(keep, e.keepNames)
 				index = append(index, i)
 			}
 		}
 	}
-	sizes, reasons := scan.GuardedSizes(dirs, guard)
+	sizes, reasons := scan.GuardedSizes(dirs, guard, keep)
 	for k, n := range sizes {
 		e := &entries[index[k]]
 		if reasons[k] != "" {
