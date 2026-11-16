@@ -14,6 +14,7 @@ names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          "bin", "build", "dist", "node_modules", "obj", "target", "tmp/cache",
          "vendor/bundle", "venv", "zig-cache"]
 quiet_hours = 24
+tmpdir_age_hours = 24
 
 # Do not scan inside these directories.
 skip = [".cache", ".git", ".hg", ".jj", ".svn"]

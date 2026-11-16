@@ -35,6 +35,9 @@ type Rules struct {
 	RefuseInside map[string][]string
 	// QuietHours is how long a project must be inactive to be quiet.
 	QuietHours float64
+	// TmpDirAgeHours is how long ago an entry in the temporary directory,
+	// and everything in it, must have last changed for the tmpdir rule to select it.
+	TmpDirAgeHours float64
 	// Skip are directory names that the walk never enters.
 	// A name in Names still matches; plonge reports it and does not enter it.
 	Skip []string
@@ -50,6 +53,10 @@ const (
 
 // XcodeRuleID names the built-in rule for stale Xcode DerivedData folders.
 const XcodeRuleID = "xcode-derived-data"
+
+// TmpDirRuleID names the built-in rule for stale entries
+// in the temporary directory.
+const TmpDirRuleID = "tmpdir"
 
 // MiseToolsRuleID names the rule for mise's installed tool versions.
 // When its tool is mise and it runs a clean command, plonge asks mise
@@ -123,9 +130,11 @@ type Global struct {
 }
 
 type file struct {
-	Names      []string            `toml:"names"`
-	QuietHours *float64            `toml:"quiet_hours"`
-	Beside     map[string][]string `toml:"beside"`
+	Names      []string `toml:"names"`
+	QuietHours *float64 `toml:"quiet_hours"`
+	// TmpDirAgeHours is tmpdir_age_hours; see Rules.TmpDirAgeHours.
+	TmpDirAgeHours *float64            `toml:"tmpdir_age_hours"`
+	Beside         map[string][]string `toml:"beside"`
 	// RefuseInside is refuse_inside; see Rules.RefuseInside.
 	RefuseInside map[string][]string `toml:"refuse_inside"`
 	Skip         []string            `toml:"skip"`
@@ -202,6 +211,9 @@ func parse(data, name string) (file, error) {
 	if f.QuietHours != nil && *f.QuietHours < 0 {
 		return f, fmt.Errorf("%s: quiet_hours must not be negative", name)
 	}
+	if f.TmpDirAgeHours != nil && !(*f.TmpDirAgeHours > 0) {
+		return f, fmt.Errorf("%s: tmpdir_age_hours must be positive", name)
+	}
 	return f, nil
 }
 
@@ -209,7 +221,7 @@ func (g Global) validate() error {
 	if g.ID == "" {
 		return fmt.Errorf("a global rule has no id")
 	}
-	if g.ID == XcodeRuleID {
+	if g.ID == XcodeRuleID || g.ID == TmpDirRuleID {
 		return fmt.Errorf("global rule id %q is reserved for a built-in rule", g.ID)
 	}
 	if g.Tool == "" || len(strings.Fields(g.Tool)) != 1 {
@@ -431,15 +443,16 @@ func Default() Rules {
 
 // merge adds the names and skip names in f to r,
 // replaces each beside entry, each refuse_inside entry, and each global rule with the same id, adds new global rules,
-// and sets the quiet period when f has one.
+// and sets the quiet period and the tmpdir age when f has them.
 func merge(r Rules, f file) Rules {
 	out := Rules{
-		Names:        slices.Clone(r.Names),
-		Beside:       make(map[string][]string, len(r.Beside)+len(f.Beside)),
-		RefuseInside: make(map[string][]string, len(r.RefuseInside)+len(f.RefuseInside)),
-		QuietHours:   r.QuietHours,
-		Skip:         slices.Clone(r.Skip),
-		Global:       slices.Clone(r.Global),
+		Names:          slices.Clone(r.Names),
+		Beside:         make(map[string][]string, len(r.Beside)+len(f.Beside)),
+		RefuseInside:   make(map[string][]string, len(r.RefuseInside)+len(f.RefuseInside)),
+		QuietHours:     r.QuietHours,
+		TmpDirAgeHours: r.TmpDirAgeHours,
+		Skip:           slices.Clone(r.Skip),
+		Global:         slices.Clone(r.Global),
 	}
 	for k, v := range r.Beside {
 		out.Beside[k] = v
@@ -465,6 +478,9 @@ func merge(r Rules, f file) Rules {
 	}
 	if f.QuietHours != nil {
 		out.QuietHours = *f.QuietHours
+	}
+	if f.TmpDirAgeHours != nil {
+		out.TmpDirAgeHours = *f.TmpDirAgeHours
 	}
 	for _, g := range f.Global {
 		i := slices.IndexFunc(out.Global, func(o Global) bool { return o.ID == g.ID })
