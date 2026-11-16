@@ -1,19 +1,17 @@
 # Plonge
 
 Developer tools and coding agents fill a disk with caches.
-Each project gets its own `node_modules`, `.build`, `DerivedData`, `target`,
-or virtual environment, and each agent worktree gets another copy.
-Package managers keep shared caches elsewhere.
+Each project gets its own `node_modules`, `.build`, `DerivedData`, `target`, or `.venv`, 
+and each agent worktree gets another copy.
+Or else, package managers squirrel away shared caches in various places.
 
-When the disk is full, you need space now,
-and that is a bad time to delete folders by hand.
-A folder that looks disposable can hold work that exists nowhere else,
-such as a dependency checkout with commits that were never pushed.
-Checking each folder first takes time, so the checks get skipped.
+When the disk is full, you need space **now**.
+And that's a bad time to delete folders by hand.
+That folder that looks disposable? 
+Whoops! That actually had work that hadn't been pushed anywhere yet.
 
-Plonge makes those checks.
-It finds the caches, reports their sizes,
-and deletes nothing until you add `--apply`.
+Plonge finds disposable caches around your system
+for you or your agent to _plonge_ away.
 In projects, it deletes only directories that match its rules and pass its Git checks.
 For shared caches, it runs each tool's cleanup command or a specific built-in rule.
 See [What Plonge covers](docs/coverage.md) for supported tools and known gaps.
@@ -173,7 +171,8 @@ a built-in clear rule deletes the contents of one directory.
 These rules refuse unsafe paths, such as the home directory, a symlink,
 or a path in or containing a Git repository,
 and they protect data that a download cannot restore.
-The Cargo rule leaves Git checkouts alone,
+For example, 
+the Cargo rule leaves Git checkouts alone,
 the Deno rules leave localStorage and REPL history alone,
 and the Maven rule refuses a repository with locally installed artifacts.
 On macOS, a prune rule for Xcode selects only build directories
@@ -279,6 +278,7 @@ Add it to `~/.claude/settings.json`:
   }
 }
 ```
+
 ## Development
 
 The repository pins its tools in `mise.toml`.
