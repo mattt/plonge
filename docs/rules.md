@@ -220,10 +220,29 @@ clones a URL that differs from the pin's `location`, so its clone is refused.
 A `DerivedData` directory beside `Package.swift`,
 such as one that `xcodebuild -derivedDataPath DerivedData` makes,
 has the same layout in `SourcePackages`, and Plonge checks it the same way.
-A `DerivedData` directory beside an Xcode project or workspace
-is still refused when it holds package clones,
-because Xcode keeps those pins inside the project or workspace,
-and one folder can hold several of them.
+A `DerivedData` directory beside an Xcode workspace or project
+has the same layout, but Xcode keeps the pins inside the workspace or project:
+
+- `<name>.xcworkspace/xcshareddata/swiftpm/Package.resolved` for a workspace.
+- `<name>.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`
+  for a project.
+
+When `Package.swift` is not beside `DerivedData`
+and exactly one workspace is, Plonge checks the clones against its pins.
+When no workspace is beside `DerivedData` and exactly one project is,
+Plonge checks them against the project's pins.
+A workspace takes precedence over any projects beside it.
+Plonge refuses the directory when it holds package clones and
+two or more workspaces, or no workspace and two or more projects, are beside it,
+because it cannot tell which one the clones belong to:
+
+```console
+Refused ~/code/app/DerivedData: contains a Git repository at SourcePackages/checkouts/dep, and its folder holds more than one Xcode project and no workspace, so no one Package.resolved pins it
+```
+
+It also refuses the directory when the chosen `Package.resolved`
+is missing or cannot be read,
+or when its pins do not name each clone, as for `.build`.
 
 `swift package reset` removes `.build`;
 `swift package clean` removes only the build output and keeps the checkouts.

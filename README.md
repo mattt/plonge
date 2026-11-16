@@ -121,6 +121,7 @@ Refused ~/code/app/node_modules: contains a Git repository at some-dep
 
 The one exception is Swift Package Manager.
 In a `.build` or `DerivedData` directory beside `Package.swift`,
+or a `DerivedData` directory beside one Xcode workspace or project,
 Plonge allows dependency clones that are unchanged
 and that SwiftPM can make again from `Package.resolved`.
 It refuses the directory when a clone has edits, extra commits, or any other repository.
