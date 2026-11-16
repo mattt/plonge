@@ -489,7 +489,9 @@ for `.build`, other than the checks against `Package.resolved`,
 which is gone with the workspace.
 Without the pins, Plonge cannot tell whether a checkout was at the commit
 that the workspace resolved, or whether a bare clone mirrors the package's URL;
-it can tell only that neither holds work that Git cannot restore.
+it can tell only that neither holds work that Git cannot restore,
+so a checkout's `HEAD` must be a commit that its remote-tracking refs
+or its bare clone's tags hold.
 The project `DerivedData` rule is different: it uses the project checks,
 without checking Xcode workspace metadata.
 

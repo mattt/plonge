@@ -402,10 +402,15 @@ because the workspace that held the pins is gone:
 a bare clone directly in `SourcePackages/repositories`
 can mirror any origin,
 and a checkout directly in `SourcePackages/checkouts`
-can be at any commit that its bare clone holds.
+can be at any commit that its `refs/remotes/origin` refs
+or the tags that its bare clone also holds already hold.
+A commit at the checkout's `HEAD` that no such ref holds is refused,
+whether `HEAD` is detached or on a local branch.
 Plonge refuses a stale directory that holds any other Git repository,
 a clone that fails the other conditions, or a directory that it cannot read.
-It checks again right before it deletes each directory.
+It checks again right before it deletes each directory,
+and the outcome's size and action then count only the directories
+that pass that check.
 The report lists each refused directory and its reason
 after the rule's action, and in `refused_folders` in JSON output;
 its size is not in the rule's size, and it is not counted in the action:
