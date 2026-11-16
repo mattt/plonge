@@ -95,6 +95,11 @@ A project with more recent or unknown activity is active.
 and `--min-size 100MiB` skips caches smaller than 100 MiB.
 Projects that the agent status check reports as busy stay excluded,
 even with `--include-active`, and a failed status check blocks project cleanup.
+A busy project has a Paseo agent with the status `running` or `initializing`.
+The check fails when `paseo` is on PATH but `paseo ls` fails,
+when it lists an entry that is not an object with a known status
+(`initializing`, `running`, `idle`, `error`, or `closed`),
+or when a running or initializing agent has no working directory.
 
 Before each deletion, Plonge checks that the path is still a directory,
 is not a symlink, is inside its root, is ignored by Git,

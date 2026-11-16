@@ -325,7 +325,8 @@ For every row:
 - `clean` shows a dry run for quiet projects.
   Add `--apply` to delete selected project caches after the path and Git checks.
   Busy projects are excluded; `--include-active` adds active projects.
-  If `paseo` is on PATH but fails, every project is busy.
+  If `paseo` is on PATH but fails, or lists an agent that Plonge cannot read,
+  every project is busy.
 - `clean --global` shows global cleanup actions instead of project caches.
   Add `--apply` to run eligible prune actions.
   A prune rule's size marked `(whole cache)` is the size of its whole cache,
