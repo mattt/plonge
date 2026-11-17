@@ -338,6 +338,9 @@ For every row:
   Busy projects are excluded; `--include-active` adds active projects.
   If `paseo` is on PATH but fails, or lists an agent that Plonge cannot read,
   every project is busy.
+  A cache that a running process uses is refused,
+  and if Plonge cannot list the processes, every project is busy;
+  see [Caches that a running process uses](rules.md#caches-that-a-running-process-uses).
 - `clean --global` shows global cleanup actions instead of project caches.
   Add `--apply` to run eligible prune actions.
   A prune rule's size marked `(whole cache)` is the size of its whole cache,
