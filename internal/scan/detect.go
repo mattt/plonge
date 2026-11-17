@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattt/plonge/internal/procs"
 	"github.com/mattt/plonge/internal/rules"
 )
 
@@ -31,6 +32,9 @@ type Refusal struct {
 	Project string `json:"project"`
 	Rule    string `json:"rule"`
 	Reason  string `json:"reason"`
+	// Processes lists the processes that use the cache,
+	// when that is why plonge refused it.
+	Processes []procs.Match `json:"processes,omitempty"`
 }
 
 // SkippedRoot is a root that plonge did not scan, and why.
@@ -45,7 +49,9 @@ type Root struct {
 	Skipped    string // why the root was skipped, or empty
 	Candidates []Candidate
 	Errors     []string // Git failures; the candidates they affect are left out
-	// Refused lists the candidates that Measure left out
+	// Refused lists the candidates that RefuseUsed left out
+	// because a running process uses them,
+	// and the ones that Measure left out
 	// because they are or hold a Git repository,
 	// or hold an entry at a refuse_inside path.
 	Refused []Refusal
@@ -54,7 +60,8 @@ type Root struct {
 	LastActivity time.Time
 	// ActivitySource names the source that set LastActivity.
 	ActivitySource string
-	// Busy is true when a coding agent is working in the root right now.
+	// Busy is true when a coding agent is working in the root right now,
+	// or when an activity source failed.
 	Busy bool
 }
 

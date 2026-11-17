@@ -51,7 +51,8 @@ type Report struct {
 	SkippedRoots []SkippedRoot `json:"skipped_roots"`
 	BrokenLinks  int           `json:"broken_links"`
 	Errors       []string      `json:"errors"`
-	// Refused lists the caches that are or hold a Git repository.
+	// Refused lists the caches that a running process uses
+	// or that are or hold a Git repository.
 	Refused []scan.Refusal `json:"refused"`
 	// ActivitySources reports each source of agent activity.
 	ActivitySources []scan.Source `json:"activity_sources"`
@@ -196,13 +197,18 @@ func writeSources(w io.Writer, sources []scan.Source) {
 			fmt.Fprintf(w, "Activity source skipped: %s (%s)\n", s.Name, s.Reason)
 		case scan.SourceFailed:
 			fmt.Fprintf(w, "Activity source failed: %s (%s)\n", s.Name, s.Reason)
-			fmt.Fprintf(w, "Every project counts as busy. Fix %s, or remove it from PATH for this run.\n", s.Name)
+			if s.Name == scan.SourceProcesses {
+				fmt.Fprintln(w, "Every project counts as busy until Plonge can list the running processes.")
+			} else {
+				fmt.Fprintf(w, "Every project counts as busy. Fix %s, or remove it from PATH for this run.\n", s.Name)
+			}
 		}
 	}
 }
 
 // WriteRefusals lists the caches, or the folders of a global rule,
-// that plonge does not report or delete because they are or hold a Git repository.
+// that plonge does not report or delete, such as because a running process uses them
+// or they are or hold a Git repository.
 func WriteRefusals(w io.Writer, refused []scan.Refusal, home string) {
 	for _, r := range refused {
 		fmt.Fprintf(w, "Refused %s: %s\n", Tilde(r.Path, home), r.Reason)
@@ -339,7 +345,7 @@ func WriteClean(w io.Writer, r clean.Result, home string) error {
 	}
 	n := r.NotSelected
 	if n.Busy.Caches > 0 {
-		fmt.Fprintf(w, "Not selected, busy project (Paseo): %s in %s\n",
+		fmt.Fprintf(w, "Not selected, busy project: %s in %s\n",
 			HumanBytes(n.Busy.Bytes), plural(n.Busy.Caches, "cache"))
 	}
 	if n.Active.Caches > 0 {

@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/mattt/plonge/internal/clean"
 	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/global"
+	"github.com/mattt/plonge/internal/procs"
 	"github.com/mattt/plonge/internal/scan"
 )
 
@@ -229,7 +231,7 @@ func TestWriteGlobalRefusedFolders(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Outcomes) != 1 || len(got.Outcomes[0].RefusedFolders) != 1 || got.Outcomes[0].RefusedFolders[0] != e.RefusedFolders[0] {
+	if len(got.Outcomes) != 1 || len(got.Outcomes[0].RefusedFolders) != 1 || !reflect.DeepEqual(got.Outcomes[0].RefusedFolders[0], e.RefusedFolders[0]) {
 		t.Errorf("JSON = %s", buf.String())
 	}
 }
@@ -323,5 +325,51 @@ func TestWriteFreedReportsHomeVolume(t *testing.T) {
 		if !strings.Contains(buf.String(), "Estimated freed: 29.0 GiB") || !strings.Contains(buf.String(), tt.want) {
 			t.Errorf("global output lacks %q:\n%s", tt.want, buf.String())
 		}
+	}
+}
+
+// TestWriteCleanProcesses reports a cache that a process uses,
+// and a failed process check, in text and JSON.
+func TestWriteCleanProcesses(t *testing.T) {
+	res := clean.Result{
+		Roots:       1,
+		NotSelected: clean.NotSelected{Busy: clean.Group{Caches: 1, Bytes: 2048}},
+		Refused: []scan.Refusal{{
+			Path: "/home/u/code/app/.venv", Project: "/home/u/code/app", Rule: ".venv",
+			Reason:    "in use by python3.12 (PID 4312), whose command line names bin/python",
+			Processes: []procs.Match{{PID: 4312, Name: "python3.12", User: "u", Use: procs.UseArgs, Path: "/home/u/code/app/.venv/bin/python"}},
+		}},
+		ActivitySources: []scan.Source{{Name: scan.SourceProcesses, Status: scan.SourceFailed, Reason: "lsof is not installed"}},
+	}
+	var buf bytes.Buffer
+	if err := WriteClean(&buf, res, "/home/u"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Not selected, busy project: 2.0 KiB in 1 cache\n",
+		"Refused ~/code/app/.venv: in use by python3.12 (PID 4312), whose command line names bin/python\n",
+		"Activity source failed: processes (lsof is not installed)\n",
+		"Every project counts as busy until Plonge can list the running processes.\n",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("clean output lacks %q:\n%s", want, buf.String())
+		}
+	}
+
+	buf.Reset()
+	if err := WriteJSON(&buf, res); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Refused []map[string]any `json:"refused"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []any{map[string]any{
+		"pid": float64(4312), "name": "python3.12", "user": "u", "use": "args", "path": "/home/u/code/app/.venv/bin/python",
+	}}
+	if len(got.Refused) != 1 || !reflect.DeepEqual(got.Refused[0]["processes"], want) {
+		t.Errorf("JSON refused = %v", got.Refused)
 	}
 }
