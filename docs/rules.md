@@ -259,6 +259,7 @@ Plonge does not refuse these repositories when SwiftPM can make them again:
   not a `.git` file or symlink, and one remote, `origin`,
   that is an accepted bare clone in the same cache.
   Its `HEAD` must be the commit that `Package.resolved` pins for its identity,
+  which is the name of its folder in lower case,
   and `git status` must show no changed, untracked, or ignored files.
   It must have no stash, no linked worktrees,
   no files marked assume-unchanged or skip-worktree,

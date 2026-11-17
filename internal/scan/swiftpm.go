@@ -383,7 +383,7 @@ func sameLocation(url, location string) bool {
 // checkCheckout returns why the checkout at dir has work that
 // "swift package resolve" would not restore, or "".
 // Its HEAD must be the revision that pins holds for its identity,
-// the name of dir, unless pins is nil, which skips that check.
+// the name of dir in lower case, unless pins is nil, which skips that check.
 // Its one remote, origin, must be one of mirrors.
 // A commit counts as one that SwiftPM can restore only when
 // a ref in refs/remotes/origin, a tag with the same object in the mirror,
@@ -414,7 +414,9 @@ func checkCheckout(ctx context.Context, dir string, pins map[string]pin, mirrors
 		return fail(err)
 	}
 	if pins != nil {
-		revision := pins[filepath.Base(dir)].revision
+		// SwiftPM names the folder after the last element of the location,
+		// such as GRDB.swift, and the identity is that name in lower case.
+		revision := pins[strings.ToLower(filepath.Base(dir))].revision
 		if revision == "" || strings.TrimSpace(string(out)) != strings.ToLower(revision) {
 			return "whose HEAD is not a commit that Package.resolved pins for it"
 		}
