@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,9 @@ import (
 )
 
 // binDir is the only directory on PATH during a test.
-// It holds Git and fake tools, so that no test can run a real tool.
+// It holds Git and fake tools, so that no test can run a real tool
+// other than lsof and ps, which the process check finds in the system
+// directories on macOS, and which only read the process list.
 func binDir(t *testing.T) string {
 	t.Helper()
 	git, err := exec.LookPath("git")
@@ -305,7 +308,7 @@ func TestCleanKeepsBusyRootAndReportsSources(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"busy project (Paseo)", "1 cache", "Activity source skipped: claude", "Estimated freed: 0 B"} {
+	for _, want := range []string{"busy project:", "1 cache", "Activity source skipped: claude", "Estimated freed: 0 B"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -332,7 +335,7 @@ func TestCleanKeepsBusyRootAndReportsSources(t *testing.T) {
 	if len(rep.Caches) != 1 || !rep.Caches[0].Busy || rep.Caches[0].Quiet || rep.Caches[0].ActivitySource != "paseo" {
 		t.Errorf("caches = %+v", rep.Caches)
 	}
-	if len(rep.Sources) != 2 {
+	if len(rep.Sources) != 3 || rep.Sources[2].Name != "processes" {
 		t.Errorf("sources = %+v", rep.Sources)
 	}
 }
@@ -356,7 +359,7 @@ func TestCleanKeepsEveryRootWhenPaseoFails(t *testing.T) {
 		}
 		out := stdout.String()
 		for _, want := range []string{
-			"busy project (Paseo)", "1 cache",
+			"busy project:", "1 cache",
 			"Activity source failed: paseo (paseo ls failed: no daemon)",
 			"Every project counts as busy. Fix paseo, or remove it from PATH for this run.",
 		} {
@@ -704,5 +707,37 @@ func TestCleanTextListsSkippedRoots(t *testing.T) {
 	want := "Skipped root " + report.Tilde(folder, home) + ": not in a Git work tree\n"
 	if !strings.Contains(stdout.String(), want) {
 		t.Errorf("output lacks %q:\n%s", want, stdout.String())
+	}
+}
+
+// TestCleanRefusesCacheThatAProcessUses starts a process that works
+// in a cache, and checks that clean keeps the cache and names the process.
+func TestCleanRefusesCacheThatAProcessUses(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("no process inspector for " + runtime.GOOS)
+	}
+	home := setup(t)
+	t.Setenv("GIT_CEILING_DIRECTORIES", home)
+	project := filepath.Join(home, "app")
+	quietRepo(t, project)
+	cache := filepath.Join(project, "node_modules")
+	sleep := exec.Command("/bin/sleep", "60")
+	sleep.Dir = cache
+	if err := sleep.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sleep.Process.Kill(); _ = sleep.Wait() })
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"clean", "--no-mise", "--root", project, "--apply"}
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	want := fmt.Sprintf("Refused ~/app/node_modules: in use by sleep (PID %d), which works in it\n", sleep.Process.Pid)
+	if out := stdout.String(); !strings.Contains(out, want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	if _, err := os.Stat(cache); err != nil {
+		t.Errorf("a cache that a process uses was deleted: %v", err)
 	}
 }
