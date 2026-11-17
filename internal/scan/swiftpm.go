@@ -112,11 +112,47 @@ func (l *packageLayout) isMirror(gitDir string) bool {
 	return l != nil && filepath.Dir(gitDir) == filepath.Join(l.dir, "repositories")
 }
 
+// checkoutOf returns the checkout that path is below, or "" when
+// path is not below a directory that is directly in the checkouts directory.
+func (l *packageLayout) checkoutOf(path string) string {
+	if l == nil {
+		return ""
+	}
+	checkouts := filepath.Join(l.dir, "checkouts")
+	rel, err := filepath.Rel(checkouts, path)
+	if err != nil || !filepath.IsLocal(rel) {
+		return ""
+	}
+	identity, rest, _ := strings.Cut(rel, string(filepath.Separator))
+	if rest == "" {
+		return ""
+	}
+	return filepath.Join(checkouts, identity)
+}
+
+// repoKind is the kind of repository that the walk let through.
+type repoKind int
+
+const (
+	checkoutRepo  repoKind = iota // the work tree of a checkout
+	mirrorRepo                    // a bare clone in repositories
+	submoduleTree                 // a work tree with a .git file, in a checkout
+	submoduleDir                  // a Git directory in a checkout's .git/modules
+)
+
 // managedRepo is a repository that the walk let through
 // because SwiftPM manages it. Git must still check it.
 type managedRepo struct {
-	path string // the work tree of a checkout, or the bare clone
-	bare bool
+	path string
+	kind repoKind
+}
+
+// what names the repository in a reason.
+func (r managedRepo) what() string {
+	if r.kind == mirrorRepo || r.kind == submoduleDir {
+		return "a Git directory"
+	}
+	return "a Git repository"
 }
 
 // guardCache measures c, with measure, and returns why c must not be deleted,
@@ -181,15 +217,14 @@ type mirror struct {
 // or "" when SwiftPM can make each one again.
 // It checks the bare clones first, as checkMirror describes,
 // because a checkout trusts only the tags that its bare clone also holds,
-// then each checkout, as checkCheckout describes.
+// then each checkout, as checkCheckout describes,
+// and the submodules of each checkout, as checkSubmodules describes.
+// It refuses a work tree with a .git file, or a Git directory
+// in a checkout's .git/modules, that is not part of such a submodule.
 // When the layout has no Package.resolved, it skips the checks against pins.
 func checkManaged(ctx context.Context, dir string, layout *packageLayout, repos []managedRepo) string {
 	first := func() string {
-		what := "a Git repository"
-		if repos[0].bare {
-			what = "a Git directory"
-		}
-		return repoReason(dir, repos[0].path, what)
+		return repoReason(dir, repos[0].path, repos[0].what())
 	}
 	if layout.unpinned != "" {
 		return first() + ", and " + layout.unpinned
@@ -203,7 +238,7 @@ func checkManaged(ctx context.Context, dir string, layout *packageLayout, repos 
 	}
 	var mirrors []mirror
 	for _, r := range repos {
-		if !r.bare {
+		if r.kind != mirrorRepo {
 			continue
 		}
 		m, why := checkMirror(ctx, r.path, pins)
@@ -212,12 +247,25 @@ func checkManaged(ctx context.Context, dir string, layout *packageLayout, repos 
 		}
 		mirrors = append(mirrors, m)
 	}
+	claimed := map[string]bool{}
 	for _, r := range repos {
-		if r.bare {
+		if r.kind != checkoutRepo {
 			continue
 		}
 		if why := checkCheckout(ctx, r.path, pins, mirrors); why != "" {
 			return repoReason(dir, r.path, "a Git repository") + " " + why
+		}
+		if path, why := checkSubmodules(ctx, r.path, filepath.Join(r.path, ".git"), claimed); why != "" {
+			return repoReason(dir, path, "a Git repository") + " " + why
+		}
+	}
+	for _, r := range repos {
+		switch {
+		case claimed[r.path]:
+		case r.kind == submoduleTree:
+			return repoReason(dir, r.path, r.what()) + " that is not a submodule that SwiftPM set up"
+		case r.kind == submoduleDir:
+			return repoReason(dir, r.path, r.what()) + " that no submodule in its checkout uses"
 		}
 	}
 	return ""
@@ -233,10 +281,10 @@ func checkManaged(ctx context.Context, dir string, layout *packageLayout, repos 
 // and a push leaves no record in a bare repository,
 // so a commit pushed into it from outside the cache is not detected.
 func checkMirror(ctx context.Context, gitDir string, pins map[string]pin) (mirror, string) {
-	g := func(args ...string) ([]byte, int, error) {
+	g := gitFunc(func(args ...string) ([]byte, int, error) {
 		return git(ctx, gitDir, nil, append([]string{"--git-dir=" + gitDir}, args...)...)
-	}
-	fail := func(err error) (mirror, string) { return mirror{}, "that Git cannot check: " + err.Error() }
+	})
+	fail := func(err error) (mirror, string) { return mirror{}, gitFail(err) }
 
 	out, _, err := g("rev-parse", "--is-bare-repository")
 	if err != nil {
@@ -282,8 +330,23 @@ func checkMirror(ctx context.Context, gitDir string, pins map[string]pin) (mirro
 	return mirror{real: real, tags: tags}, ""
 }
 
+// gitFunc runs a Git command in one repository,
+// and returns its output and exit code as git does.
+type gitFunc func(args ...string) ([]byte, int, error)
+
+// workTreeGit returns a gitFunc for the work tree dir and its Git directory.
+// It names both so that Git never finds another repository above dir.
+func workTreeGit(ctx context.Context, dir, gitDir string) gitFunc {
+	return func(args ...string) ([]byte, int, error) {
+		return git(ctx, dir, nil, append([]string{"--git-dir=" + gitDir, "--work-tree=" + dir}, args...)...)
+	}
+}
+
+// gitFail is the reason for a repository that Git cannot check.
+func gitFail(err error) string { return "that Git cannot check: " + err.Error() }
+
 // originReason returns why a repository does not have exactly one remote, origin.
-func originReason(g func(args ...string) ([]byte, int, error)) (string, error) {
+func originReason(g gitFunc) (string, error) {
 	out, _, err := g("remote")
 	if err != nil {
 		return "", err
@@ -295,7 +358,7 @@ func originReason(g func(args ...string) ([]byte, int, error)) (string, error) {
 }
 
 // tagRefs returns the object ID of each tag ref, by ref name.
-func tagRefs(g func(args ...string) ([]byte, int, error)) (map[string]string, error) {
+func tagRefs(g gitFunc) (map[string]string, error) {
 	out, _, err := g("for-each-ref", "--format=%(objectname) %(refname)", "refs/tags")
 	if err != nil {
 		return nil, err
@@ -322,7 +385,7 @@ func pinned(url string, pins map[string]pin) bool {
 
 // originURL returns the one URL of the origin remote, byte for byte.
 // It is an error when origin has no URL or more than one.
-func originURL(g func(args ...string) ([]byte, int, error)) (string, error) {
+func originURL(g gitFunc) (string, error) {
 	out, _, err := g("config", "-z", "--get-all", "remote.origin.url")
 	if err != nil {
 		return "", err
@@ -395,18 +458,11 @@ func checkCheckout(ctx context.Context, dir string, pins map[string]pin, mirrors
 	if why := worktreesReason(gitDir); why != "" {
 		return why
 	}
-	// Name the repository so that Git never finds another one above it.
-	g := func(args ...string) ([]byte, int, error) {
-		return git(ctx, dir, nil, append([]string{"--git-dir=" + gitDir, "--work-tree=" + dir}, args...)...)
-	}
-	fail := func(err error) string { return "that Git cannot check: " + err.Error() }
+	g := workTreeGit(ctx, dir, gitDir)
+	fail := gitFail
 
-	_, code, err := g("rev-parse", "--verify", "--quiet", "refs/stash")
-	switch {
-	case err == nil:
-		return "that has a stash"
-	case code != 1:
-		return fail(err)
+	if why := stashReason(g); why != "" {
+		return why
 	}
 
 	out, _, err := g("rev-parse", "--verify", "HEAD^{commit}")
@@ -422,25 +478,8 @@ func checkCheckout(ctx context.Context, dir string, pins map[string]pin, mirrors
 		}
 	}
 
-	// Set every option that would hide a change, in case configuration changes it.
-	out, _, err = g("status", "--porcelain=v1", "-z", "--untracked-files=all",
-		"--ignored=matching", "--ignore-submodules=none")
-	if err != nil {
-		return fail(err)
-	}
-	if len(out) > 0 {
-		return "that has changed, untracked, or ignored files"
-	}
-
-	// assume-unchanged and skip-worktree hide changes from git status.
-	out, _, err = g("ls-files", "-v", "-z")
-	if err != nil {
-		return fail(err)
-	}
-	for _, f := range splitNUL(out) {
-		if tag := f[0]; tag == 'S' || ('a' <= tag && tag <= 'z') {
-			return "that has files marked assume-unchanged or skip-worktree"
-		}
+	if why := changesReason(g); why != "" {
+		return why
 	}
 
 	if why, err := originReason(g); err != nil {
@@ -466,16 +505,8 @@ func checkCheckout(ctx context.Context, dir string, pins map[string]pin, mirrors
 		return "whose origin is not a SwiftPM clone in this cache"
 	}
 
-	// A push to origin updates a remote-tracking ref, which then holds
-	// a commit that the dependency's source may not have.
-	out, _, err = g("log", "-g", "--format=%gs", "--glob=refs/remotes/origin/*")
-	if err != nil {
-		return fail(err)
-	}
-	for line := range strings.SplitSeq(string(out), "\n") {
-		if strings.HasPrefix(line, "update by push") {
-			return "that has pushed commits to its SwiftPM clone"
-		}
+	if why := pushReason(g); why != "" {
+		return why + " to its SwiftPM clone"
 	}
 
 	tags, err := tagRefs(g)
@@ -502,6 +533,62 @@ func checkCheckout(ctx context.Context, dir string, pins map[string]pin, mirrors
 			return "that has commits that only its HEAD, local branches, tags, or reflogs hold"
 		}
 		return "that has commits that only its local branches, tags, or reflogs hold"
+	}
+	return ""
+}
+
+// stashReason returns why a repository has a stash, or "".
+func stashReason(g gitFunc) string {
+	_, code, err := g("rev-parse", "--verify", "--quiet", "refs/stash")
+	switch {
+	case err == nil:
+		return "that has a stash"
+	case code != 1:
+		return gitFail(err)
+	}
+	return ""
+}
+
+// changesReason returns why a work tree has files that its HEAD
+// would not restore, or "": a changed, untracked, or ignored file,
+// or a file with a flag that hides its changes from git status.
+func changesReason(g gitFunc) string {
+	// Set every option that would hide a change, in case configuration changes it.
+	out, _, err := g("status", "--porcelain=v1", "-z", "--untracked-files=all",
+		"--ignored=matching", "--ignore-submodules=none")
+	if err != nil {
+		return gitFail(err)
+	}
+	if len(out) > 0 {
+		return "that has changed, untracked, or ignored files"
+	}
+
+	// assume-unchanged and skip-worktree hide changes from git status.
+	out, _, err = g("ls-files", "-v", "-z")
+	if err != nil {
+		return gitFail(err)
+	}
+	for _, f := range splitNUL(out) {
+		if tag := f[0]; tag == 'S' || ('a' <= tag && tag <= 'z') {
+			return "that has files marked assume-unchanged or skip-worktree"
+		}
+	}
+	return ""
+}
+
+// pushReason returns why a repository has pushed to origin, or "".
+// A push to origin updates a remote-tracking ref, which then holds
+// a commit that the source of the repository may not have.
+// The caller adds where the commits went.
+func pushReason(g gitFunc) string {
+	out, _, err := g("log", "-g", "--format=%gs", "--glob=refs/remotes/origin/*")
+	if err != nil {
+		return gitFail(err)
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if strings.HasPrefix(line, "update by push") {
+			return "that has pushed commits"
+		}
 	}
 	return ""
 }
