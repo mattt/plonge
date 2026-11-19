@@ -259,6 +259,7 @@ Plonge does not refuse these repositories when SwiftPM can make them again:
   not a `.git` file or symlink, and one remote, `origin`,
   that is an accepted bare clone in the same cache.
   Its `HEAD` must be the commit that `Package.resolved` pins for its identity,
+  which is the name of its folder in lower case,
   and `git status` must show no changed, untracked, or ignored files.
   It must have no stash, no linked worktrees,
   no files marked assume-unchanged or skip-worktree,
@@ -268,15 +269,56 @@ Plonge does not refuse these repositories when SwiftPM can make them again:
   A local branch, a tag that only the checkout has,
   or a reflog does not count.
 
+SwiftPM also runs `git submodule update --init --recursive` in each checkout,
+so a dependency with submodules, such as GRDB.swift, has more repositories:
+Git keeps each submodule's Git directory in the checkout's `.git/modules/<name>`
+and writes a `.git` file that names it in the submodule's folder.
+Plonge does not refuse a submodule of an accepted checkout
+when `swift package resolve` can make it again:
+
+- `.gitmodules` at the checkout's `HEAD` must give the submodule's path
+  one name and one URL.
+  The `.git` file must name `.git/modules/<name>` in the checkout,
+  and that Git directory must have no linked worktrees
+  and a `core.worktree` value that names the submodule's folder.
+- Its `HEAD` must be the commit that the checkout's `HEAD` records for its path.
+- It must pass the checkout's checks for changed, untracked, and ignored files,
+  a stash, files marked assume-unchanged or skip-worktree,
+  and a reflog entry for a push to `origin`.
+- Its one remote, `origin`, and `submodule.<name>.url`
+  in the checkout's configuration must be the URL in `.gitmodules`,
+  compared as a bare clone's origin is compared with a pin's `location`.
+  Plonge compares the values as written.
+  Git stores a URL before it applies a `url.<base>.insteadOf` setting,
+  so a rewritten URL still matches,
+  and a relative URL in `.gitmodules` is refused.
+- Every commit in it must be in `HEAD` or in `refs/remotes/origin`.
+  A submodule has no bare clone to compare its tags with,
+  so a tag, a local branch, or a reflog does not count.
+- A submodule of the submodule must pass the same checks,
+  with the submodule in place of the checkout.
+
+A submodule that is not initialized has no Git directory,
+and `git status` does not look inside its folder,
+so Plonge refuses the checkout when that folder holds a file.
+It also refuses a Git directory in `.git/modules` that no submodule uses,
+as `git submodule deinit` leaves one,
+and a `.git` file that is not part of a submodule that passes these checks.
+
 Plonge refuses the `.build` directory for any other Git repository in it,
-including a repository inside a checkout, such as a submodule,
+including a repository inside a checkout that is not such a submodule,
 and a Git directory with a `commondir` or `gitdir` entry,
 such as the Git directory of a checkout's linked worktree.
 The reason names the path:
 
 ```console
 Refused ~/code/app/.build: contains a Git repository at checkouts/swift-nio that has changed, untracked, or ignored files
+Refused ~/code/app/.build: contains a Git repository at checkouts/GRDB.swift/SQLiteCustom/src that has commits that only its local branches, tags, or reflogs hold
 ```
+
+When `git status` in a checkout reports a submodule,
+because the submodule has a changed or untracked file or is at another commit,
+the reason names the checkout.
 
 Plonge reads `Package.resolved` versions 2 and 3, which key pins by package identity.
 It refuses a checkout when it cannot read the file,
@@ -295,6 +337,9 @@ to its bare clone is not detected, and neither is a push into the bare clone
 from a repository outside the cache.
 A SwiftPM mirror set in `.swiftpm/configuration/mirrors.json`
 clones a URL that differs from the pin's `location`, so its clone is refused.
+A submodule's origin is outside the cache,
+so Plonge cannot tell whether a commit in its `refs/remotes/origin` refs
+is still at that origin, or was put there without a push.
 
 A `DerivedData` directory beside `Package.swift`,
 such as one that `xcodebuild -derivedDataPath DerivedData` makes,
@@ -502,6 +547,8 @@ can mirror any origin,
 and a checkout directly in `SourcePackages/checkouts`
 can be at any commit that its `refs/remotes/origin` refs
 or the tags that its bare clone also holds already hold.
+A submodule of such a checkout must pass the same checks as in a project,
+because they do not use the pins.
 A commit at the checkout's `HEAD` that no such ref holds is refused,
 whether `HEAD` is detached or on a local branch.
 Plonge refuses a stale directory that holds any other Git repository,

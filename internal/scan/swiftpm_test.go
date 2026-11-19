@@ -188,6 +188,15 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 	}{
 		{name: "clean pinned checkout"},
 		{
+			name: "checkout whose folder name has capital letters",
+			setup: func(t *testing.T, p swiftPackage) {
+				// SwiftPM 6.4 names GRDB.swift's folder GRDB.swift and its identity grdb.swift.
+				if err := os.Rename(p.checkout, filepath.Join(filepath.Dir(p.checkout), "Dep")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
 			name:  "DerivedData beside Package.swift",
 			cache: "DerivedData",
 		},
