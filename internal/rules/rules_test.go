@@ -11,8 +11,8 @@ import (
 
 func TestDefault(t *testing.T) {
 	r := Default()
-	if len(r.Names) != 27 || r.QuietHours != 24 {
-		t.Errorf("got %d names and %g quiet hours", len(r.Names), r.QuietHours)
+	if len(r.Names) != 27 || r.QuietHours != 24 || r.TmpDirAgeHours != 24 {
+		t.Errorf("got %d names, %g quiet hours, and %g tmpdir hours", len(r.Names), r.QuietHours, r.TmpDirAgeHours)
 	}
 	if !slices.Equal(r.Beside["target"], []string{"Cargo.toml", "pom.xml"}) {
 		t.Errorf("beside target = %q", r.Beside["target"])
@@ -50,6 +50,7 @@ func TestLoad(t *testing.T) {
 		wantNames  []string // names that must be present
 		wantBeside map[string][]string
 		wantQuiet  float64
+		wantTmp    float64
 		wantErr    bool
 	}{
 		{
@@ -77,6 +78,10 @@ func TestLoad(t *testing.T) {
 		{name: "path name with dot dot", body: `names = ["a/../b"]`, wantErr: true},
 		{name: "path name with dot", body: `names = ["./a"]`, wantErr: true},
 		{name: "negative quiet hours", body: "quiet_hours = -1", wantErr: true},
+		{name: "tmpdir age", body: "tmpdir_age_hours = 168", wantQuiet: 24, wantTmp: 168},
+		{name: "zero tmpdir age", body: "tmpdir_age_hours = 0", wantErr: true},
+		{name: "negative tmpdir age", body: "tmpdir_age_hours = -1", wantErr: true},
+		{name: "NaN tmpdir age", body: "tmpdir_age_hours = nan", wantErr: true},
 		{name: "bad toml", body: "names = [", wantErr: true},
 	}
 	for _, tt := range tests {
@@ -106,6 +111,13 @@ func TestLoad(t *testing.T) {
 			}
 			if r.QuietHours != tt.wantQuiet {
 				t.Errorf("quiet hours = %g, want %g", r.QuietHours, tt.wantQuiet)
+			}
+			wantTmp := tt.wantTmp
+			if wantTmp == 0 {
+				wantTmp = 24
+			}
+			if r.TmpDirAgeHours != wantTmp {
+				t.Errorf("tmpdir age hours = %g, want %g", r.TmpDirAgeHours, wantTmp)
 			}
 		})
 	}
@@ -338,6 +350,7 @@ os = "darwin"
 		"other path":        "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"echo /x\"\nclean = \"t c\"\nkind = \"prune\"\n",
 		"empty tool":        "[[global]]\nid = \"a\"\ntool = \"\"\npath = \"/x\"\nclean = \"t c\"\nkind = \"prune\"\n",
 		"reserved id":       "[[global]]\nid = \"xcode-derived-data\"\n" + base,
+		"reserved tmpdir":   "[[global]]\nid = \"tmpdir\"\n" + base,
 		"unknown key":       "[[global]]\nid = \"a\"\nnope = 1\n" + base,
 		"label, fixed path": "[[global]]\nid = \"a\"\ntool = \"t\"\npath = \"/x\"\npath_label = \"p\"\nclean = \"t c\"\nkind = \"prune\"\n",
 		"duplicate id":      "[[global]]\nid = \"a\"\n" + base + "[[global]]\nid = \"a\"\n" + base,

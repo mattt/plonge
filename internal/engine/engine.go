@@ -70,7 +70,7 @@ func Inspect(ctx context.Context, sel Selection) (Inventory, error) {
 	inv.Report = report.Build(inv.Roots, inv.Sizes, inv.Rules.QuietHours, broken, inv.Now)
 	inv.Report.ActivitySources = inv.Sources
 	if sel.Global {
-		inv.Report.Global = global.New(env.Home).List(ctx, inv.Rules.Global)
+		inv.Report.Global = global.New(env.Home, inv.Rules.TmpDirAgeHours).List(ctx, inv.Rules.Global)
 	}
 	return inv, nil
 }
@@ -118,7 +118,7 @@ func CleanGlobal(ctx context.Context, opts global.Options) (global.Result, mise.
 	if err != nil {
 		return global.Result{}, env, err
 	}
-	r := global.New(env.Home)
+	r := global.New(env.Home, rs.TmpDirAgeHours)
 	entries := r.List(ctx, rs.Global)
 	if !opts.Apply {
 		return r.Clean(ctx, entries, opts), env, nil

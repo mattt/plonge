@@ -1,0 +1,377 @@
+//go:build darwin || linux
+
+package global
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/mattt/plonge/internal/scan"
+)
+
+// tmpSetup makes a fake temporary directory and a Runner whose clock
+// is 30 days ahead, so that every file the test makes is old
+// unless the test sets a later modification time.
+func tmpSetup(t *testing.T) (r Runner, tmp string, open *[]string) {
+	t.Helper()
+	bin := t.TempDir()
+	withGit(t, bin)
+	home := realTempDir(t)
+	tmp = filepath.Join(home, "T")
+	if err := os.Mkdir(tmp, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Add(30 * 24 * time.Hour)
+	open = &[]string{}
+	r = Runner{
+		Home: home, GOOS: runtime.GOOS, TmpDir: tmp, TmpAge: DefaultTmpAge,
+		openFiles: func(context.Context) ([]string, error) { return *open, nil },
+		now:       func() time.Time { return now },
+	}
+	return r, tmp, open
+}
+
+// touchRecent gives path a modification time inside the rule's period.
+func touchRecent(t *testing.T, r Runner, path string) {
+	t.Helper()
+	recent := r.clock().Add(-time.Hour)
+	if err := os.Chtimes(path, recent, recent); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func tmpEntryOf(t *testing.T, r Runner) Entry {
+	t.Helper()
+	entries := r.List(context.Background(), nil)
+	i := slices.IndexFunc(entries, func(e Entry) bool { return e.ID == "tmpdir" })
+	if i < 0 {
+		t.Fatalf("no tmpdir entry in %+v", entries)
+	}
+	return entries[i]
+}
+
+func mkfile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func refusedReasons(e Entry) map[string]string {
+	reasons := map[string]string{}
+	for _, f := range e.RefusedFolders {
+		reasons[filepath.Base(f.Path)] = f.Reason
+	}
+	return reasons
+}
+
+func TestTmpDirSelectsOnlyStaleEntries(t *testing.T) {
+	r, tmp, open := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "old-dir", "a", "blob"), strings.Repeat("x", 50_000))
+	mkfile(t, filepath.Join(tmp, "old-file"), "old")
+
+	mkfile(t, filepath.Join(tmp, "recent-file"), "new")
+	touchRecent(t, r, filepath.Join(tmp, "recent-file"))
+	mkfile(t, filepath.Join(tmp, "recent-inside", "sub", "new"), "new")
+	touchRecent(t, r, filepath.Join(tmp, "recent-inside", "sub", "new"))
+
+	mkfile(t, filepath.Join(tmp, "open-file"), "open")
+	mkfile(t, filepath.Join(tmp, "open-dir", "x"), "open")
+	if err := os.Mkdir(filepath.Join(tmp, "cwd-dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	*open = []string{
+		filepath.Join(tmp, "open-file"),
+		filepath.Join(real, "open-dir", "x"),
+		filepath.Join(tmp, "cwd-dir"),
+		"127.0.0.1:8080",
+	}
+
+	if err := os.Symlink(filepath.Join(tmp, "old-dir"), filepath.Join(tmp, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(tmp, "pipe-dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(tmp, "pipe-dir", "fifo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mkfile(t, filepath.Join(tmp, "repo", ".git", "HEAD"), "ref: refs/heads/main\n")
+	for _, name := range []string{"com.apple.Safari", "TemporaryItems", ".X11-unix", "systemd-private-abc"} {
+		mkfile(t, filepath.Join(tmp, name, "data"), "managed")
+	}
+
+	e := tmpEntryOf(t, r)
+	if e.Skipped != "" {
+		t.Fatalf("skipped: %s", e.Skipped)
+	}
+	if e.Path != real || e.Kind != "prune" || e.WholeCache {
+		t.Errorf("entry = %+v", e)
+	}
+	var stale []string
+	for _, p := range e.stale {
+		stale = append(stale, filepath.Base(p))
+	}
+	if !slices.Equal(stale, []string{"old-dir", "old-file"}) {
+		t.Errorf("stale = %q", stale)
+	}
+	if e.Bytes < 50_000 || e.Bytes > 200_000 || !strings.Contains(e.Command, "delete 2 stale entries") {
+		t.Errorf("bytes = %d, command = %q", e.Bytes, e.Command)
+	}
+	want := map[string]string{
+		"recent-inside": "holds sub/new, which changed in the last 24 hours",
+		"open-file":     "a running process",
+		"open-dir":      "a running process",
+		"cwd-dir":       "a running process",
+		"link":          "is a symlink",
+		"pipe-dir":      "holds fifo, which is a named pipe",
+		"repo":          "Git",
+	}
+	got := refusedReasons(e)
+	if len(got) != len(want) {
+		t.Errorf("refused = %q", got)
+	}
+	for name, part := range want {
+		if !strings.Contains(got[name], part) {
+			t.Errorf("refusal of %s = %q, want %q", name, got[name], part)
+		}
+	}
+	if e.Note != "kept without checks: 1 changed in the last 24 hours, 4 managed by the system" {
+		t.Errorf("note = %q", e.Note)
+	}
+}
+
+func TestTmpDirApplyChecksAgain(t *testing.T) {
+	r, tmp, open := tmpSetup(t)
+	for _, name := range []string{"a", "b", "c", "d"} {
+		mkfile(t, filepath.Join(tmp, name, "blob"), strings.Repeat("x", 10_000))
+	}
+	mkfile(t, filepath.Join(tmp, "recent"), "new")
+	touchRecent(t, r, filepath.Join(tmp, "recent"))
+	mkfile(t, filepath.Join(tmp, "com.apple.thing"), "managed")
+	ctx := context.Background()
+	entries := r.List(ctx, nil)
+
+	// After the listing, a process opens a file in b, c gains a recent file,
+	// d is removed, and a new old entry appears that the listing did not select.
+	*open = []string{filepath.Join(tmp, "b", "blob")}
+	mkfile(t, filepath.Join(tmp, "c", "new"), "new")
+	touchRecent(t, r, filepath.Join(tmp, "c", "new"))
+	if err := os.RemoveAll(filepath.Join(tmp, "d")); err != nil {
+		t.Fatal(err)
+	}
+	mkfile(t, filepath.Join(tmp, "e"), "late")
+
+	res := r.Clean(ctx, entries, Options{Apply: true})
+	o := res.Outcomes[slices.IndexFunc(res.Outcomes, func(o Outcome) bool { return o.ID == "tmpdir" })]
+	if o.Status != Ran || o.Command != tmpCommand(1) || o.FreedBytes <= 0 {
+		t.Errorf("outcome = %+v", o)
+	}
+	for name, kept := range map[string]bool{"a": false, "b": true, "c": true, "e": true, "recent": true, "com.apple.thing": true} {
+		_, err := os.Lstat(filepath.Join(tmp, name))
+		if gone := errors.Is(err, os.ErrNotExist); gone == kept {
+			t.Errorf("%s: kept = %v, want %v", name, !gone, kept)
+		}
+	}
+	got := refusedReasons(o.Entry)
+	if !strings.Contains(got["b"], "a running process") || !strings.Contains(got["c"], "holds new") {
+		t.Errorf("refused = %q", got)
+	}
+	// The listed entry must not change.
+	e := entries[slices.IndexFunc(entries, func(e Entry) bool { return e.ID == "tmpdir" })]
+	if len(e.stale) != 4 || len(e.RefusedFolders) != 0 {
+		t.Errorf("listed entry changed: %+v", e)
+	}
+}
+
+func TestTmpDirWithoutApplyDeletesNothing(t *testing.T) {
+	r, tmp, _ := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "old"), "old")
+	ctx := context.Background()
+	res := r.Clean(ctx, r.List(ctx, nil), Options{})
+	o := res.Outcomes[slices.IndexFunc(res.Outcomes, func(o Outcome) bool { return o.ID == "tmpdir" })]
+	if o.Status != WouldRun || o.Command != tmpCommand(1) {
+		t.Errorf("outcome = %+v", o)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "old")); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestTmpDirStatusChangeTimeCounts(t *testing.T) {
+	r, tmp, _ := tmpSetup(t)
+	r.now = nil
+	// An extracted file can keep an old modification time,
+	// but its status change time is when it was made.
+	path := filepath.Join(tmp, "extracted")
+	mkfile(t, path, "data")
+	old := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	e := tmpEntryOf(t, r)
+	if len(e.stale) != 0 || !strings.Contains(e.Note, "1 changed") {
+		t.Errorf("entry = %+v", e)
+	}
+}
+
+func TestTmpDirResolvesSymlink(t *testing.T) {
+	r, tmp, _ := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "old"), "old")
+	link := filepath.Join(r.Home, "link")
+	if err := os.Symlink(tmp, link); err != nil {
+		t.Fatal(err)
+	}
+	r.TmpDir = link
+	e := tmpEntryOf(t, r)
+	if e.Skipped != "" || e.Path != tmp || len(e.stale) != 1 {
+		t.Errorf("entry = %+v", e)
+	}
+}
+
+func TestTmpDirSkips(t *testing.T) {
+	t.Run("home", func(t *testing.T) {
+		r, _, _ := tmpSetup(t)
+		r.TmpDir = r.Home
+		if e := tmpEntryOf(t, r); !strings.Contains(e.Skipped, "home directory") || e.Command != "" {
+			t.Errorf("entry = %+v", e)
+		}
+	})
+	t.Run("ancestor of home", func(t *testing.T) {
+		r, _, _ := tmpSetup(t)
+		r.TmpDir = filepath.Dir(r.Home)
+		if e := tmpEntryOf(t, r); !strings.Contains(e.Skipped, "contains the home directory") {
+			t.Errorf("entry = %+v", e)
+		}
+	})
+	t.Run("relative", func(t *testing.T) {
+		r, _, _ := tmpSetup(t)
+		r.TmpDir = "tmp"
+		if e := tmpEntryOf(t, r); !strings.Contains(e.Skipped, "not an absolute path") {
+			t.Errorf("entry = %+v", e)
+		}
+	})
+	t.Run("missing", func(t *testing.T) {
+		r, tmp, _ := tmpSetup(t)
+		r.TmpDir = filepath.Join(tmp, "none")
+		if e := tmpEntryOf(t, r); !strings.Contains(e.Skipped, "cannot resolve") {
+			t.Errorf("entry = %+v", e)
+		}
+	})
+	t.Run("in a Git repository", func(t *testing.T) {
+		r, tmp, _ := tmpSetup(t)
+		mkfile(t, filepath.Join(tmp, "old"), "old")
+		if out, err := exec.Command("git", "init", "-q", r.Home).CombinedOutput(); err != nil {
+			t.Fatalf("git init: %v\n%s", err, out)
+		}
+		if e := tmpEntryOf(t, r); !strings.Contains(e.Skipped, "Git") {
+			t.Errorf("entry = %+v", e)
+		}
+	})
+	t.Run("lsof fails", func(t *testing.T) {
+		r, tmp, _ := tmpSetup(t)
+		mkfile(t, filepath.Join(tmp, "old"), "old")
+		r.openFiles = func(context.Context) ([]string, error) { return nil, errors.New("lsof is not installed") }
+		e := tmpEntryOf(t, r)
+		if e.Skipped != "cannot list open files: lsof is not installed" {
+			t.Errorf("entry = %+v", e)
+		}
+		res := r.Clean(context.Background(), []Entry{e}, Options{Apply: true})
+		if res.Outcomes[0].Status != Skipped {
+			t.Errorf("outcome = %+v", res.Outcomes[0])
+		}
+		if _, err := os.Stat(filepath.Join(tmp, "old")); err != nil {
+			t.Error(err)
+		}
+	})
+	t.Run("other systems", func(t *testing.T) {
+		r, _, _ := tmpSetup(t)
+		r.GOOS = "windows"
+		if slices.ContainsFunc(r.List(context.Background(), nil), func(e Entry) bool { return e.ID == "tmpdir" }) {
+			t.Error("tmpdir rule listed on windows")
+		}
+	})
+}
+
+func TestTmpManaged(t *testing.T) {
+	for name, want := range map[string]bool{
+		"com.apple.Safari": true, "TemporaryItems": true, ".AddressBookLocks": true,
+		"cryptex.personalize.x": true, ".X11-unix": true, ".X0-lock": true,
+		"systemd-private-1-foo.service-a": true, "snap-private-tmp": true,
+		"com.google.Chrome": false, "go-build123": false, "tmp.abc": false, "TemporaryItems2": false,
+	} {
+		if got := tmpManaged(name); got != want {
+			t.Errorf("tmpManaged(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestOpenNames(t *testing.T) {
+	got := openNames([]string{
+		"/private/T/a/b/c",
+		"/T/d",
+		"/private/T/gone (deleted)",
+		"/private/T",
+		"/private/Tother/x",
+		"127.0.0.1:80->127.0.0.1:81",
+	}, "/T", "/private/T")
+	for _, name := range []string{"a", "d", "gone", "gone (deleted)"} {
+		if !got[name] {
+			t.Errorf("%s not open in %v", name, got)
+		}
+	}
+	if len(got) != 4 {
+		t.Errorf("names = %v", got)
+	}
+}
+
+// TestListOpenFiles checks that lsof reports a file that this process has open,
+// by the path with symlinks resolved.
+func TestListOpenFiles(t *testing.T) {
+	if _, err := exec.LookPath("lsof"); err != nil && !slices.ContainsFunc(lsofDirs, func(d string) bool {
+		_, err := os.Stat(filepath.Join(d, "lsof"))
+		return err == nil
+	}) {
+		t.Skip("lsof not installed")
+	}
+	path := filepath.Join(realTempDir(t), "held")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	paths, err := listOpenFiles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(paths, path) {
+		t.Errorf("lsof did not report %s among %d paths", path, len(paths))
+	}
+}
+
+func TestTmpDirGitCheckMatchesScan(t *testing.T) {
+	// The listing and the final check must refuse the same repositories.
+	r, tmp, _ := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "nested", "dep", ".git"), "gitdir: /elsewhere\n")
+	e := tmpEntryOf(t, r)
+	got := refusedReasons(e)["nested"]
+	if got == "" || got != scan.GitRefusal(filepath.Join(tmp, "nested")) {
+		t.Errorf("refusal = %q", got)
+	}
+}

@@ -40,6 +40,9 @@ but MCP does not support `--root` or `--no-mise`.
    A `clear` rule can remove cached data still in use;
    later commands may need to download dependencies or rebuild files.
    Global cleanup does not use the project activity or Git checks.
+   The `tmpdir` rule deletes old entries in the temporary directory;
+   say that it cannot see a program that will use a path later
+   without holding it open now.
 
 4. Run a dry run and show the output.
    Project and global cleanup are separate operations:
