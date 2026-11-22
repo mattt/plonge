@@ -79,13 +79,14 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 		return Entry{}, false
 	}
 	e := Entry{ID: rules.TmpDirRuleID, Tool: "lsof", Kind: rules.KindPrune, Path: r.TmpDir, stale: []string{}}
-	dir, dev, reason := r.tmpState(ctx)
+	t, dev, reason := r.tmpState(ctx)
 	if reason != "" {
 		e.Skipped = reason
 		return e, true
 	}
-	e.Path = dir
-	ents, err := os.ReadDir(dir)
+	defer t.Close()
+	e.Path = t.path
+	names, err := readNames(t.root)
 	if err != nil {
 		e.Skipped = "cannot read the temporary directory: " + err.Error()
 		return e, true
@@ -93,13 +94,13 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 	cutoff := r.clock().Add(-r.TmpAge)
 	var candidates []string
 	recent, managed := 0, 0
-	for _, ent := range ents {
-		path := filepath.Join(dir, ent.Name())
-		if tmpManaged(ent.Name()) {
+	for _, name := range names {
+		path := filepath.Join(t.path, name)
+		if tmpManaged(name) {
 			managed++
 			continue
 		}
-		info, err := os.Lstat(path)
+		info, err := t.root.Lstat(name)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -132,7 +133,7 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 			return ""
 		})
 		if reason == "" {
-			reason = r.tmpRefusal(path, dev, cutoff)
+			reason = r.tmpCheck(t.root, filepath.Base(path), "", dev, cutoff, map[string]fileID{})
 		}
 		if reason != "" {
 			e.refuseFolder(path, reason)
@@ -159,29 +160,35 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 	return e, true
 }
 
-// tmpState resolves the temporary directory, checks that plonge may delete
-// entries in it, and returns its device.
-// It returns a reason when the rule cannot run.
-func (r Runner) tmpState(ctx context.Context) (dir string, dev uint64, reason string) {
+// tmpState resolves and opens the temporary directory,
+// checks that plonge may delete entries in it, and returns its device.
+// It returns a reason when the rule cannot run;
+// otherwise the caller must close the directory.
+func (r Runner) tmpState(ctx context.Context) (t *tmpDir, dev uint64, reason string) {
 	if !filepath.IsAbs(r.TmpDir) {
-		return "", 0, fmt.Sprintf("the temporary directory %q is not an absolute path", r.TmpDir)
+		return nil, 0, fmt.Sprintf("the temporary directory %q is not an absolute path", r.TmpDir)
 	}
 	dir, err := filepath.EvalSymlinks(r.TmpDir)
 	if err != nil {
-		return "", 0, "cannot resolve the temporary directory: " + err.Error()
+		return nil, 0, "cannot resolve the temporary directory: " + err.Error()
 	}
-	if reason := r.refuseDelete(ctx, dir); reason != "" {
-		return "", 0, "temporary directory " + r.tilde(dir) + ": " + reason
-	}
-	info, err := os.Lstat(dir)
+	// Open the directory before the checks, and make sure afterward
+	// that its path still names it, so the checks apply to what is open.
+	t, err = openTmpDir(dir)
 	if err != nil {
-		return "", 0, "cannot read the temporary directory: " + err.Error()
+		return nil, 0, "cannot open the temporary directory: " + err.Error()
 	}
-	st, ok := r.stat(info)
-	if !ok {
-		return "", 0, "cannot read the status of the temporary directory"
+	reason = r.refuseDelete(ctx, dir)
+	if reason != "" {
+		reason = "temporary directory " + r.tilde(dir) + ": " + reason
+	} else if !t.unchanged() {
+		reason = "the temporary directory changed while plonge checked it"
 	}
-	return dir, st.id.dev, ""
+	if reason != "" {
+		t.Close()
+		return nil, 0, reason
+	}
+	return t, t.id.dev, ""
 }
 
 // processes returns the inspector that the tmpdir rule asks
@@ -226,48 +233,6 @@ func (i *recordedInspector) Snapshot(ctx context.Context) (*procs.Snapshot, erro
 	snap, err := i.Inspector.Snapshot(ctx)
 	i.err = err
 	return snap, err
-}
-
-// tmpRefusal returns why plonge must not delete the stale entry at path,
-// or "" when it may. dev is the device of the temporary directory.
-// It checks path and every entry in it, and does not look for Git repositories.
-func (r Runner) tmpRefusal(path string, dev uint64, cutoff time.Time) string {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return "cannot read: " + err.Error()
-	}
-	if info.Mode()&fs.ModeSymlink != 0 {
-		return "is a symlink"
-	}
-	uid := uint32(os.Getuid())
-	var reason string
-	_ = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			reason = "cannot check: " + err.Error()
-			return fs.SkipAll
-		}
-		info, err := d.Info()
-		if err != nil {
-			reason = "cannot check: " + err.Error()
-			return fs.SkipAll
-		}
-		reason = r.tmpInfoRefusal(info, tmpWhere(path, p), dev, uid, cutoff)
-		if reason != "" {
-			return fs.SkipAll
-		}
-		return nil
-	})
-	return reason
-}
-
-// tmpWhere returns how a refusal names the entry at p in the stale entry at top:
-// "" for top itself, or its path relative to top.
-func tmpWhere(top, p string) string {
-	if p == top {
-		return ""
-	}
-	rel, _ := filepath.Rel(top, p)
-	return filepath.ToSlash(rel)
 }
 
 // tmpInfoRefusal returns why the file that info describes keeps
@@ -360,9 +325,12 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 	listed := o.stale
 	o.stale, o.Bytes = []string{}, 0
 	o.Command = tmpCommand(0)
-	dir, dev, reason := r.tmpState(ctx)
-	if reason == "" && dir != o.Path {
-		reason = "the temporary directory is now " + r.tilde(dir)
+	t, dev, reason := r.tmpState(ctx)
+	if reason == "" {
+		defer t.Close()
+		if t.path != o.Path {
+			reason = "the temporary directory is now " + r.tilde(t.path)
+		}
 	}
 	if reason != "" {
 		o.Status, o.Reason = Skipped, reason
@@ -373,10 +341,16 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 	inUse := clean.InUseChecker(ctx, insp, time.Now)
 	var failures []string
 	for _, path := range listed {
-		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+		name := filepath.Base(path)
+		if filepath.Dir(path) != t.path {
+			o.refuseFolder(path, "is not in the temporary directory")
 			continue
 		}
-		reason := r.tmpRefusal(path, dev, cutoff)
+		if _, err := t.root.Lstat(name); errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		ids := map[string]fileID{}
+		reason := r.tmpCheck(t.root, name, "", dev, cutoff, ids)
 		if reason == "" {
 			reason = scan.GitRefusal(path)
 		}
@@ -389,6 +363,18 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 				break
 			}
 		}
+		// The Git, process, and size checks read the entry by its path,
+		// so make sure that the path still names the checked entry.
+		if reason == "" && !t.unchanged() {
+			reason = "the temporary directory " + errReplaced.Error()
+		}
+		if reason == "" {
+			if info, err := os.Lstat(path); err != nil {
+				reason = "cannot read: " + err.Error()
+			} else if id, ok := identity(info); !ok || id != ids[""] {
+				reason = errReplaced.Error()
+			}
+		}
 		if reason != "" {
 			o.refuseFolder(path, reason)
 			continue
@@ -396,8 +382,8 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 		before := scan.DiskUsage(path)
 		o.stale = append(o.stale, path)
 		o.Bytes += before
-		if err := clean.RemoveTree(path); err != nil {
-			failures = append(failures, err.Error())
+		if err := tmpRemove(t.root, name, "", ids); err != nil {
+			failures = append(failures, path+": "+err.Error())
 		}
 		o.FreedBytes += max(0, before-scan.DiskUsage(path))
 	}

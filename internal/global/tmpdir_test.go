@@ -461,3 +461,111 @@ func TestTmpDirApplySkipsWhenTheProcessListFails(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// replaceDir puts a new directory with a file in it at path,
+// so that path names a directory with a different identity.
+func replaceDir(t *testing.T, path string) {
+	t.Helper()
+	fresh := path + ".fresh"
+	mkfile(t, filepath.Join(fresh, "new"), "new")
+	if err := os.Rename(path, path+".old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(fresh, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTmpDirApplyKeepsAReplacedEntry(t *testing.T) {
+	r, tmp, insp := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "a", "old"), "old")
+	ctx := context.Background()
+	listed := r.List(ctx, nil)
+
+	// After the final check of a, and before its deletion,
+	// another directory takes its name.
+	insp.onSnapshot = func() { replaceDir(t, filepath.Join(tmp, "a")) }
+	o := tmpOutcome(t, r.Clean(ctx, listed, Options{Apply: true}))
+	if got := refusedReasons(o.Entry)["a"]; got != "was replaced after plonge checked it" {
+		t.Errorf("refusal = %q, outcome = %+v", got, o)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "a", "new")); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestTmpDirApplyKeepsAReplacedTemporaryDirectory(t *testing.T) {
+	r, tmp, insp := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "a", "old"), "old")
+	victim := filepath.Join(r.Home, "victim")
+	mkfile(t, filepath.Join(victim, "a", "keep"), "keep")
+	ctx := context.Background()
+	listed := r.List(ctx, nil)
+
+	// After the final check, the temporary directory's path
+	// becomes a symlink to a directory with the same entry names.
+	insp.onSnapshot = func() {
+		if err := os.Rename(tmp, tmp+".old"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(victim, tmp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o := tmpOutcome(t, r.Clean(ctx, listed, Options{Apply: true}))
+	if o.Command != tmpCommand(0) {
+		t.Errorf("outcome = %+v", o)
+	}
+	if _, err := os.Stat(filepath.Join(victim, "a", "keep")); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestTmpRemoveWorksInTheOpenDirectory(t *testing.T) {
+	r, tmp, _ := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "a", "sub", "file"), "x")
+	mkfile(t, filepath.Join(tmp, "a", "other"), "x")
+	if err := os.Chmod(filepath.Join(tmp, "a", "sub"), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	d, err := openTmpDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ids := map[string]fileID{}
+	if reason := r.tmpCheck(d.root, "a", "", d.id.dev, r.clock().Add(-r.TmpAge), ids); reason != "" {
+		t.Fatal(reason)
+	}
+
+	// After the check, the temporary directory's path becomes a symlink
+	// to another directory with the same names, and a file in the open
+	// directory is replaced.
+	victim := filepath.Join(r.Home, "victim")
+	mkfile(t, filepath.Join(victim, "a", "other"), "keep")
+	moved := tmp + ".old"
+	if err := os.Rename(tmp, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, tmp); err != nil {
+		t.Fatal(err)
+	}
+	mkfile(t, filepath.Join(moved, "a", "other.new"), "new")
+	if err := os.Rename(filepath.Join(moved, "a", "other.new"), filepath.Join(moved, "a", "other")); err != nil {
+		t.Fatal(err)
+	}
+
+	err = tmpRemove(d.root, "a", "", ids)
+	if err == nil || !strings.Contains(err.Error(), "other: kept, because it was replaced") {
+		t.Errorf("err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(victim, "a", "other")); err != nil {
+		t.Errorf("victim: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(moved, "a", "other")); err != nil {
+		t.Errorf("replaced file: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(moved, "a", "sub")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("read-only folder: %v", err)
+	}
+}

@@ -925,6 +925,16 @@ and the rule is skipped when it deleted none.
 The outcome's size and action count only the entries that pass.
 The size is the size of the selected entries, without the `(whole cache)` mark.
 
+Plonge opens the temporary directory before it checks it,
+and reads and deletes each entry through that open directory,
+so a folder that is renamed or replaced by a symlink after the check
+does not change what Plonge deletes.
+The check records the device and inode of every file and folder in the entry,
+and the deletion keeps a file that was replaced or added after the check,
+with the folders that hold it, and reports a failure.
+The Git, process, and size checks read the entry by its path,
+so Plonge first makes sure that the path still names the checked entry.
+
 The rule has these limits:
 
 - The process check has the
@@ -937,6 +947,8 @@ The rule has these limits:
   Plonge cannot see such a use;
   only the period protects the entry.
 - A process can open an entry after the final check and before the deletion.
+- A process that can write to a folder in an entry
+  can replace a file in it between its last check and its removal.
 - The rule does not ask Paseo or any other agent tool which paths it uses.
 - On macOS, the `com.apple.bsd.dirhelper` launchd job runs every day
   with `CLEAN_FILES_OLDER_THAN_DAYS` set to 3,
