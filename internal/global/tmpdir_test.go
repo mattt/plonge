@@ -17,13 +17,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattt/plonge/internal/procs"
 	"github.com/mattt/plonge/internal/scan"
 )
+
+// fakeProcs is a process inspector whose one process uses the files in files.
+// onSnapshot, when set, runs before each snapshot.
+type fakeProcs struct {
+	files      []procs.File
+	err        error
+	onSnapshot func()
+}
+
+func (f *fakeProcs) Snapshot(context.Context) (*procs.Snapshot, error) {
+	if f.onSnapshot != nil {
+		f.onSnapshot()
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &procs.Snapshot{Processes: []procs.Process{{PID: 42, Name: "tool", Files: f.files}}}, nil
+}
+
+// use makes the fake process use each path in the way that use names.
+func (f *fakeProcs) use(use string, paths ...string) {
+	for _, p := range paths {
+		f.files = append(f.files, procs.File{Use: use, Path: p})
+	}
+}
 
 // tmpSetup makes a fake temporary directory and a Runner whose clock
 // is 30 days ahead, so that every file the test makes is old
 // unless the test sets a later modification time.
-func tmpSetup(t *testing.T) (r Runner, tmp string, open *[]string) {
+func tmpSetup(t *testing.T) (r Runner, tmp string, insp *fakeProcs) {
 	t.Helper()
 	bin := t.TempDir()
 	withGit(t, bin)
@@ -33,13 +59,13 @@ func tmpSetup(t *testing.T) (r Runner, tmp string, open *[]string) {
 		t.Fatal(err)
 	}
 	now := time.Now().Add(30 * 24 * time.Hour)
-	open = &[]string{}
+	insp = &fakeProcs{}
 	r = Runner{
 		Home: home, GOOS: runtime.GOOS, TmpDir: tmp, TmpAge: DefaultTmpAge,
-		openFiles: func(context.Context) ([]string, error) { return *open, nil },
+		inspector: insp,
 		now:       func() time.Time { return now },
 	}
-	return r, tmp, open
+	return r, tmp, insp
 }
 
 // touchRecent gives path a modification time inside the rule's period.
@@ -80,7 +106,7 @@ func refusedReasons(e Entry) map[string]string {
 }
 
 func TestTmpDirSelectsOnlyStaleEntries(t *testing.T) {
-	r, tmp, open := tmpSetup(t)
+	r, tmp, insp := tmpSetup(t)
 	mkfile(t, filepath.Join(tmp, "old-dir", "a", "blob"), strings.Repeat("x", 50_000))
 	mkfile(t, filepath.Join(tmp, "old-file"), "old")
 
@@ -98,12 +124,8 @@ func TestTmpDirSelectsOnlyStaleEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	*open = []string{
-		filepath.Join(tmp, "open-file"),
-		filepath.Join(real, "open-dir", "x"),
-		filepath.Join(tmp, "cwd-dir"),
-		"127.0.0.1:8080",
-	}
+	insp.use(procs.UseOpen, filepath.Join(tmp, "open-file"), filepath.Join(real, "open-dir", "x"), "127.0.0.1:8080")
+	insp.use(procs.UseCwd, filepath.Join(tmp, "cwd-dir"))
 
 	if err := os.Symlink(filepath.Join(tmp, "old-dir"), filepath.Join(tmp, "link")); err != nil {
 		t.Fatal(err)
@@ -138,9 +160,9 @@ func TestTmpDirSelectsOnlyStaleEntries(t *testing.T) {
 	}
 	want := map[string]string{
 		"recent-inside": "holds sub/new, which changed in the last 24 hours",
-		"open-file":     "a running process",
-		"open-dir":      "a running process",
-		"cwd-dir":       "a running process",
+		"open-file":     "in use by tool (PID 42), which has it open",
+		"open-dir":      "in use by tool (PID 42), which has x open",
+		"cwd-dir":       "in use by tool (PID 42), which works in it",
 		"link":          "is a symlink",
 		"pipe-dir":      "holds fifo, which is a named pipe",
 		"repo":          "Git",
@@ -160,7 +182,7 @@ func TestTmpDirSelectsOnlyStaleEntries(t *testing.T) {
 }
 
 func TestTmpDirApplyChecksAgain(t *testing.T) {
-	r, tmp, open := tmpSetup(t)
+	r, tmp, insp := tmpSetup(t)
 	for _, name := range []string{"a", "b", "c", "d"} {
 		mkfile(t, filepath.Join(tmp, name, "blob"), strings.Repeat("x", 10_000))
 	}
@@ -172,7 +194,7 @@ func TestTmpDirApplyChecksAgain(t *testing.T) {
 
 	// After the listing, a process opens a file in b, c gains a recent file,
 	// d is removed, and a new old entry appears that the listing did not select.
-	*open = []string{filepath.Join(tmp, "b", "blob")}
+	insp.use(procs.UseOpen, filepath.Join(tmp, "b", "blob"))
 	mkfile(t, filepath.Join(tmp, "c", "new"), "new")
 	touchRecent(t, r, filepath.Join(tmp, "c", "new"))
 	if err := os.RemoveAll(filepath.Join(tmp, "d")); err != nil {
@@ -192,7 +214,7 @@ func TestTmpDirApplyChecksAgain(t *testing.T) {
 		}
 	}
 	got := refusedReasons(o.Entry)
-	if !strings.Contains(got["b"], "a running process") || !strings.Contains(got["c"], "holds new") {
+	if !strings.Contains(got["b"], "in use by tool") || !strings.Contains(got["c"], "holds new") {
 		t.Errorf("refused = %q", got)
 	}
 	// The listed entry must not change.
@@ -286,12 +308,12 @@ func TestTmpDirSkips(t *testing.T) {
 			t.Errorf("entry = %+v", e)
 		}
 	})
-	t.Run("lsof fails", func(t *testing.T) {
-		r, tmp, _ := tmpSetup(t)
+	t.Run("process list fails", func(t *testing.T) {
+		r, tmp, insp := tmpSetup(t)
 		mkfile(t, filepath.Join(tmp, "old"), "old")
-		r.openFiles = func(context.Context) ([]string, error) { return nil, errors.New("lsof is not installed") }
+		insp.err = errors.New("lsof is not installed")
 		e := tmpEntryOf(t, r)
-		if e.Skipped != "cannot list open files: lsof is not installed" {
+		if e.Skipped != "cannot list processes: lsof is not installed" {
 			t.Errorf("entry = %+v", e)
 		}
 		res := r.Clean(context.Background(), []Entry{e}, Options{Apply: true})
@@ -321,49 +343,6 @@ func TestTmpManaged(t *testing.T) {
 		if got := tmpManaged(name); got != want {
 			t.Errorf("tmpManaged(%q) = %v, want %v", name, got, want)
 		}
-	}
-}
-
-func TestOpenNames(t *testing.T) {
-	got := openNames([]string{
-		"/private/T/a/b/c",
-		"/T/d",
-		"/private/T/gone (deleted)",
-		"/private/T",
-		"/private/Tother/x",
-		"127.0.0.1:80->127.0.0.1:81",
-	}, "/T", "/private/T")
-	for _, name := range []string{"a", "d", "gone", "gone (deleted)"} {
-		if !got[name] {
-			t.Errorf("%s not open in %v", name, got)
-		}
-	}
-	if len(got) != 4 {
-		t.Errorf("names = %v", got)
-	}
-}
-
-// TestListOpenFiles checks that lsof reports a file that this process has open,
-// by the path with symlinks resolved.
-func TestListOpenFiles(t *testing.T) {
-	if _, err := exec.LookPath("lsof"); err != nil && !slices.ContainsFunc(lsofDirs, func(d string) bool {
-		_, err := os.Stat(filepath.Join(d, "lsof"))
-		return err == nil
-	}) {
-		t.Skip("lsof not installed")
-	}
-	path := filepath.Join(realTempDir(t), "held")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	paths, err := listOpenFiles(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(paths, path) {
-		t.Errorf("lsof did not report %s among %d paths", path, len(paths))
 	}
 }
 
@@ -433,5 +412,52 @@ func TestTmpDirRefusesForeignFilesInsideAnEntry(t *testing.T) {
 		if gone := errors.Is(err, os.ErrNotExist); gone == kept {
 			t.Errorf("%s: kept = %v, want %v", name, !gone, kept)
 		}
+	}
+}
+
+func TestTmpDirApplyAsksTheProcessInspector(t *testing.T) {
+	r, tmp, insp := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "named", "data"), "x")
+	mkfile(t, filepath.Join(tmp, "free", "data"), "x")
+	link := filepath.Join(r.Home, "link")
+	if err := os.Symlink(tmp, link); err != nil {
+		t.Fatal(err)
+	}
+	r.TmpDir = link
+	ctx := context.Background()
+	listed := r.List(ctx, nil)
+
+	// After the listing, a process names one entry on its command line
+	// through the symlink, which lsof alone does not report.
+	insp.use(procs.UseArgs, filepath.Join(link, "named", "data"))
+	o := tmpOutcome(t, r.Clean(ctx, listed, Options{Apply: true}))
+	if o.Status != Ran || o.Command != tmpCommand(1) {
+		t.Errorf("outcome = %+v", o)
+	}
+	if got := refusedReasons(o.Entry)["named"]; !strings.Contains(got, "whose command line names") {
+		t.Errorf("refusal = %q", got)
+	}
+	if _, err := os.Lstat(filepath.Join(tmp, "named")); err != nil {
+		t.Errorf("named: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(tmp, "free")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("free: %v", err)
+	}
+}
+
+func TestTmpDirApplySkipsWhenTheProcessListFails(t *testing.T) {
+	r, tmp, insp := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "old"), "old")
+	ctx := context.Background()
+	listed := r.List(ctx, nil)
+
+	// The listing succeeded; the list before the deletion fails.
+	insp.err = errors.New("lsof did not finish in 30s")
+	o := tmpOutcome(t, r.Clean(ctx, listed, Options{Apply: true}))
+	if o.Status != Skipped || o.Reason != "cannot list processes: lsof did not finish in 30s" || o.FreedBytes != 0 {
+		t.Errorf("outcome = %+v", o)
+	}
+	if _, err := os.Lstat(filepath.Join(tmp, "old")); err != nil {
+		t.Error(err)
 	}
 }

@@ -217,8 +217,8 @@ It leaves alone names that the system manages, such as `com.apple.*`
 and `systemd-private-*`.
 It refuses an entry that is a symlink, is or holds another user's file or a mount point,
 holds a socket or a recent file, holds a Git repository,
-or that `lsof` reports as open or as a process's working directory.
-`lsof` cannot see a program that will use a path later
+or that a running process uses, by the same check as for project caches.
+That check cannot see a program that will use a path later
 without holding it open now,
 so read the [limits of this rule](docs/rules.md#temporary-directory)
 before you apply it.

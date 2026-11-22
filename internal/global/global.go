@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mattt/plonge/internal/disk"
+	"github.com/mattt/plonge/internal/procs"
 	"github.com/mattt/plonge/internal/rules"
 	"github.com/mattt/plonge/internal/scan"
 )
@@ -78,8 +79,9 @@ type Runner struct {
 	// TmpAge is how long ago an entry in TmpDir must have last changed.
 	TmpAge time.Duration
 
-	// openFiles lists the paths that processes have open; nil runs lsof.
-	openFiles func(context.Context) ([]string, error)
+	// inspector lists the running processes for the tmpdir rule;
+	// nil uses procs.System.
+	inspector procs.Inspector
 	// now returns the current time; nil uses time.Now.
 	now func() time.Time
 	// statHook, when set, replaces statOf for the tmpdir rule.

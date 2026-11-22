@@ -1,13 +1,11 @@
 package global
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -15,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mattt/plonge/internal/clean"
+	"github.com/mattt/plonge/internal/procs"
 	"github.com/mattt/plonge/internal/rules"
 	"github.com/mattt/plonge/internal/scan"
 )
@@ -28,7 +27,7 @@ import (
 // It refuses a stale entry that is a symlink,
 // is or holds a file of another user, or a file whose owner it cannot read,
 // is or holds a mount point of another file system,
-// is open in a process or is a process's working directory as lsof reports,
+// is used by a running process, as the shared process inspector reports,
 // is or holds a socket, a named pipe, or a device,
 // holds an entry that changed more recently,
 // or is or holds a Git repository, and reports it in RefusedFolders.
@@ -80,7 +79,7 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 		return Entry{}, false
 	}
 	e := Entry{ID: rules.TmpDirRuleID, Tool: "lsof", Kind: rules.KindPrune, Path: r.TmpDir, stale: []string{}}
-	dir, dev, open, reason := r.tmpState(ctx)
+	dir, dev, reason := r.tmpState(ctx)
 	if reason != "" {
 		e.Skipped = reason
 		return e, true
@@ -114,9 +113,28 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 		}
 		candidates = append(candidates, path)
 	}
+	snap, err := r.processes().Snapshot(ctx)
+	if err != nil {
+		e.Skipped = "cannot list processes: " + err.Error()
+		return e, true
+	}
+	var aliases []string
+	for _, path := range candidates {
+		aliases = append(aliases, r.tmpAliases(path)...)
+	}
+	used := snap.Find(aliases)
 	var checked []string
 	for _, path := range candidates {
-		if reason := r.tmpRefusal(path, dev, cutoff, open); reason != "" {
+		reason := r.tmpInUse(path, func(p string) string {
+			if ms := used[p]; len(ms) > 0 {
+				return procs.Reason(p, ms)
+			}
+			return ""
+		})
+		if reason == "" {
+			reason = r.tmpRefusal(path, dev, cutoff)
+		}
+		if reason != "" {
 			e.refuseFolder(path, reason)
 			continue
 		}
@@ -142,51 +160,84 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 }
 
 // tmpState resolves the temporary directory, checks that plonge may delete
-// entries in it, and lists the names of the entries in it that a process
-// has open or works in. It returns a reason when the rule cannot run.
-func (r Runner) tmpState(ctx context.Context) (dir string, dev uint64, open map[string]bool, reason string) {
+// entries in it, and returns its device.
+// It returns a reason when the rule cannot run.
+func (r Runner) tmpState(ctx context.Context) (dir string, dev uint64, reason string) {
 	if !filepath.IsAbs(r.TmpDir) {
-		return "", 0, nil, fmt.Sprintf("the temporary directory %q is not an absolute path", r.TmpDir)
+		return "", 0, fmt.Sprintf("the temporary directory %q is not an absolute path", r.TmpDir)
 	}
 	dir, err := filepath.EvalSymlinks(r.TmpDir)
 	if err != nil {
-		return "", 0, nil, "cannot resolve the temporary directory: " + err.Error()
+		return "", 0, "cannot resolve the temporary directory: " + err.Error()
 	}
 	if reason := r.refuseDelete(ctx, dir); reason != "" {
-		return "", 0, nil, "temporary directory " + r.tilde(dir) + ": " + reason
+		return "", 0, "temporary directory " + r.tilde(dir) + ": " + reason
 	}
 	info, err := os.Lstat(dir)
 	if err != nil {
-		return "", 0, nil, "cannot read the temporary directory: " + err.Error()
+		return "", 0, "cannot read the temporary directory: " + err.Error()
 	}
 	st, ok := r.stat(info)
 	if !ok {
-		return "", 0, nil, "cannot read the status of the temporary directory"
+		return "", 0, "cannot read the status of the temporary directory"
 	}
-	list := r.openFiles
-	if list == nil {
-		list = listOpenFiles
+	return dir, st.id.dev, ""
+}
+
+// processes returns the inspector that the tmpdir rule asks
+// which processes use an entry: the one that a test sets, or procs.System.
+func (r Runner) processes() procs.Inspector {
+	if r.inspector != nil {
+		return r.inspector
 	}
-	paths, err := list(ctx)
-	if err != nil {
-		return "", 0, nil, "cannot list open files: " + err.Error()
+	return procs.System()
+}
+
+// tmpAliases returns path, an entry in the resolved temporary directory,
+// and the same entry under TmpDir when TmpDir goes through a symlink,
+// because a command line can name either.
+func (r Runner) tmpAliases(path string) []string {
+	alias := filepath.Join(filepath.Clean(r.TmpDir), filepath.Base(path))
+	if alias == path {
+		return []string{path}
 	}
-	return dir, st.id.dev, openNames(paths, filepath.Clean(r.TmpDir), dir), ""
+	return []string{path, alias}
+}
+
+// tmpInUse returns why a process uses the entry at path, by any of its
+// aliases, as inUse reports, or "" when none does.
+func (r Runner) tmpInUse(path string, inUse func(string) string) string {
+	for _, p := range r.tmpAliases(path) {
+		if reason := inUse(p); reason != "" {
+			return reason
+		}
+	}
+	return ""
+}
+
+// recordedInspector remembers the error of the last snapshot it took,
+// so that the tmpdir rule can stop when the processes cannot be listed.
+type recordedInspector struct {
+	procs.Inspector
+	err error
+}
+
+func (i *recordedInspector) Snapshot(ctx context.Context) (*procs.Snapshot, error) {
+	snap, err := i.Inspector.Snapshot(ctx)
+	i.err = err
+	return snap, err
 }
 
 // tmpRefusal returns why plonge must not delete the stale entry at path,
 // or "" when it may. dev is the device of the temporary directory.
 // It checks path and every entry in it, and does not look for Git repositories.
-func (r Runner) tmpRefusal(path string, dev uint64, cutoff time.Time, open map[string]bool) string {
+func (r Runner) tmpRefusal(path string, dev uint64, cutoff time.Time) string {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "cannot read: " + err.Error()
 	}
 	if info.Mode()&fs.ModeSymlink != 0 {
 		return "is a symlink"
-	}
-	if open[filepath.Base(path)] {
-		return "a running process has it or a file in it open, or works in it"
 	}
 	uid := uint32(os.Getuid())
 	var reason string
@@ -289,71 +340,6 @@ func ageText(d time.Duration) string {
 	return strconv.FormatFloat(d.Hours(), 'f', -1, 64) + " hours"
 }
 
-// openNames returns the names of the entries directly in each of dirs
-// that hold a path in paths, or are one.
-// lsof can follow a name with text such as " (deleted)",
-// so a name is also recorded without that text.
-func openNames(paths []string, dirs ...string) map[string]bool {
-	names := map[string]bool{}
-	for _, p := range paths {
-		for _, dir := range dirs {
-			rest, ok := strings.CutPrefix(p, dir+string(filepath.Separator))
-			if !ok {
-				continue
-			}
-			name, _, _ := strings.Cut(rest, string(filepath.Separator))
-			names[name] = true
-			if short, _, ok := strings.Cut(name, " ("); ok {
-				names[short] = true
-			}
-		}
-	}
-	return names
-}
-
-// lsofDirs are where systems install lsof, for a PATH that leaves them out.
-var lsofDirs = []string{"/usr/sbin", "/usr/bin", "/sbin"}
-
-// listOpenFiles returns the path names that lsof reports for the files
-// that processes have open, including each process's working directory.
-// Without root, lsof sees only the processes of the current user.
-func listOpenFiles(ctx context.Context) ([]string, error) {
-	path, err := exec.LookPath("lsof")
-	if err != nil {
-		for _, dir := range lsofDirs {
-			if p, err := exec.LookPath(filepath.Join(dir, "lsof")); err == nil {
-				path = p
-				break
-			}
-		}
-	}
-	if path == "" {
-		return nil, errors.New("lsof is not installed")
-	}
-	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
-	defer cancel()
-	// -w leaves out warnings, -n and -P leave out name lookups,
-	// and -F n prints each file's name on a line that starts with n.
-	cmd := exec.CommandContext(ctx, path, "-w", "-n", "-P", "-F", "n")
-	cmd.WaitDelay = time.Second
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		if msg := lastLine(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("lsof failed: %w: %s", err, msg)
-		}
-		return nil, fmt.Errorf("lsof failed: %w", err)
-	}
-	var paths []string
-	for line := range strings.SplitSeq(string(out), "\n") {
-		if name, ok := strings.CutPrefix(line, "n"); ok {
-			paths = append(paths, name)
-		}
-	}
-	return paths, nil
-}
-
 // clock returns the current time, or the time that a test sets.
 func (r Runner) clock() time.Time {
 	if r.now != nil {
@@ -374,7 +360,7 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 	listed := o.stale
 	o.stale, o.Bytes = []string{}, 0
 	o.Command = tmpCommand(0)
-	dir, dev, open, reason := r.tmpState(ctx)
+	dir, dev, reason := r.tmpState(ctx)
 	if reason == "" && dir != o.Path {
 		reason = "the temporary directory is now " + r.tilde(dir)
 	}
@@ -383,14 +369,25 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 		return
 	}
 	cutoff := r.clock().Add(-r.TmpAge)
+	insp := &recordedInspector{Inspector: r.processes()}
+	inUse := clean.InUseChecker(ctx, insp, time.Now)
 	var failures []string
 	for _, path := range listed {
 		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		reason := r.tmpRefusal(path, dev, cutoff, open)
+		reason := r.tmpRefusal(path, dev, cutoff)
 		if reason == "" {
 			reason = scan.GitRefusal(path)
+		}
+		if reason == "" {
+			reason = r.tmpInUse(path, inUse)
+			if insp.err != nil {
+				// A failed list does not show that no process uses an entry,
+				// so the rule stops here, as it would when it lists.
+				failures = append(failures, "stopped: cannot list processes: "+insp.err.Error())
+				break
+			}
 		}
 		if reason != "" {
 			o.refuseFolder(path, reason)
@@ -405,6 +402,10 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 		o.FreedBytes += max(0, before-scan.DiskUsage(path))
 	}
 	o.Command = tmpCommand(len(o.stale))
+	if insp.err != nil && len(o.stale) == 0 {
+		o.Status, o.Reason = Skipped, "cannot list processes: "+insp.err.Error()
+		return
+	}
 	if len(failures) > 0 {
 		o.Status, o.Reason = Failed, strings.Join(failures, "; ")
 		return

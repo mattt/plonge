@@ -207,7 +207,8 @@ The check has these limits:
 - On macOS, `ps` joins the words of a command line with spaces,
   so a path with a space in it can be missed.
 
-Global rules do not use this check.
+Global rules do not use this check,
+except the [temporary directory rule](#temporary-directory).
 
 ## Caches that hold a Git repository
 
@@ -861,7 +862,8 @@ on Linux, `/tmp` is usually shared by all users.
 Plonge skips the rule when the path is not absolute, does not exist,
 is `/` or the home directory, contains the home directory,
 or is in a Git repository.
-It also skips the rule when `lsof` is not installed or fails.
+It also skips the rule when it cannot list the processes,
+for the [same reasons as for project caches](#caches-that-a-running-process-uses).
 
 The rule looks only at the entries directly in the directory,
 both files and folders.
@@ -901,8 +903,9 @@ Plonge refuses a stale entry and lists it with the reason when it:
   or whose owner Plonge cannot read;
 - is or holds a folder on another file system, such as a mount point,
   because the deletion would reach into that file system;
-- is a file that a process has open, holds such a file,
-  or is or holds a process's working directory, as `lsof` reports;
+- is used by a running process, by the
+  [same check as for project caches](#caches-that-a-running-process-uses),
+  through the resolved path or the path that `$TMPDIR` names;
 - is or holds a socket, a named pipe, or a device,
   which a program can use without holding it open;
 - holds a file or folder that changed within the period;
@@ -911,20 +914,23 @@ Plonge refuses a stale entry and lists it with the reason when it:
   or holds a directory that Plonge cannot read.
 
 ```console
-Refused /private/var/folders/xy/abc/T/build-123: a running process has it or a file in it open, or works in it
+Refused /private/var/folders/xy/abc/T/build-123: in use by node (PID 911), which works in it
 ```
 
-With `--apply`, Plonge runs `lsof` again and checks each selected entry again
+With `--apply`, Plonge checks each selected entry again
 right before it deletes it,
-and the outcome's size and action count only the entries that pass.
+and lists the processes again as `clean --apply` does for project caches.
+If that list fails, Plonge deletes no more entries,
+and the rule is skipped when it deleted none.
+The outcome's size and action count only the entries that pass.
 The size is the size of the selected entries, without the `(whole cache)` mark.
 
 The rule has these limits:
 
-- `lsof` sees only the processes that it can inspect.
-  Without root, these are your own processes.
-  On Linux, an entry in a shared `/tmp` that belongs to another user is refused,
-  but your own entry can be in use by another user's process.
+- The process check has the
+  [limits described for project caches](#caches-that-a-running-process-uses).
+  Without root, Plonge sees another user's process only through its command line,
+  so on Linux your own entry in a shared `/tmp` can be in use by another user's process.
 - A program can keep a path to use later without holding it open,
   such as an agent that waits between commands,
   or a tool that writes a temporary path to its settings.
