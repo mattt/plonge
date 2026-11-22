@@ -946,7 +946,9 @@ Before it removes each file or folder,
 Plonge renames it to a random name in the same folder
 and checks its device and inode under that name,
 so a file that takes the original name after the check is kept.
-Plonge renames a replaced file back with a rename that refuses
+Plonge renames a replaced file back,
+or a file or folder that it cannot remove, such as a folder that gained a file,
+with a rename that refuses
 an existing destination,
 `renameat2` with `RENAME_NOREPLACE` on Linux
 and `renameatx_np` with `RENAME_EXCL` on macOS.

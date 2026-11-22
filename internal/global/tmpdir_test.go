@@ -721,3 +721,39 @@ func TestTmpRemoveDoesNotOverwriteAFileAtTheOriginalName(t *testing.T) {
 		t.Errorf("isolated replacement = %q, %v", body, err)
 	}
 }
+
+func TestTmpRemoveRestoresAFolderThatGainedAFile(t *testing.T) {
+	r, tmp, _ := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "a", "sub", "old"), "old")
+	d, err := openTmpDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ids := map[string]fileID{}
+	if reason := r.tmpCheck(d.root, "a", "", r.tmpPolicy(d, "a", r.clock().Add(-r.TmpAge), nil), ids); reason != "" {
+		t.Fatal(reason)
+	}
+
+	// After tmpRemove empties a/sub and before it removes the folder,
+	// a process writes a file in it.
+	child := filepath.Join(tmp, "a", "sub", "late")
+	tmpRemoveHook = func(stage, rel string) {
+		if stage == "isolate" && rel == "sub" {
+			mkfile(t, child, "late")
+		}
+	}
+	t.Cleanup(func() { tmpRemoveHook = nil })
+
+	err = tmpRemove(d.root, d.path, "a", "", ids)
+	want := "sub: kept as " + filepath.Join(tmp, "a", "sub") + ", because cannot remove it"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %v, want it to contain %q", err, want)
+	}
+	if body, err := os.ReadFile(child); err != nil || string(body) != "late" {
+		t.Errorf("child = %q, %v", body, err)
+	}
+	if _, err := os.Lstat(filepath.Join(tmp, "a", "sub", "old")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("old: %v", err)
+	}
+}

@@ -266,10 +266,13 @@ var tmpRemoveHook func(stage, rel string)
 
 // isolateAndRemove renames the file name in parent to a random name,
 // checks that the renamed file has the identity want, and removes it.
-// When the identity is different, it renames the file back
-// with a rename that fails when another file took the original name;
-// then, or when that rename is not supported, it keeps the file
-// under the random name and returns an error with its path.
+// When the identity is different, when it cannot check it,
+// or when the removal fails, as for a folder that gained a file,
+// it renames the file back with a rename that fails when another file
+// took the original name; then, or when that rename is not supported,
+// it keeps the file under the random name and returns an error with its path.
+// No failure after the first rename leaves the file under the random name
+// without a report of that path.
 func isolateAndRemove(parent *os.Root, parentPath, name, rel string, want fileID) error {
 	if tmpRemoveHook != nil {
 		tmpRemoveHook("isolate", rel)
@@ -281,11 +284,21 @@ func isolateAndRemove(parent *os.Root, parentPath, name, rel string, want fileID
 		return fmt.Errorf("%s: %w", tmpName(rel), err)
 	}
 	info, err := parent.Lstat(temp)
-	if err == nil {
-		if id, ok := identity(info); ok && id == want {
-			return parent.Remove(temp)
-		}
+	if err != nil {
+		return restore(parent, parentPath, temp, name, rel, fmt.Errorf("cannot check it: %w", err))
 	}
+	if id, ok := identity(info); !ok || id != want {
+		return restore(parent, parentPath, temp, name, rel, fmt.Errorf("it %w", errReplaced))
+	}
+	if err := parent.Remove(temp); err != nil {
+		return restore(parent, parentPath, temp, name, rel, fmt.Errorf("cannot remove it: %w", err))
+	}
+	return nil
+}
+
+// restore renames temp in parent back to name, unless another file has name,
+// and returns an error that says why the file was kept, and where.
+func restore(parent *os.Root, parentPath, temp, name, rel string, why error) error {
 	if tmpRemoveHook != nil {
 		tmpRemoveHook("restore", rel)
 	}
@@ -293,5 +306,5 @@ func isolateAndRemove(parent *os.Root, parentPath, name, rel string, want fileID
 	if renameNoReplace(parent, temp, name) == nil {
 		where = filepath.Join(parentPath, name)
 	}
-	return fmt.Errorf("%s: kept as %s, because it %w", tmpName(rel), where, errReplaced)
+	return fmt.Errorf("%s: kept as %s, because %w", tmpName(rel), where, why)
 }
