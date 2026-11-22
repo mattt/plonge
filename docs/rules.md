@@ -946,6 +946,13 @@ Before it removes each file or folder,
 Plonge renames it to a random name in the same folder
 and checks its device and inode under that name,
 so a file that takes the original name after the check is kept.
+Plonge renames a replaced file back with a rename that refuses
+an existing destination,
+`renameat2` with `RENAME_NOREPLACE` on Linux
+and `renameatx_np` with `RENAME_EXCL` on macOS.
+When another file has the name, or the file system does not support that rename,
+Plonge keeps the replaced file under the random name
+and reports its path in the outcome.
 Plonge makes a read-only folder writable
 through a handle that it opened and checked.
 The Git, process, and size checks read the entry by its path,

@@ -388,7 +388,7 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 		before := scan.DiskUsage(path)
 		o.stale = append(o.stale, path)
 		o.Bytes += before
-		if err := tmpRemove(t.root, name, "", ids); err != nil {
+		if err := tmpRemove(t.root, t.path, name, "", ids); err != nil {
 			failures = append(failures, path+": "+err.Error())
 		}
 		o.FreedBytes += max(0, before-scan.DiskUsage(path))

@@ -189,7 +189,8 @@ func tmpName(rel string) string {
 // before the removal, could put another file there.
 // tmpRemove makes a folder writable for its owner before it deletes from it,
 // as clean.RemoveTree does, through a handle that it opened and checked.
-func tmpRemove(parent *os.Root, name, rel string, ids map[string]fileID) error {
+// parentPath is the path of parent, for the report.
+func tmpRemove(parent *os.Root, parentPath, name, rel string, ids map[string]fileID) error {
 	info, err := parent.Lstat(name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -205,16 +206,16 @@ func tmpRemove(parent *os.Root, name, rel string, ids map[string]fileID) error {
 		return fmt.Errorf("%s: kept, because it %w", tmpName(rel), errReplaced)
 	}
 	if info.IsDir() {
-		if err := removeContents(parent, name, rel, info, ids); err != nil {
+		if err := removeContents(parent, parentPath, name, rel, info, ids); err != nil {
 			return err
 		}
 	}
-	return isolateAndRemove(parent, name, rel, want)
+	return isolateAndRemove(parent, parentPath, name, rel, want)
 }
 
 // removeContents deletes everything in the folder name in parent,
 // whose status info shows the identity in ids.
-func removeContents(parent *os.Root, name, rel string, info fs.FileInfo, ids map[string]fileID) error {
+func removeContents(parent *os.Root, parentPath, name, rel string, info fs.FileInfo, ids map[string]fileID) error {
 	want := ids[rel]
 	if perm := info.Mode().Perm(); perm&0o700 != 0o700 {
 		if err := chmodChecked(parent, name, want, perm|0o700); err != nil {
@@ -232,7 +233,7 @@ func removeContents(parent *os.Root, name, rel string, info fs.FileInfo, ids map
 		errs = append(errs, err)
 	}
 	for _, child := range names {
-		if err := tmpRemove(dir, child, path.Join(rel, child), ids); err != nil {
+		if err := tmpRemove(dir, filepath.Join(parentPath, name), child, path.Join(rel, child), ids); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -258,17 +259,20 @@ func chmodChecked(parent *os.Root, name string, want fileID, mode fs.FileMode) e
 	return f.Chmod(mode)
 }
 
-// beforeIsolate, when a test sets it, runs after tmpRemove checks a file
-// and before it renames it.
-var beforeIsolate func(parent *os.Root, name, rel string)
+// tmpRemoveHook, when a test sets it, runs at two stages of isolateAndRemove:
+// "isolate", after tmpRemove checks a file and before it renames it,
+// and "restore", right before it renames a replaced file back.
+var tmpRemoveHook func(stage, rel string)
 
 // isolateAndRemove renames the file name in parent to a random name,
 // checks that the renamed file has the identity want, and removes it.
-// When the identity is different, it renames the file back,
-// unless another file took the original name, and keeps it.
-func isolateAndRemove(parent *os.Root, name, rel string, want fileID) error {
-	if beforeIsolate != nil {
-		beforeIsolate(parent, name, rel)
+// When the identity is different, it renames the file back
+// with a rename that fails when another file took the original name;
+// then, or when that rename is not supported, it keeps the file
+// under the random name and returns an error with its path.
+func isolateAndRemove(parent *os.Root, parentPath, name, rel string, want fileID) error {
+	if tmpRemoveHook != nil {
+		tmpRemoveHook("isolate", rel)
 	}
 	var b [12]byte
 	_, _ = rand.Read(b[:])
@@ -282,9 +286,12 @@ func isolateAndRemove(parent *os.Root, name, rel string, want fileID) error {
 			return parent.Remove(temp)
 		}
 	}
-	where := temp
-	if _, err := parent.Lstat(name); errors.Is(err, fs.ErrNotExist) && parent.Rename(temp, name) == nil {
-		where = name
+	if tmpRemoveHook != nil {
+		tmpRemoveHook("restore", rel)
+	}
+	where := filepath.Join(parentPath, temp)
+	if renameNoReplace(parent, temp, name) == nil {
+		where = filepath.Join(parentPath, name)
 	}
 	return fmt.Errorf("%s: kept as %s, because it %w", tmpName(rel), where, errReplaced)
 }
