@@ -1,6 +1,7 @@
 package global
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -46,3 +47,24 @@ func unescapeOctal(s string) string {
 }
 
 func isOctal(c byte) bool { return c >= '0' && c <= '7' }
+
+// parseMountInfo returns the mount point of each line of a mountinfo file,
+// as proc_pid_mountinfo(5) describes it: fields separated by ASCII spaces,
+// whose fifth is the mount point. The kernel writes a space, tab, newline,
+// or backslash in a path as an octal escape, such as \040, and every other
+// byte as it is, so a path can hold other white space, such as U+00A0,
+// which strings.Fields would split on.
+func parseMountInfo(data string) ([]string, error) {
+	var paths []string
+	for line := range strings.SplitSeq(data, "\n") {
+		if line == "" {
+			continue
+		}
+		f := strings.Split(line, " ")
+		if len(f) < 5 {
+			return nil, fmt.Errorf("cannot read mountinfo line %q", line)
+		}
+		paths = append(paths, unescapeOctal(f[4]))
+	}
+	return paths, nil
+}
