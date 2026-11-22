@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -27,7 +30,7 @@ A dry run returns preview_token. apply requires that token and the same include_
 
 A quiet project has known activity at least quiet_hours old (default: 24 hours). Active projects have newer or unknown activity; include_active selects them too. min_size (such as "100MiB") leaves out smaller caches. A busy project has a running or initializing Paseo agent and is excluded. If paseo is on PATH but its status cannot be read, the paseo entry in activity_sources has status "failed" and every project is busy, so nothing is deleted; tell the user the reason. If paseo is not on PATH, the busy check provides no protection.
 
-With global, it selects only global cleanup actions, without checking project activity. apply runs eligible actions. A prune rule uses the tool's cleanup policy; a clear rule can also remove cached data still in use. Clear rules require include_clear. Later commands may need to download dependencies or rebuild files. Show this effect before asking for approval. In a global dry run, folders lists the folders that the Xcode rule deletes, and target_paths lists the installation paths that a rule's targets removes; show these paths to the user. Each list shows at most 500 paths, and paths_omitted counts the rest, which apply also removes; tell the user how many paths were not shown. Sizes and freed space are estimates. When a rule has whole_cache: true, bytes is the size of a prune rule's whole cache, and the tool's policy removes only part of it; do not present it as the space to free. With apply, home_volume has the free space on the home directory's volume before and after the cleanup; other processes can change it too. Report gained_bytes next to freed_bytes.`
+With global, it selects only global cleanup actions, without checking project activity. apply runs eligible actions. A prune rule uses the tool's cleanup policy; a clear rule can also remove cached data still in use. Clear rules require include_clear. Later commands may need to download dependencies or rebuild files. Show this effect before asking for approval. In a global dry run, folders lists the folders that the Xcode rule deletes, and target_paths lists the installation paths that a rule's targets removes; show these paths to the user. A path that is not valid UTF-8, or that starts with a double quote, appears in Go's quoted form, in double quotes with \x escapes for bytes that are not UTF-8. Each list shows at most 500 paths, and paths_omitted counts the rest, which apply also removes; tell the user how many paths were not shown. Sizes and freed space are estimates. When a rule has whole_cache: true, bytes is the size of a prune rule's whole cache, and the tool's policy removes only part of it; do not present it as the space to free. With apply, home_volume has the free space on the home directory's volume before and after the cleanup; other processes can change it too. Report gained_bytes next to freed_bytes.`
 
 const diskDescription = `Report the free space on the volume of the user's home directory. It only reads.`
 
@@ -92,12 +95,31 @@ func previewOutcomes(res global.Result) []previewOutcome {
 }
 
 // firstPaths returns at most maxPreviewPaths of paths, in order,
-// and how many it left out.
+// as displayPath shows them, and how many it left out.
 func firstPaths(paths []string) ([]string, int) {
-	if len(paths) <= maxPreviewPaths {
-		return paths, 0
+	omitted := 0
+	if len(paths) > maxPreviewPaths {
+		paths, omitted = paths[:maxPreviewPaths], len(paths)-maxPreviewPaths
 	}
-	return paths[:maxPreviewPaths], len(paths) - maxPreviewPaths
+	shown := make([]string, len(paths))
+	for i, p := range paths {
+		shown[i] = displayPath(p)
+	}
+	return shown, omitted
+}
+
+// displayPath returns path as JSON can carry it without loss.
+// JSON replaces each byte that is not valid UTF-8 with U+FFFD,
+// so two different names could look the same.
+// A path that is not valid UTF-8, or that starts with a double quote,
+// is shown in Go's quoted form, as strconv.Quote writes it,
+// with \x escapes for those bytes; every other path is shown as it is.
+// A shown path that starts with a double quote is therefore always quoted.
+func displayPath(path string) string {
+	if !utf8.ValidString(path) || strings.HasPrefix(path, `"`) {
+		return strconv.Quote(path)
+	}
+	return path
 }
 
 type diskInput struct{}

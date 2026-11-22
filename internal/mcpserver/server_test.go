@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -642,5 +643,22 @@ func TestFirstPathsBoundsThePreview(t *testing.T) {
 	}
 	if !strings.Contains(cleanDescription, fmt.Sprintf("at most %d paths", maxPreviewPaths)) {
 		t.Error("the clean description does not give the limit")
+	}
+}
+
+func TestFirstPathsShowsNamesThatAreNotUTF8(t *testing.T) {
+	shown, _ := firstPaths([]string{"/t/a\xff", "/t/a\xfe", `/t/"q"`, `"x`, "/t/é"})
+	want := []string{`"/t/a\xff"`, `"/t/a\xfe"`, `/t/"q"`, `"\"x"`, "/t/é"}
+	if !slices.Equal(shown, want) {
+		t.Errorf("shown = %q, want %q", shown, want)
+	}
+	for _, s := range shown {
+		if !utf8.ValidString(s) {
+			t.Errorf("%q is not valid UTF-8", s)
+		}
+	}
+	d := selection{"/t/a\xff": "x"}.diff(selection{})
+	if len(d) != 1 || !strings.Contains(d[0], `"/t/a\xff"`) {
+		t.Errorf("diff = %q", d)
 	}
 }
