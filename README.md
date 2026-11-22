@@ -282,8 +282,17 @@ it deletes nothing and returns an error that lists the differences.
 For project caches, the selection is the paths
 with their rules, projects, sizes, and modification times.
 For global caches, it is the rules that would run,
-with their paths, actions, and the items that they remove;
-global cache sizes are left out because every build can change them.
+with their paths and actions,
+the names and installation paths that a rule's `targets` lists,
+its `keep_names`, and the folders that the Xcode rule deletes.
+Plonge compares each of these lists item by item.
+The total size of the Xcode rule's folders is compared too,
+because plonge deletes them itself;
+other global cache sizes are left out because every build can change them.
+An external command, such as `mise prune`,
+still decides what it removes when it runs.
+A rule whose `targets` command fails is skipped,
+because the dry run cannot show what it would remove.
 The paths and actions that pass are still subject to every safety check
 that `clean --apply` runs.
 

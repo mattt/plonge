@@ -58,23 +58,15 @@ func projectSelection(res clean.Result) selection {
 }
 
 // globalSelection describes each rule that a global dry run would run
-// by its kind, path, action, and the items or folders that it removes.
+// by the inputs of its action, as global.Inputs encodes them.
 // It leaves out the size of a shared cache, which every build can change,
 // but keeps the size of the folders that the Xcode rule deletes.
 func globalSelection(res global.Result) selection {
 	sel := selection{}
 	for _, o := range res.Outcomes {
-		if o.Status != global.WouldRun {
-			continue
+		if o.Status == global.WouldRun {
+			sel[o.ID] = o.Inputs().String()
 		}
-		parts := []string{o.Kind, "path " + o.Path, "action " + o.Command}
-		if len(o.Targets) > 0 {
-			parts = append(parts, "targets "+strings.Join(o.Targets, ", "))
-		}
-		if folders := o.Folders(); len(folders) > 0 {
-			parts = append(parts, "folders "+strings.Join(folders, ", "), fmt.Sprintf("%d bytes", o.Bytes))
-		}
-		sel[o.ID] = strings.Join(parts, "; ")
 	}
 	return sel
 }

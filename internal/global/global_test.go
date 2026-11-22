@@ -973,3 +973,34 @@ func TestPathEnvReplacesFixedPath(t *testing.T) {
 		}
 	}
 }
+
+func TestInputsCompareEachField(t *testing.T) {
+	base := Entry{ID: "r", Kind: rules.KindPrune, Path: "/c", Command: "t prune",
+		Targets: []string{"a@1"}, targetPaths: []string{"/i/a/1"}, keepNames: []string{"a", "b"}}
+	same := base
+	same.Targets = slices.Clone(base.Targets)
+	if base.Inputs().String() != same.Inputs().String() {
+		t.Errorf("equal entries differ: %s", base.Inputs())
+	}
+	for name, change := range map[string]func(e *Entry){
+		// Each change keeps the text that a joined list would show.
+		"keep_names":  func(e *Entry) { e.keepNames = []string{"a, b"} },
+		"target path": func(e *Entry) { e.targetPaths = []string{"/i/a/2"} },
+		"target name": func(e *Entry) { e.Targets = []string{"a@2"} },
+		"targets split": func(e *Entry) {
+			e.Targets, e.targetPaths = []string{"a@1", ""}, []string{"/i/a/1", ""}
+		},
+	} {
+		e := base
+		change(&e)
+		if e.Inputs().String() == base.Inputs().String() {
+			t.Errorf("%s: %s matches the original", name, e.Inputs())
+		}
+	}
+	x := Entry{ID: rules.XcodeRuleID, Kind: rules.KindPrune, stale: []string{"/d/A"}, Bytes: 10}
+	y := x
+	y.Bytes = 11
+	if x.Inputs().String() == y.Inputs().String() {
+		t.Error("the Xcode rule's folder total is not compared")
+	}
+}
