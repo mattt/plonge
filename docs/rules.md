@@ -942,6 +942,12 @@ does not change what Plonge deletes.
 The check records the device and inode of every file and folder in the entry,
 and the deletion keeps a file that was replaced or added after the check,
 with the folders that hold it, and reports a failure.
+Before it removes each file or folder,
+Plonge renames it to a random name in the same folder
+and checks its device and inode under that name,
+so a file that takes the original name after the check is kept.
+Plonge makes a read-only folder writable
+through a handle that it opened and checked.
 The Git, process, and size checks read the entry by its path,
 so Plonge first makes sure that the path still names the checked entry.
 
@@ -957,8 +963,9 @@ The rule has these limits:
   Plonge cannot see such a use;
   only the period protects the entry.
 - A process can open an entry after the final check and before the deletion.
-- A process that can write to a folder in an entry
-  can replace a file in it between its last check and its removal.
+- A process that can write to a folder in an entry,
+  and learns the random name before the removal,
+  can put another file under that name.
 - The rule does not ask Paseo or any other agent tool which paths it uses.
 - On macOS, the `com.apple.bsd.dirhelper` launchd job runs every day
   with `CLEAN_FILES_OLDER_THAN_DAYS` set to 3,

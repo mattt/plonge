@@ -631,3 +631,46 @@ func TestUnescapeOctal(t *testing.T) {
 		}
 	}
 }
+
+func TestTmpRemoveKeepsAFileReplacedBeforeItsRemoval(t *testing.T) {
+	r, tmp, _ := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "a", "target"), "old")
+	mkfile(t, filepath.Join(tmp, "a", "other"), "old")
+	d, err := openTmpDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ids := map[string]fileID{}
+	if reason := r.tmpCheck(d.root, "a", "", r.tmpPolicy(d, "a", r.clock().Add(-r.TmpAge), nil), ids); reason != "" {
+		t.Fatal(reason)
+	}
+
+	// After tmpRemove checks a/target's identity and before it removes it,
+	// another file takes its name.
+	target := filepath.Join(tmp, "a", "target")
+	beforeIsolate = func(_ *os.Root, _, rel string) {
+		if rel == "a/target" || rel == "target" {
+			mkfile(t, target+".new", "new")
+			if err := os.Rename(target+".new", target); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Cleanup(func() { beforeIsolate = nil })
+
+	err = tmpRemove(d.root, "a", "", ids)
+	if err == nil || !strings.Contains(err.Error(), "target: kept as target, because it was replaced") {
+		t.Errorf("err = %v", err)
+	}
+	if body, err := os.ReadFile(target); err != nil || string(body) != "new" {
+		t.Errorf("replacement = %q, %v", body, err)
+	}
+	if _, err := os.Lstat(filepath.Join(tmp, "a", "other")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("other: %v", err)
+	}
+	ents, _ := os.ReadDir(filepath.Join(tmp, "a"))
+	if len(ents) != 1 {
+		t.Errorf("a holds %d entries, want only the replacement", len(ents))
+	}
+}
