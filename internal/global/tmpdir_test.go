@@ -534,7 +534,7 @@ func TestTmpRemoveWorksInTheOpenDirectory(t *testing.T) {
 	}
 	defer d.Close()
 	ids := map[string]fileID{}
-	if reason := r.tmpCheck(d.root, "a", "", d.id.dev, r.clock().Add(-r.TmpAge), ids); reason != "" {
+	if reason := r.tmpCheck(d.root, "a", "", r.tmpPolicy(d, "a", r.clock().Add(-r.TmpAge), nil), ids); reason != "" {
 		t.Fatal(reason)
 	}
 
@@ -567,5 +567,67 @@ func TestTmpRemoveWorksInTheOpenDirectory(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(moved, "a", "sub")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("read-only folder: %v", err)
+	}
+}
+
+func TestTmpDirRefusesABindMountInsideAnEntry(t *testing.T) {
+	r, tmp, _ := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "bound", "sub", "file"), "x")
+	mkfile(t, filepath.Join(tmp, "plain", "file"), "x")
+	ctx := context.Background()
+	listed := r.List(ctx, nil)
+
+	// After the listing, a folder on the same device is bind-mounted
+	// at bound/sub. Its device number does not change.
+	real, err := filepath.EvalSymlinks(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.mountsHook = func() ([]string, error) {
+		return []string{"/", filepath.Join(real, "bound", "sub"), real + "-other"}, nil
+	}
+	want := map[string]string{"bound": "holds sub, which is a mount point"}
+	if got := refusedReasons(tmpEntryOf(t, r)); !maps.Equal(got, want) {
+		t.Errorf("listing refused = %q", got)
+	}
+	o := tmpOutcome(t, r.Clean(ctx, listed, Options{Apply: true}))
+	if got := refusedReasons(o.Entry); !maps.Equal(got, want) {
+		t.Errorf("apply refused = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "bound", "sub", "file")); err != nil {
+		t.Error(err)
+	}
+	if _, err := os.Lstat(filepath.Join(tmp, "plain")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("plain: %v", err)
+	}
+
+	// When the mount table cannot be read, the rule does not run.
+	r.mountsHook = func() ([]string, error) { return nil, errors.New("no access") }
+	if e := tmpEntryOf(t, r); e.Skipped != "cannot list mount points: no access" {
+		t.Errorf("entry = %+v", e)
+	}
+	o = tmpOutcome(t, r.Clean(ctx, listed, Options{Apply: true}))
+	if o.Status != Skipped {
+		t.Errorf("outcome = %+v", o)
+	}
+}
+
+func TestMountPointsListsTheRoot(t *testing.T) {
+	paths, err := mountPoints()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(paths, "/") {
+		t.Errorf("mount points = %q", paths)
+	}
+}
+
+func TestUnescapeOctal(t *testing.T) {
+	for in, want := range map[string]string{
+		`/mnt/a\040b`: "/mnt/a b", `/x\134y`: `/x\y`, `/x\0`: `/x\0`, "/plain": "/plain",
+	} {
+		if got := unescapeOctal(in); got != want {
+			t.Errorf("unescapeOctal(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

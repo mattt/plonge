@@ -907,8 +907,12 @@ Plonge refuses a stale entry and lists it with the reason when it:
 - is a symlink;
 - is or holds a file or folder that belongs to another user,
   or whose owner Plonge cannot read;
-- is or holds a folder on another file system, such as a mount point,
-  because the deletion would reach into that file system;
+- is or holds a folder on another file system,
+  or a mount point on the same one, such as a bind mount,
+  because the deletion would reach into the mounted folder.
+  Plonge reads the mount points from `/proc/self/mountinfo` on Linux
+  and from `getfsstat` on macOS,
+  and skips the rule when it cannot read them;
 - is used by a running process, by the
   [same check as for project caches](#caches-that-a-running-process-uses),
   through the resolved path or the path that `$TMPDIR` names;

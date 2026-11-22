@@ -26,7 +26,7 @@ import (
 // The rule keeps the names in tmpManagedNames without looking at them.
 // It refuses a stale entry that is a symlink,
 // is or holds a file of another user, or a file whose owner it cannot read,
-// is or holds a mount point of another file system,
+// is or holds a mount point, by its device or the mount table,
 // is used by a running process, as the shared process inspector reports,
 // is or holds a socket, a named pipe, or a device,
 // holds an entry that changed more recently,
@@ -79,7 +79,7 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 		return Entry{}, false
 	}
 	e := Entry{ID: rules.TmpDirRuleID, Tool: "lsof", Kind: rules.KindPrune, Path: r.TmpDir, stale: []string{}}
-	t, dev, reason := r.tmpState(ctx)
+	t, mounts, reason := r.tmpState(ctx)
 	if reason != "" {
 		e.Skipped = reason
 		return e, true
@@ -133,7 +133,7 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 			return ""
 		})
 		if reason == "" {
-			reason = r.tmpCheck(t.root, filepath.Base(path), "", dev, cutoff, map[string]fileID{})
+			reason = r.tmpCheck(t.root, filepath.Base(path), "", r.tmpPolicy(t, filepath.Base(path), cutoff, mounts), map[string]fileID{})
 		}
 		if reason != "" {
 			e.refuseFolder(path, reason)
@@ -164,19 +164,19 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 // checks that plonge may delete entries in it, and returns its device.
 // It returns a reason when the rule cannot run;
 // otherwise the caller must close the directory.
-func (r Runner) tmpState(ctx context.Context) (t *tmpDir, dev uint64, reason string) {
+func (r Runner) tmpState(ctx context.Context) (t *tmpDir, mounts map[string]bool, reason string) {
 	if !filepath.IsAbs(r.TmpDir) {
-		return nil, 0, fmt.Sprintf("the temporary directory %q is not an absolute path", r.TmpDir)
+		return nil, nil, fmt.Sprintf("the temporary directory %q is not an absolute path", r.TmpDir)
 	}
 	dir, err := filepath.EvalSymlinks(r.TmpDir)
 	if err != nil {
-		return nil, 0, "cannot resolve the temporary directory: " + err.Error()
+		return nil, nil, "cannot resolve the temporary directory: " + err.Error()
 	}
 	// Open the directory before the checks, and make sure afterward
 	// that its path still names it, so the checks apply to what is open.
 	t, err = openTmpDir(dir)
 	if err != nil {
-		return nil, 0, "cannot open the temporary directory: " + err.Error()
+		return nil, nil, "cannot open the temporary directory: " + err.Error()
 	}
 	reason = r.refuseDelete(ctx, dir)
 	if reason != "" {
@@ -184,11 +184,18 @@ func (r Runner) tmpState(ctx context.Context) (t *tmpDir, dev uint64, reason str
 	} else if !t.unchanged() {
 		reason = "the temporary directory changed while plonge checked it"
 	}
+	if reason == "" {
+		// Without the mount table, plonge cannot tell whether an entry
+		// holds a mount point on the same device, so the rule cannot run.
+		if mounts, err = r.mountsUnder(dir); err != nil {
+			reason = "cannot list mount points: " + err.Error()
+		}
+	}
 	if reason != "" {
 		t.Close()
-		return nil, 0, reason
+		return nil, nil, reason
 	}
-	return t, t.id.dev, ""
+	return t, mounts, ""
 }
 
 // processes returns the inspector that the tmpdir rule asks
@@ -238,8 +245,7 @@ func (i *recordedInspector) Snapshot(ctx context.Context) (*procs.Snapshot, erro
 // tmpInfoRefusal returns why the file that info describes keeps
 // a stale entry from deletion, or "" when it does not.
 // rel is the file's path in the stale entry, or "" for the entry itself.
-// dev is the device of the temporary directory, and uid is the current user.
-func (r Runner) tmpInfoRefusal(info fs.FileInfo, rel string, dev uint64, uid uint32, cutoff time.Time) string {
+func (r Runner) tmpInfoRefusal(info fs.FileInfo, rel string, pol tmpPolicy) string {
 	is := "is"
 	if rel != "" {
 		is = "holds " + rel + ", which is"
@@ -254,7 +260,7 @@ func (r Runner) tmpInfoRefusal(info fs.FileInfo, rel string, dev uint64, uid uin
 		}
 		return "cannot read the status of " + rel
 	}
-	if st.uid != uid {
+	if st.uid != pol.uid {
 		if rel == "" {
 			return "belongs to another user"
 		}
@@ -262,10 +268,10 @@ func (r Runner) tmpInfoRefusal(info fs.FileInfo, rel string, dev uint64, uid uin
 	}
 	// A different device inside the entry is a mount point,
 	// and removal would delete files on the mounted file system.
-	if st.id.dev != dev {
+	if st.id.dev != pol.dev {
 		return is + " on another file system"
 	}
-	if lastChange(info, st).After(cutoff) {
+	if lastChange(info, st).After(pol.cutoff) {
 		if rel == "" {
 			return "changed in the last " + ageText(r.TmpAge)
 		}
@@ -325,7 +331,7 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 	listed := o.stale
 	o.stale, o.Bytes = []string{}, 0
 	o.Command = tmpCommand(0)
-	t, dev, reason := r.tmpState(ctx)
+	t, mounts, reason := r.tmpState(ctx)
 	if reason == "" {
 		defer t.Close()
 		if t.path != o.Path {
@@ -350,7 +356,7 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 			continue
 		}
 		ids := map[string]fileID{}
-		reason := r.tmpCheck(t.root, name, "", dev, cutoff, ids)
+		reason := r.tmpCheck(t.root, name, "", r.tmpPolicy(t, name, cutoff, mounts), ids)
 		if reason == "" {
 			reason = scan.GitRefusal(path)
 		}

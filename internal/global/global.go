@@ -136,6 +136,8 @@ type Runner struct {
 	now func() time.Time
 	// statHook, when set, replaces statOf for the tmpdir rule.
 	statHook func(fs.FileInfo) (fileStat, bool)
+	// mountsHook, when set, replaces mountPoints for the tmpdir rule.
+	mountsHook func() ([]string, error)
 }
 
 // New returns a Runner for this machine, whose tmpdir rule selects

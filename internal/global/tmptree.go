@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"time"
 )
@@ -99,12 +100,29 @@ func readNames(dir *os.Root) ([]string, error) {
 	return names, err
 }
 
+// tmpPolicy is what the checks of one stale entry compare against.
+type tmpPolicy struct {
+	// entry is the path of the stale entry in the open temporary directory.
+	entry string
+	// dev is the device of the temporary directory.
+	dev    uint64
+	uid    uint32
+	cutoff time.Time
+	// mounts are the mount points in the temporary directory, by path.
+	mounts map[string]bool
+}
+
+// tmpPolicy returns the policy for the stale entry name in t.
+func (r Runner) tmpPolicy(t *tmpDir, name string, cutoff time.Time, mounts map[string]bool) tmpPolicy {
+	return tmpPolicy{entry: filepath.Join(t.path, name), dev: t.id.dev, uid: uint32(os.Getuid()), cutoff: cutoff, mounts: mounts}
+}
+
 // tmpCheck checks the file name in parent and everything in it,
 // and returns why plonge must not delete the stale entry that holds it,
 // or "" when it may. rel is the file's path in the stale entry,
-// or "" for the entry itself. dev is the device of the temporary directory.
+// or "" for the entry itself.
 // tmpCheck records the identity of each file that passes in ids, by rel.
-func (r Runner) tmpCheck(parent *os.Root, name, rel string, dev uint64, cutoff time.Time, ids map[string]fileID) string {
+func (r Runner) tmpCheck(parent *os.Root, name, rel string, pol tmpPolicy, ids map[string]fileID) string {
 	info, err := parent.Lstat(name)
 	if err != nil {
 		return "cannot check: " + err.Error()
@@ -112,8 +130,16 @@ func (r Runner) tmpCheck(parent *os.Root, name, rel string, dev uint64, cutoff t
 	if rel == "" && info.Mode()&fs.ModeSymlink != 0 {
 		return "is a symlink"
 	}
-	if reason := r.tmpInfoRefusal(info, rel, dev, uint32(os.Getuid()), cutoff); reason != "" {
+	if reason := r.tmpInfoRefusal(info, rel, pol); reason != "" {
 		return reason
+	}
+	// A bind mount can have the same device as the folder around it,
+	// so the mount table shows the mount points that the device misses.
+	if pol.mounts[filepath.Join(pol.entry, filepath.FromSlash(rel))] {
+		if rel == "" {
+			return "is a mount point"
+		}
+		return "holds " + rel + ", which is a mount point"
 	}
 	id, ok := identity(info)
 	if !ok {
@@ -133,7 +159,7 @@ func (r Runner) tmpCheck(parent *os.Root, name, rel string, dev uint64, cutoff t
 		return "cannot check " + tmpName(rel) + ": " + err.Error()
 	}
 	for _, child := range names {
-		if reason := r.tmpCheck(dir, child, path.Join(rel, child), dev, cutoff, ids); reason != "" {
+		if reason := r.tmpCheck(dir, child, path.Join(rel, child), pol, ids); reason != "" {
 			return reason
 		}
 	}
