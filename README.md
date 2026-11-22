@@ -301,7 +301,8 @@ with their paths and actions,
 the names and installation paths that a rule's `targets` lists,
 its `keep_names`, the folders that the Xcode rule deletes,
 and the entries that the `tmpdir` rule deletes.
-Plonge compares each of these lists item by item.
+Plonge compares each of these lists item by item,
+byte for byte, so names that are not valid UTF-8 stay distinct.
 The total size of the Xcode rule's folders and of the `tmpdir` rule's entries
 is compared too,
 because plonge deletes them itself;
@@ -315,6 +316,9 @@ A global dry run lists these paths for each rule:
 and `target_paths` for a rule with `targets`.
 Each list shows at most 500 paths,
 and `paths_omitted` counts the rest, which `apply` also removes.
+A path that is not valid UTF-8, or that starts with a double quote,
+appears in Go's quoted form, such as `"/tmp/a\xff"`,
+because JSON would replace each invalid byte with U+FFFD.
 The paths and actions that pass are still subject to every safety check
 that `clean --apply` runs.
 

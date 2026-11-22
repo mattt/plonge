@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/mattt/plonge/internal/rules"
 )
@@ -996,6 +997,15 @@ func TestInputsCompareEachField(t *testing.T) {
 		if e.Inputs().String() == base.Inputs().String() {
 			t.Errorf("%s: %s matches the original", name, e.Inputs())
 		}
+	}
+	// JSON would show both names as "/d/A\ufffd".
+	bad, worse := base, base
+	bad.Path, worse.Path = "/d/A\xff", "/d/A\xfe"
+	if bad.Inputs().String() == worse.Inputs().String() {
+		t.Errorf("paths with different invalid bytes match: %s", bad.Inputs())
+	}
+	if !utf8.ValidString(bad.Inputs().String()) || !strings.Contains(bad.Inputs().String(), `"/d/A\xff"`) {
+		t.Errorf("inputs = %s", bad.Inputs())
 	}
 	x := Entry{ID: rules.XcodeRuleID, Kind: rules.KindPrune, stale: []string{"/d/A"}, Bytes: 10}
 	y := x

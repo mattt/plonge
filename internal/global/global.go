@@ -107,14 +107,15 @@ func (e Entry) Inputs() Inputs {
 	return in
 }
 
-// String encodes the inputs as JSON, which keeps the boundaries of each list,
+// String describes the inputs with each text in Go's quoted form,
+// as strconv.Quote writes it. The quoted form keeps every byte of a path,
+// including bytes that are not valid UTF-8, which JSON would replace,
+// and the boundaries of each list,
 // so two Inputs have the same string only when every field is equal.
+// The result is valid UTF-8, so it can be shown as it is.
 func (in Inputs) String() string {
-	data, err := json.Marshal(in)
-	if err != nil {
-		panic(err) // Inputs holds only strings and numbers.
-	}
-	return string(data)
+	return fmt.Sprintf("kind=%q path=%q action=%q targets=%q target_paths=%q keep_names=%q folders=%q folder_bytes=%d",
+		in.Kind, in.Path, in.Action, in.Targets, in.TargetPaths, in.KeepNames, in.Folders, in.FolderBytes)
 }
 
 // Runner resolves tools and runs them from the home directory,

@@ -52,7 +52,7 @@ func projectSelection(res clean.Result) selection {
 	sel := selection{}
 	for _, it := range res.Items {
 		sel[it.Path] = fmt.Sprintf("rule %s in %s, %d bytes, modified %s",
-			it.Rule, it.Project, it.Bytes, modTime(it.Path))
+			it.Rule, displayPath(it.Project), it.Bytes, modTime(it.Path))
 	}
 	return sel
 }
@@ -86,14 +86,14 @@ func (s selection) diff(now selection) []string {
 		is, ok := now[key]
 		switch {
 		case !ok:
-			out = append(out, fmt.Sprintf("no longer selected: %s (%s)", key, was))
+			out = append(out, fmt.Sprintf("no longer selected: %s (%s)", displayPath(key), was))
 		case is != was:
-			out = append(out, fmt.Sprintf("changed: %s (was %s; now %s)", key, was, is))
+			out = append(out, fmt.Sprintf("changed: %s (was %s; now %s)", displayPath(key), was, is))
 		}
 	}
 	for key, is := range now {
 		if _, ok := s[key]; !ok {
-			out = append(out, fmt.Sprintf("newly selected: %s (%s)", key, is))
+			out = append(out, fmt.Sprintf("newly selected: %s (%s)", displayPath(key), is))
 		}
 	}
 	slices.Sort(out)
