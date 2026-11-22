@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,13 +60,61 @@ type Entry struct {
 	// targeted is true when targetPaths, and not Path, gives Bytes.
 	targeted    bool
 	targetPaths []string
-	stale       []string // for the built-in Xcode and tmpdir rules, what to delete
+	// targetsErr is why the rule's targets command failed, or empty.
+	// Clean does not run a rule whose targets it cannot list.
+	targetsErr string
+	stale      []string // for the built-in Xcode and tmpdir rules, what to delete
 	// deleteContents is true when plonge deletes what is in Path itself.
 	deleteContents bool
 	// refuseNames are the rule's refuse_names.
 	refuseNames []string
 	// keepNames are the rule's keep_names, which plonge leaves in Path.
 	keepNames []string
+}
+
+// Inputs are what plonge gives a rule's action, and what it listed
+// for that action to remove. Each list is a separate field,
+// so two lists match only when they hold the same items.
+// An external command still decides what it removes when it runs;
+// Inputs record only the command, its path, and what plonge listed.
+type Inputs struct {
+	Kind        string   `json:"kind"`
+	Path        string   `json:"path"`
+	Action      string   `json:"action"`
+	Targets     []string `json:"targets"`
+	TargetPaths []string `json:"target_paths"`
+	KeepNames   []string `json:"keep_names"`
+	Folders     []string `json:"folders"`
+	// FolderBytes is the size of Folders for the Xcode rule,
+	// which plonge deletes itself, and 0 for every other rule.
+	FolderBytes int64 `json:"folder_bytes"`
+}
+
+// Inputs returns the inputs of the entry's action.
+func (e Entry) Inputs() Inputs {
+	in := Inputs{
+		Kind:        e.Kind,
+		Path:        e.Path,
+		Action:      e.Command,
+		Targets:     slices.Clone(e.Targets),
+		TargetPaths: slices.Clone(e.targetPaths),
+		KeepNames:   slices.Clone(e.keepNames),
+		Folders:     slices.Clone(e.stale),
+	}
+	if e.ID == rules.XcodeRuleID {
+		in.FolderBytes = e.Bytes
+	}
+	return in
+}
+
+// String encodes the inputs as JSON, which keeps the boundaries of each list,
+// so two Inputs have the same string only when every field is equal.
+func (in Inputs) String() string {
+	data, err := json.Marshal(in)
+	if err != nil {
+		panic(err) // Inputs holds only strings and numbers.
+	}
+	return string(data)
 }
 
 // Runner resolves tools and runs them from the home directory,
@@ -435,6 +484,10 @@ func (r Runner) Clean(ctx context.Context, entries []Entry, opts Options) Result
 		switch {
 		case e.Skipped != "":
 			o.Status, o.Reason = Skipped, e.Skipped
+		case e.targetsErr != "":
+			// Without the list, a dry run cannot show what the command removes,
+			// and a failed lookup must not look like an empty list.
+			o.Status, o.Reason = Skipped, "cannot list what the rule would remove: "+e.targetsErr
 		case e.Kind == rules.KindClear && !opts.IncludeClear:
 			o.Status, o.Reason = Skipped, "clear rule requires --include-clear"
 		case opts.Apply:

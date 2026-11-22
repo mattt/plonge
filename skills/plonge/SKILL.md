@@ -14,6 +14,11 @@ or from CLI `--root` options.
 If the Plonge MCP server is available, use its `scan`, `clean`, and `disk` tools.
 MCP parameters have the same meaning as the corresponding CLI options,
 but MCP does not support `--root` or `--no-mise`.
+The MCP `clean` dry run returns a `preview_token`.
+After the user approves that dry run, call `clean` with `apply: true`,
+the token, and the same options.
+If the caches changed, `apply` deletes nothing and lists the differences;
+show them to the user and run a new dry run.
 
 ## Steps
 

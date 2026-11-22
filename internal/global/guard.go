@@ -114,11 +114,13 @@ func (r Runner) evaluate(ctx context.Context, g *guard) (reason string, refused 
 }
 
 // listTargets records what the rule would remove.
-// When that cannot be known, the rule keeps the size of its whole path and says so.
+// When that cannot be known, the rule keeps the size of its whole path and says so,
+// and Clean does not run it.
 func (r Runner) listTargets(ctx context.Context, e *Entry, t tool, g rules.Global) {
 	names, paths, err := r.targets(ctx, t, g)
 	if err != nil {
 		e.addNote("size is the whole directory: cannot list what would be removed: " + err.Error())
+		e.targetsErr = err.Error()
 		return
 	}
 	e.Targets, e.targetPaths, e.targeted = names, paths, true
