@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -245,7 +246,7 @@ func TestCleanToolKeepsCachesWhenPaseoFails(t *testing.T) {
 		if len(res.Items) != 0 || res.NotSelected.Busy.Caches != 1 {
 			t.Errorf("%v: result = %+v", args, res)
 		}
-		if len(res.Sources) != 2 || res.Sources[1].Status != "failed" || !strings.Contains(res.Sources[1].Reason, "no daemon") {
+		if len(res.Sources) != 3 || res.Sources[1].Status != "failed" || !strings.Contains(res.Sources[1].Reason, "no daemon") {
 			t.Errorf("%v: sources = %+v", args, res.Sources)
 		}
 	}
@@ -466,6 +467,19 @@ func TestCleanToolRefusesChangedSelection(t *testing.T) {
 			if err := os.RemoveAll(filepath.Join(project, "node_modules")); err != nil {
 				t.Fatal(err)
 			}
+		},
+		// A process that starts to work in a cache after the dry run
+		// makes the new scan refuse the cache, so the selection changes.
+		"cache became busy": func(t *testing.T, _, project string) {
+			if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+				t.Skip("no process inspector for " + runtime.GOOS)
+			}
+			sleep := exec.Command("/bin/sleep", "60")
+			sleep.Dir = filepath.Join(project, "node_modules")
+			if err := sleep.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = sleep.Process.Kill(); _ = sleep.Wait() })
 		},
 	}
 	for name, change := range cases {

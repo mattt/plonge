@@ -37,6 +37,8 @@ show them to the user and run a new dry run.
    (24 hours by default).
    An active project has more recent or unknown activity.
    A busy project has a running or initializing Paseo agent.
+   Plonge refuses a project cache that a running process uses
+   and names the process in the report.
    Project cleanup excludes busy projects and, by default, active projects.
    Say which global rules are `prune` and which are `clear`.
    A `prune` rule uses the tool's policy to select unused or stale data.
@@ -85,6 +87,9 @@ and Paseo status, not on uncommitted edits or running builds.
 If `paseo` is not on PATH, the busy check cannot see Paseo agents and gives no protection.
 If `paseo` is on PATH but its status cannot be read, every project counts as busy,
 so `clean` deletes no project caches until Paseo works again.
+The running-process check sees only processes that run when Plonge checks;
+it does not see a stopped service or a later cron job.
+If Plonge cannot list the processes, every project counts as busy.
 Do not clean caches in a project that you know is busy.
 
 Do not use another deletion command to bypass a skipped path or rule.
