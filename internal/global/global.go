@@ -85,8 +85,8 @@ type Inputs struct {
 	TargetPaths []string `json:"target_paths"`
 	KeepNames   []string `json:"keep_names"`
 	Folders     []string `json:"folders"`
-	// FolderBytes is the size of Folders for the Xcode rule,
-	// which plonge deletes itself, and 0 for every other rule.
+	// FolderBytes is the size of Folders for the Xcode and tmpdir rules,
+	// whose folders and entries plonge deletes itself, and 0 for every other rule.
 	FolderBytes int64 `json:"folder_bytes"`
 }
 
@@ -101,7 +101,7 @@ func (e Entry) Inputs() Inputs {
 		KeepNames:   slices.Clone(e.keepNames),
 		Folders:     slices.Clone(e.stale),
 	}
-	if e.ID == rules.XcodeRuleID {
+	if e.ID == rules.XcodeRuleID || e.ID == rules.TmpDirRuleID {
 		in.FolderBytes = e.Bytes
 	}
 	return in

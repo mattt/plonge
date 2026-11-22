@@ -650,3 +650,75 @@ func TestFirstPathsBoundsThePreview(t *testing.T) {
 		t.Error("the clean description does not give the limit")
 	}
 }
+
+// staleTmp sets a tmpdir age of 36 milliseconds in the rules file,
+// makes an entry with a file in the temporary directory for each name,
+// and waits until the entries are old enough. It returns their resolved paths.
+func staleTmp(t *testing.T, home string, names ...string) []string {
+	t.Helper()
+	mkfile(t, filepath.Join(home, "config", "plonge", "rules.toml"), "tmpdir_age_hours = 0.00001\n")
+	tmp, err := filepath.EvalSymlinks(os.Getenv("TMPDIR"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, name := range names {
+		mkfile(t, filepath.Join(tmp, name, "blob"), "x")
+		paths = append(paths, filepath.Join(tmp, name))
+	}
+	time.Sleep(100 * time.Millisecond)
+	return paths
+}
+
+func TestCleanToolGlobalPreviewListsTmpDirEntries(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("the tmpdir rule runs only on macOS and Linux")
+	}
+	home, _ := env(t)
+	entries := staleTmp(t, home, "build-a", "build-b")
+	type outcome struct {
+		ID      string
+		Status  string
+		Folders []string `json:"folders"`
+		Omitted int      `json:"paths_omitted"`
+	}
+	var res struct{ Outcomes []outcome }
+	s := connect(t)
+	if msg := call(t, s, "clean", map[string]any{"global": true}, &res); msg != "" {
+		t.Fatal(msg)
+	}
+	i := slices.IndexFunc(res.Outcomes, func(o outcome) bool { return o.ID == "tmpdir" })
+	if i < 0 || !slices.Equal(res.Outcomes[i].Folders, entries) || res.Outcomes[i].Omitted != 0 {
+		t.Errorf("outcomes = %+v, want folders %v", res.Outcomes, entries)
+	}
+}
+
+func TestCleanToolRefusesChangedTmpDirSelection(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("the tmpdir rule runs only on macOS and Linux")
+	}
+	home, _ := env(t)
+	entries := staleTmp(t, home, "build-a")
+	s := connect(t)
+	clear := map[string]any{"global": true, "include_clear": true}
+	token := dryRun(t, s, clear)
+
+	// The selected entry gets another name, with the same size.
+	renamed := filepath.Join(filepath.Dir(entries[0]), "build-z")
+	if err := os.Rename(entries[0], renamed); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	var res any
+	msg := call(t, s, "clean", applyArgs(clear, token), &res)
+	if !strings.Contains(msg, "changed: tmpdir") {
+		t.Errorf("apply = %q", msg)
+	}
+	// No global rule ran: neither the tmpdir rule nor the go-build clear rule.
+	if _, err := os.Stat(filepath.Join(renamed, "blob")); err != nil {
+		t.Errorf("the tmpdir rule ran: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "gocache", "blob")); err != nil {
+		t.Errorf("the go-build rule ran: %v", err)
+	}
+}

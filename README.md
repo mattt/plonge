@@ -299,9 +299,11 @@ with their rules, projects, sizes, and modification times.
 For global caches, it is the rules that would run,
 with their paths and actions,
 the names and installation paths that a rule's `targets` lists,
-its `keep_names`, and the folders that the Xcode rule deletes.
+its `keep_names`, the folders that the Xcode rule deletes,
+and the entries that the `tmpdir` rule deletes.
 Plonge compares each of these lists item by item.
-The total size of the Xcode rule's folders is compared too,
+The total size of the Xcode rule's folders and of the `tmpdir` rule's entries
+is compared too,
 because plonge deletes them itself;
 other global cache sizes are left out because every build can change them.
 An external command, such as `mise prune`,
@@ -309,7 +311,8 @@ still decides what it removes when it runs.
 A rule whose `targets` command fails is skipped,
 because the dry run cannot show what it would remove.
 A global dry run lists these paths for each rule:
-`folders` for the Xcode rule and `target_paths` for a rule with `targets`.
+`folders` for the Xcode and `tmpdir` rules
+and `target_paths` for a rule with `targets`.
 Each list shows at most 500 paths,
 and `paths_omitted` counts the rest, which `apply` also removes.
 The paths and actions that pass are still subject to every safety check
