@@ -2,12 +2,9 @@
 
 package global
 
-import (
-	"io/fs"
-	"time"
-)
+import "io/fs"
 
-// statOwner returns false: the tmpdir rule supports only macOS and Linux.
-func statOwner(fs.FileInfo) (uint32, time.Time, bool) {
-	return 0, time.Time{}, false
+// statOf returns false: the tmpdir rule supports only macOS and Linux.
+func statOf(fs.FileInfo) (fileStat, bool) {
+	return fileStat{}, false
 }

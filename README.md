@@ -215,7 +215,7 @@ only when it and everything in it last changed at least 24 hours ago;
 `tmpdir_age_hours` in your rules file changes that period.
 It leaves alone names that the system manages, such as `com.apple.*`
 and `systemd-private-*`.
-It refuses an entry that is a symlink, belongs to another user,
+It refuses an entry that is a symlink, is or holds another user's file or a mount point,
 holds a socket or a recent file, holds a Git repository,
 or that `lsof` reports as open or as a process's working directory.
 `lsof` cannot see a program that will use a path later

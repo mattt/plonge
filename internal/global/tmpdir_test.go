@@ -5,6 +5,8 @@ package global
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -373,5 +375,63 @@ func TestTmpDirGitCheckMatchesScan(t *testing.T) {
 	got := refusedReasons(e)["nested"]
 	if got == "" || got != scan.GitRefusal(filepath.Join(tmp, "nested")) {
 		t.Errorf("refusal = %q", got)
+	}
+}
+
+// foreignStat returns a stat hook that reports the file named owner
+// as another user's, and the file named mount as on another device.
+func foreignStat(owner, mount string) func(fs.FileInfo) (fileStat, bool) {
+	return func(info fs.FileInfo) (fileStat, bool) {
+		st, ok := statOf(info)
+		switch info.Name() {
+		case owner:
+			st.uid++
+		case mount:
+			st.id.dev++
+		}
+		return st, ok
+	}
+}
+
+func tmpOutcome(t *testing.T, res Result) Outcome {
+	t.Helper()
+	i := slices.IndexFunc(res.Outcomes, func(o Outcome) bool { return o.ID == "tmpdir" })
+	if i < 0 {
+		t.Fatalf("no tmpdir outcome in %+v", res.Outcomes)
+	}
+	return res.Outcomes[i]
+}
+
+func TestTmpDirRefusesForeignFilesInsideAnEntry(t *testing.T) {
+	r, tmp, _ := tmpSetup(t)
+	mkfile(t, filepath.Join(tmp, "owned", "a", "theirs"), "x")
+	mkfile(t, filepath.Join(tmp, "mounted", "a", "mnt", "file"), "x")
+	mkfile(t, filepath.Join(tmp, "plain", "file"), "x")
+	ctx := context.Background()
+
+	listed := r.List(ctx, nil)
+	if e := tmpEntryOf(t, r); len(e.stale) != 3 {
+		t.Fatalf("stale = %q", e.stale)
+	}
+
+	// After the listing, a file deep in one entry belongs to another user,
+	// and a directory deep in another is a mount point.
+	r.statHook = foreignStat("theirs", "mnt")
+	want := map[string]string{
+		"owned":   "holds a/theirs, which belongs to another user",
+		"mounted": "holds a/mnt, which is on another file system",
+	}
+	if got := refusedReasons(tmpEntryOf(t, r)); !maps.Equal(got, want) {
+		t.Errorf("listing refused = %q, want %q", got, want)
+	}
+	o := tmpOutcome(t, r.Clean(ctx, listed, Options{Apply: true}))
+	if got := refusedReasons(o.Entry); !maps.Equal(got, want) {
+		t.Errorf("apply refused = %q, want %q", got, want)
+	}
+	for name, kept := range map[string]bool{"owned": true, "mounted": true, "plain": false} {
+		_, err := os.Lstat(filepath.Join(tmp, name))
+		if gone := errors.Is(err, os.ErrNotExist); gone == kept {
+			t.Errorf("%s: kept = %v, want %v", name, !gone, kept)
+		}
 	}
 }

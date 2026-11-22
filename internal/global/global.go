@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,6 +82,8 @@ type Runner struct {
 	openFiles func(context.Context) ([]string, error)
 	// now returns the current time; nil uses time.Now.
 	now func() time.Time
+	// statHook, when set, replaces statOf for the tmpdir rule.
+	statHook func(fs.FileInfo) (fileStat, bool)
 }
 
 // New returns a Runner for this machine, whose tmpdir rule selects

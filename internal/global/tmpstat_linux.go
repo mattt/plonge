@@ -6,13 +6,16 @@ import (
 	"time"
 )
 
-// statOwner returns the owner of the file that info describes
-// and the time its status last changed. The result is false
-// when info has no system status.
-func statOwner(info fs.FileInfo) (uid uint32, changed time.Time, ok bool) {
+// statOf returns the system status of the file that info describes.
+// The result is false when info has no system status.
+func statOf(info fs.FileInfo) (fileStat, bool) {
 	st, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
-		return 0, time.Time{}, false
+		return fileStat{}, false
 	}
-	return st.Uid, time.Unix(st.Ctim.Unix()), true
+	return fileStat{
+		uid:     st.Uid,
+		id:      fileID{dev: uint64(st.Dev), ino: uint64(st.Ino)},
+		changed: time.Unix(st.Ctim.Unix()),
+	}, true
 }

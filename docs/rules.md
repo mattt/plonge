@@ -897,7 +897,10 @@ and the entries that changed within the period.
 Plonge refuses a stale entry and lists it with the reason when it:
 
 - is a symlink;
-- belongs to another user;
+- is or holds a file or folder that belongs to another user,
+  or whose owner Plonge cannot read;
+- is or holds a folder on another file system, such as a mount point,
+  because the deletion would reach into that file system;
 - is a file that a process has open, holds such a file,
   or is or holds a process's working directory, as `lsof` reports;
 - is or holds a socket, a named pipe, or a device,

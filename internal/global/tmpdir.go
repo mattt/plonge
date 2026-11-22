@@ -25,7 +25,9 @@ import (
 // An entry is stale when it and everything in it last changed,
 // by modification time or status change time, at least TmpAge ago.
 // The rule keeps the names in tmpManagedNames without looking at them.
-// It refuses a stale entry that is a symlink, belongs to another user,
+// It refuses a stale entry that is a symlink,
+// is or holds a file of another user, or a file whose owner it cannot read,
+// is or holds a mount point of another file system,
 // is open in a process or is a process's working directory as lsof reports,
 // is or holds a socket, a named pipe, or a device,
 // holds an entry that changed more recently,
@@ -78,7 +80,7 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 		return Entry{}, false
 	}
 	e := Entry{ID: rules.TmpDirRuleID, Tool: "lsof", Kind: rules.KindPrune, Path: r.TmpDir, stale: []string{}}
-	dir, open, reason := r.tmpState(ctx)
+	dir, dev, open, reason := r.tmpState(ctx)
 	if reason != "" {
 		e.Skipped = reason
 		return e, true
@@ -105,7 +107,7 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 		// An entry whose status cannot be read stays a candidate,
 		// so that the report lists it with the reason.
 		if err == nil {
-			if last, ok := lastChange(info); ok && last.After(cutoff) {
+			if st, ok := r.stat(info); ok && lastChange(info, st).After(cutoff) {
 				recent++
 				continue
 			}
@@ -114,7 +116,7 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 	}
 	var checked []string
 	for _, path := range candidates {
-		if reason := r.tmpRefusal(path, cutoff, open); reason != "" {
+		if reason := r.tmpRefusal(path, dev, cutoff, open); reason != "" {
 			e.refuseFolder(path, reason)
 			continue
 		}
@@ -142,16 +144,24 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 // tmpState resolves the temporary directory, checks that plonge may delete
 // entries in it, and lists the names of the entries in it that a process
 // has open or works in. It returns a reason when the rule cannot run.
-func (r Runner) tmpState(ctx context.Context) (dir string, open map[string]bool, reason string) {
+func (r Runner) tmpState(ctx context.Context) (dir string, dev uint64, open map[string]bool, reason string) {
 	if !filepath.IsAbs(r.TmpDir) {
-		return "", nil, fmt.Sprintf("the temporary directory %q is not an absolute path", r.TmpDir)
+		return "", 0, nil, fmt.Sprintf("the temporary directory %q is not an absolute path", r.TmpDir)
 	}
 	dir, err := filepath.EvalSymlinks(r.TmpDir)
 	if err != nil {
-		return "", nil, "cannot resolve the temporary directory: " + err.Error()
+		return "", 0, nil, "cannot resolve the temporary directory: " + err.Error()
 	}
 	if reason := r.refuseDelete(ctx, dir); reason != "" {
-		return "", nil, "temporary directory " + r.tilde(dir) + ": " + reason
+		return "", 0, nil, "temporary directory " + r.tilde(dir) + ": " + reason
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return "", 0, nil, "cannot read the temporary directory: " + err.Error()
+	}
+	st, ok := r.stat(info)
+	if !ok {
+		return "", 0, nil, "cannot read the status of the temporary directory"
 	}
 	list := r.openFiles
 	if list == nil {
@@ -159,14 +169,15 @@ func (r Runner) tmpState(ctx context.Context) (dir string, open map[string]bool,
 	}
 	paths, err := list(ctx)
 	if err != nil {
-		return "", nil, "cannot list open files: " + err.Error()
+		return "", 0, nil, "cannot list open files: " + err.Error()
 	}
-	return dir, openNames(paths, filepath.Clean(r.TmpDir), dir), ""
+	return dir, st.id.dev, openNames(paths, filepath.Clean(r.TmpDir), dir), ""
 }
 
 // tmpRefusal returns why plonge must not delete the stale entry at path,
-// or "" when it may. It does not look for Git repositories.
-func (r Runner) tmpRefusal(path string, cutoff time.Time, open map[string]bool) string {
+// or "" when it may. dev is the device of the temporary directory.
+// It checks path and every entry in it, and does not look for Git repositories.
+func (r Runner) tmpRefusal(path string, dev uint64, cutoff time.Time, open map[string]bool) string {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "cannot read: " + err.Error()
@@ -174,29 +185,14 @@ func (r Runner) tmpRefusal(path string, cutoff time.Time, open map[string]bool) 
 	if info.Mode()&fs.ModeSymlink != 0 {
 		return "is a symlink"
 	}
-	owner, _, ok := statOwner(info)
-	if !ok {
-		return "cannot read its owner"
-	}
-	if owner != uint32(os.Getuid()) {
-		return "belongs to another user"
-	}
 	if open[filepath.Base(path)] {
 		return "a running process has it or a file in it open, or works in it"
 	}
+	uid := uint32(os.Getuid())
 	var reason string
 	_ = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			reason = "cannot check: " + err.Error()
-			return fs.SkipAll
-		}
-		where := "is"
-		if p != path {
-			rel, _ := filepath.Rel(path, p)
-			where = "holds " + filepath.ToSlash(rel) + ", which is"
-		}
-		if kind := specialKind(d.Type()); kind != "" {
-			reason = where + " " + kind
 			return fs.SkipAll
 		}
 		info, err := d.Info()
@@ -204,23 +200,62 @@ func (r Runner) tmpRefusal(path string, cutoff time.Time, open map[string]bool) 
 			reason = "cannot check: " + err.Error()
 			return fs.SkipAll
 		}
-		last, ok := lastChange(info)
-		if !ok {
-			reason = "cannot read when " + filepath.ToSlash(p) + " changed"
-			return fs.SkipAll
-		}
-		if last.After(cutoff) {
-			if p == path {
-				reason = "changed in the last " + ageText(r.TmpAge)
-			} else {
-				rel, _ := filepath.Rel(path, p)
-				reason = "holds " + filepath.ToSlash(rel) + ", which changed in the last " + ageText(r.TmpAge)
-			}
+		reason = r.tmpInfoRefusal(info, tmpWhere(path, p), dev, uid, cutoff)
+		if reason != "" {
 			return fs.SkipAll
 		}
 		return nil
 	})
 	return reason
+}
+
+// tmpWhere returns how a refusal names the entry at p in the stale entry at top:
+// "" for top itself, or its path relative to top.
+func tmpWhere(top, p string) string {
+	if p == top {
+		return ""
+	}
+	rel, _ := filepath.Rel(top, p)
+	return filepath.ToSlash(rel)
+}
+
+// tmpInfoRefusal returns why the file that info describes keeps
+// a stale entry from deletion, or "" when it does not.
+// rel is the file's path in the stale entry, or "" for the entry itself.
+// dev is the device of the temporary directory, and uid is the current user.
+func (r Runner) tmpInfoRefusal(info fs.FileInfo, rel string, dev uint64, uid uint32, cutoff time.Time) string {
+	is := "is"
+	if rel != "" {
+		is = "holds " + rel + ", which is"
+	}
+	if kind := specialKind(info.Mode().Type()); kind != "" {
+		return is + " " + kind
+	}
+	st, ok := r.stat(info)
+	if !ok {
+		if rel == "" {
+			return "cannot read its status"
+		}
+		return "cannot read the status of " + rel
+	}
+	if st.uid != uid {
+		if rel == "" {
+			return "belongs to another user"
+		}
+		return "holds " + rel + ", which belongs to another user"
+	}
+	// A different device inside the entry is a mount point,
+	// and removal would delete files on the mounted file system.
+	if st.id.dev != dev {
+		return is + " on another file system"
+	}
+	if lastChange(info, st).After(cutoff) {
+		if rel == "" {
+			return "changed in the last " + ageText(r.TmpAge)
+		}
+		return "holds " + rel + ", which changed in the last " + ageText(r.TmpAge)
+	}
+	return ""
 }
 
 // specialKind names a file type that a running program may still use
@@ -239,18 +274,14 @@ func specialKind(t fs.FileMode) string {
 	return ""
 }
 
-// lastChange returns the later of the modification time and the status
-// change time of info. The status change time catches files that keep an
-// old modification time, such as files extracted from an archive.
-func lastChange(info fs.FileInfo) (time.Time, bool) {
-	_, changed, ok := statOwner(info)
-	if !ok {
-		return time.Time{}, false
+// lastChange returns the later of the modification time of info
+// and the status change time in st. The status change time catches files
+// that keep an old modification time, such as files extracted from an archive.
+func lastChange(info fs.FileInfo, st fileStat) time.Time {
+	if info.ModTime().After(st.changed) {
+		return info.ModTime()
 	}
-	if info.ModTime().After(changed) {
-		return info.ModTime(), true
-	}
-	return changed, true
+	return st.changed
 }
 
 // ageText formats a period for the report, such as "24 hours".
@@ -343,7 +374,7 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 	listed := o.stale
 	o.stale, o.Bytes = []string{}, 0
 	o.Command = tmpCommand(0)
-	dir, open, reason := r.tmpState(ctx)
+	dir, dev, open, reason := r.tmpState(ctx)
 	if reason == "" && dir != o.Path {
 		reason = "the temporary directory is now " + r.tilde(dir)
 	}
@@ -357,7 +388,7 @@ func (r Runner) applyTmp(ctx context.Context, o *Outcome) {
 		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		reason := r.tmpRefusal(path, cutoff, open)
+		reason := r.tmpRefusal(path, dev, cutoff, open)
 		if reason == "" {
 			reason = scan.GitRefusal(path)
 		}
