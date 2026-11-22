@@ -734,6 +734,9 @@ to a list of `{"version": ..., "install_path": ...}` objects.
 `targets` must start with `tool`.
 Each object needs a nonempty `version` and an absolute `install_path`.
 The rule's size is then the total of those directories, not its whole `path`.
+When the `targets` command fails or prints something else,
+`scan` reports the size of the whole `path` with a note,
+and `clean` skips the rule.
 
 A cache with no cleanup command can use `delete_contents` in place of `clean`:
 

@@ -34,17 +34,11 @@ func useMiseData(t *testing.T, r Runner) (installs string) {
 	return filepath.Join(data, "installs")
 }
 
-// fakeMise logs its arguments and runs dryRun for the dry run.
+// fakeMise logs its arguments, runs dryRun for the dry run,
+// and lists no prunable versions.
 func fakeMise(t *testing.T, r Runner, dryRun string) (log string) {
 	t.Helper()
-	useMiseData(t, r)
-	log = filepath.Join(t.TempDir(), "log")
-	addTool(t, fakeTools(t), "mise", fmt.Sprintf(`echo "$*" >> %q
-case "$*" in
-%s
-"prune --tools --dry-run") %s ;;
-esac`, log, fakeMiseDoctor, dryRun))
-	return log
+	return fakeMiseTargets(t, r, dryRun, `echo '{}'`)
 }
 
 func miseCalls(t *testing.T, log string) []string {
@@ -186,6 +180,9 @@ func TestMiseSizeIsThePrunableVersions(t *testing.T) {
 	e := entries[0]
 	if strings.Join(e.Targets, "|") != "bun@1.3.10|rust@1.81.0" || e.Note != "" || e.WholeCache {
 		t.Fatalf("entry = %+v", e)
+	}
+	if want := []string{filepath.Join(installs, "bun", "1.3.10"), link}; !slices.Equal(e.TargetPaths(), want) {
+		t.Errorf("TargetPaths = %q, want %q", e.TargetPaths(), want)
 	}
 	if e.Bytes < 40_000 || e.Bytes >= 900_000 {
 		t.Errorf("Bytes = %d, want only the size of bun 1.3.10", e.Bytes)
@@ -389,5 +386,27 @@ func TestMiseFreedBytesUseTheCustomInstallsDir(t *testing.T) {
 	res := r.Clean(ctx, entries, Options{Apply: true})
 	if o := res.Outcomes[0]; o.Status != Ran || o.Path != installs || o.FreedBytes < 60_000 {
 		t.Errorf("outcome = %+v", o)
+	}
+}
+
+// A failed targets command must not let the rule run,
+// because a dry run could not show what the command removes.
+func TestMiseSkipsRuleWhenTargetsFail(t *testing.T) {
+	r := runner(t)
+	installs := filepath.Join(r.Home, ".local", "share", "mise", "installs", "bun", "1.3.10")
+	if err := os.MkdirAll(installs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := fakeMiseTargets(t, r, ":", `echo "no such flag" >&2; exit 2`)
+	ctx := context.Background()
+	entries := r.List(ctx, []rules.Global{miseToolsRule(t)})
+	for _, apply := range []bool{false, true} {
+		o := r.Clean(ctx, entries, Options{Apply: apply}).Outcomes[0]
+		if o.Status != Skipped || !strings.Contains(o.Reason, "cannot list what the rule would remove") {
+			t.Errorf("apply=%t: outcome = %+v", apply, o)
+		}
+	}
+	if calls := miseCalls(t, log); slices.Contains(calls, "prune --tools --yes") {
+		t.Errorf("the prune ran: calls = %q", calls)
 	}
 }
