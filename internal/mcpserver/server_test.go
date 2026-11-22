@@ -427,22 +427,34 @@ func TestCleanToolTokenDeletesExactlyThePreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := connect(t)
-	token := dryRun(t, s, nil)
 	var res struct {
 		Items []struct{ Path, Status string }
+		Token string `json:"preview_token"`
 	}
+	paths := func(status string) []string {
+		var out []string
+		for _, it := range res.Items {
+			if it.Status == status {
+				out = append(out, it.Path)
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+	if msg := call(t, s, "clean", nil, &res); msg != "" {
+		t.Fatal(msg)
+	}
+	token, previewed := res.Token, paths("would delete")
 	if msg := call(t, s, "clean", applyArgs(nil, token), &res); msg != "" {
 		t.Fatal(msg)
 	}
-	var deleted []string
-	for _, it := range res.Items {
-		if it.Status == "deleted" {
-			deleted = append(deleted, it.Path)
-		}
-	}
 	want := []string{filepath.Join(project, "node_modules"), filepath.Join(other, ".venv")}
-	if len(deleted) != 2 || !slices.Contains(deleted, want[0]) || !slices.Contains(deleted, want[1]) {
-		t.Errorf("deleted %v, want %v", deleted, want)
+	slices.Sort(want)
+	if !slices.Equal(previewed, want) {
+		t.Errorf("previewed %v, want %v", previewed, want)
+	}
+	if deleted := paths("deleted"); !slices.Equal(deleted, previewed) {
+		t.Errorf("deleted %v, but the preview showed %v", deleted, previewed)
 	}
 	for _, p := range want {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
