@@ -102,7 +102,28 @@ when it lists an entry that is not an object with a known status
 (`initializing`, `running`, `idle`, `error`, or `closed`),
 or when a running or initializing agent has no working directory.
 
-Before each deletion, Plonge checks that the path is still a directory,
+Plonge also refuses a cache that a running process uses,
+such as a `.venv` that a service runs from,
+because the HEAD log and transcripts do not show a long-running service.
+A process uses a cache when it has a file open or a library mapped under it,
+works in it, runs an executable from it, or names a path in it on its command line.
+`--include-active` does not override this check.
+The report names the process:
+
+```console
+Refused ~/code/app/.venv: in use by python3.12 (PID 4312), whose command line names bin/python
+```
+
+On macOS, Plonge runs `lsof` and `ps` once for each scan;
+on Linux, it reads `/proc`.
+If it cannot list the processes, every project counts as busy.
+The check does not see a service that is stopped when Plonge runs,
+a timer or cron job, or a process that starts after the last check.
+The [rule reference](docs/rules.md#caches-that-a-running-process-uses)
+describes what the check can miss.
+
+Before each deletion, Plonge checks again that no process uses the cache,
+and that the path is still a directory,
 is not a symlink, is inside its root, is ignored by Git,
 and contains no tracked files.
 It also refuses a directory that holds an entry that its rule protects;

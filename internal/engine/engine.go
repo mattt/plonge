@@ -10,6 +10,7 @@ import (
 	"github.com/mattt/plonge/internal/disk"
 	"github.com/mattt/plonge/internal/global"
 	"github.com/mattt/plonge/internal/mise"
+	"github.com/mattt/plonge/internal/procs"
 	"github.com/mattt/plonge/internal/report"
 	"github.com/mattt/plonge/internal/rules"
 	"github.com/mattt/plonge/internal/scan"
@@ -30,7 +31,7 @@ type Inventory struct {
 	Sizes  [][]int64
 	Report report.Report
 	Now    time.Time
-	// Sources reports each source of agent activity.
+	// Sources reports each source of activity: agents and running processes.
 	Sources []scan.Source
 }
 
@@ -64,6 +65,7 @@ func Inspect(ctx context.Context, sel Selection) (Inventory, error) {
 	paths = mise.DropNested(paths, func(root string) bool { return inTree[root] })
 	inv.Roots = scan.Run(ctx, paths, inv.Rules)
 	inv.Sources = agents.Apply(ctx, inv.Roots, env.Home, inv.Now)
+	inv.Sources = append(inv.Sources, scan.RefuseUsed(ctx, inv.Roots, procs.System()))
 	inv.Sizes = scan.Measure(ctx, inv.Roots)
 	inv.Report = report.Build(inv.Roots, inv.Sizes, inv.Rules.QuietHours, broken, inv.Now)
 	inv.Report.ActivitySources = inv.Sources
@@ -96,6 +98,7 @@ func Clean(ctx context.Context, opts CleanOptions) (clean.Result, Inventory, err
 			QuietHours:    inv.Rules.QuietHours,
 			Now:           inv.Now,
 			StillBusy:     func(root string) string { return agents.Busy(ctx, root, inv.Env.Home) },
+			InUse:         clean.InUseChecker(ctx, procs.System(), time.Now),
 		})
 	}
 	if opts.Apply {

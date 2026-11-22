@@ -219,7 +219,7 @@ func TestCleanToolKeepsCachesWhenPaseoFails(t *testing.T) {
 		if len(res.Items) != 0 || res.NotSelected.Busy.Caches != 1 {
 			t.Errorf("%v: result = %+v", args, res)
 		}
-		if len(res.Sources) != 2 || res.Sources[1].Status != "failed" || !strings.Contains(res.Sources[1].Reason, "no daemon") {
+		if len(res.Sources) != 3 || res.Sources[1].Status != "failed" || !strings.Contains(res.Sources[1].Reason, "no daemon") {
 			t.Errorf("%v: sources = %+v", args, res.Sources)
 		}
 	}

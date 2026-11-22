@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mattt/plonge/internal/disk"
+	"github.com/mattt/plonge/internal/procs"
 	"github.com/mattt/plonge/internal/scan"
 )
 
@@ -34,6 +35,10 @@ type Options struct {
 	// It returns why the root is busy, or "" when it is not.
 	// Run calls it once per root, before the first deletion there.
 	StillBusy func(root string) string
+	// InUse, when set, asks whether a running process uses a cache.
+	// It returns why the cache is in use, or "" when it is not.
+	// Run calls it before it checks and deletes each cache.
+	InUse func(path string) string
 }
 
 // Item is one selected cache and what happened to it.
@@ -80,7 +85,7 @@ type Result struct {
 	Roots        int                `json:"roots"`
 	SkippedRoots []scan.SkippedRoot `json:"skipped_roots"`
 	// Refused lists the caches that the scan refused
-	// because they are or hold a Git repository.
+	// because a running process uses them, or they are or hold a Git repository.
 	Refused []scan.Refusal `json:"refused"`
 
 	ActivitySources []scan.Source `json:"activity_sources"`
@@ -146,6 +151,8 @@ func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) 
 			}
 			if reason := busy[p.root]; reason != "" {
 				p.item.Status, p.item.Reason = Skipped, reason
+			} else if reason := inUse(opts, p.item.Path); reason != "" {
+				p.item.Status, p.item.Reason = Skipped, reason
 			} else {
 				apply(ctx, &p)
 			}
@@ -160,6 +167,40 @@ func Run(ctx context.Context, roots []scan.Root, sizes [][]int64, opts Options) 
 		}
 	}
 	return res
+}
+
+func inUse(opts Options, path string) string {
+	if opts.InUse == nil {
+		return ""
+	}
+	return opts.InUse(path)
+}
+
+// SnapshotAge is how old a process snapshot can be before InUseChecker takes another.
+const SnapshotAge = 10 * time.Second
+
+// InUseChecker returns a function for Options.InUse that asks insp.
+// It takes a snapshot at its first call, and another at a later call
+// only when the last one is older than SnapshotAge.
+// When a snapshot fails, every call until the next one returns the error,
+// so the caches are skipped.
+func InUseChecker(ctx context.Context, insp procs.Inspector, now func() time.Time) func(path string) string {
+	var snap *procs.Snapshot
+	var err error
+	var taken time.Time
+	return func(path string) string {
+		if t := now(); taken.IsZero() || t.Sub(taken) > SnapshotAge {
+			snap, err = insp.Snapshot(ctx)
+			taken = t
+		}
+		if err != nil {
+			return "cannot list processes: " + err.Error()
+		}
+		if ms := snap.Find([]string{path})[filepath.Clean(path)]; len(ms) > 0 {
+			return procs.Reason(path, ms)
+		}
+		return ""
+	}
 }
 
 func apply(ctx context.Context, p *planned) {

@@ -157,8 +157,10 @@ func matchInside(dir string, elems []string) (string, error) {
 // or beside a commondir or gitdir entry, as sharesGitDir describes,
 // or a directory that it cannot read, which could hide either.
 // With a layout, it does not refuse the repositories that SwiftPM manages:
-// a .git directory directly in a checkout, and a Git directory directly
-// in repositories, unless either one shares another Git directory.
+// a .git directory directly in a checkout, a Git directory directly
+// in repositories, and, for a submodule in a checkout, a .git file
+// and a Git directory in the checkout's .git/modules,
+// unless a Git directory shares another one.
 // It returns them so that the caller can check them with Git.
 func walkCache(dir string, keep []string, measure, guard bool, layout *packageLayout) (int64, string, []managedRepo) {
 	var t tally
@@ -286,7 +288,14 @@ func gitReason(dir, path string, d fs.DirEntry, layout *packageLayout, repos *[]
 		repo := filepath.Dir(path)
 		// A .git file or symlink can point at a repository outside the cache.
 		if d.IsDir() && layout.isCheckout(repo) {
-			*repos = append(*repos, managedRepo{path: repo})
+			*repos = append(*repos, managedRepo{path: repo, kind: checkoutRepo})
+			return ""
+		}
+		// A submodule's .git file names a Git directory in its checkout.
+		// checkManaged refuses the file unless it is part of a submodule
+		// that passes its checks.
+		if d.Type().IsRegular() && layout.checkoutOf(repo) != "" {
+			*repos = append(*repos, managedRepo{path: repo, kind: submoduleTree})
 			return ""
 		}
 		return repoReason(dir, repo, "a Git repository")
@@ -308,7 +317,12 @@ func gitReason(dir, path string, d fs.DirEntry, layout *packageLayout, repos *[]
 				return ""
 			}
 			if layout.isMirror(parent) {
-				*repos = append(*repos, managedRepo{path: parent, bare: true})
+				*repos = append(*repos, managedRepo{path: parent, kind: mirrorRepo})
+				return ""
+			}
+			// Git keeps a submodule's Git directory in .git/modules.
+			if co := layout.checkoutOf(parent); co != "" && Inside(parent, filepath.Join(co, ".git", "modules")) {
+				*repos = append(*repos, managedRepo{path: parent, kind: submoduleDir})
 				return ""
 			}
 			return repoReason(dir, parent, "a Git directory")
