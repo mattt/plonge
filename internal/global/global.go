@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mattt/plonge/internal/disk"
+	"github.com/mattt/plonge/internal/procs"
 	"github.com/mattt/plonge/internal/rules"
 	"github.com/mattt/plonge/internal/scan"
 )
@@ -37,17 +39,20 @@ type Entry struct {
 	// Targets are the items that the rule's command would remove.
 	// When the rule lists them, Bytes is their size and not the size of Path.
 	Targets []string `json:"targets,omitempty"`
-	// Note says why Path is a fallback, or why Bytes is the size of Path
-	// although the rule has targets.
+	// Note says why Path is a fallback, why Bytes is the size of Path
+	// although the rule has targets, or, for the tmpdir rule,
+	// how many entries it kept without checking them.
 	Note string `json:"note,omitempty"`
 	// WholeCache is true when Bytes is the size of the whole cache
 	// of a prune rule, whose tool removes only the part that its policy selects.
 	// It is false for a clear rule, for a rule whose targets give Bytes,
-	// and for the Xcode rule, whose Bytes is the size of the folders that it deletes.
+	// and for the Xcode and tmpdir rules, whose Bytes is the size of what they delete.
 	WholeCache bool `json:"whole_cache,omitempty"`
 	// RefusedFolders are the folders that the rule would remove
-	// but keeps because they are or hold a Git repository, with the reason.
-	// They are not in Bytes or Command. Only the Xcode rule sets them.
+	// but keeps, with the reason: for the Xcode rule, because they are
+	// or hold a Git repository, and for the tmpdir rule, because they fail
+	// one of its checks. They are not in Bytes or Command.
+	// Only these two rules set them.
 	RefusedFolders []scan.Refusal `json:"refused_folders,omitempty"`
 
 	argv   []string
@@ -58,7 +63,7 @@ type Entry struct {
 	// targetsErr is why the rule's targets command failed, or empty.
 	// Clean does not run a rule whose targets it cannot list.
 	targetsErr string
-	stale      []string // for the built-in Xcode rule, the folders to delete
+	stale      []string // for the built-in Xcode and tmpdir rules, what to delete
 	// deleteContents is true when plonge deletes what is in Path itself.
 	deleteContents bool
 	// refuseNames are the rule's refuse_names.
@@ -80,8 +85,8 @@ type Inputs struct {
 	TargetPaths []string `json:"target_paths"`
 	KeepNames   []string `json:"keep_names"`
 	Folders     []string `json:"folders"`
-	// FolderBytes is the size of Folders for the Xcode rule,
-	// which plonge deletes itself, and 0 for every other rule.
+	// FolderBytes is the size of Folders for the Xcode and tmpdir rules,
+	// whose folders and entries plonge deletes itself, and 0 for every other rule.
 	FolderBytes int64 `json:"folder_bytes"`
 }
 
@@ -96,7 +101,7 @@ func (e Entry) Inputs() Inputs {
 		KeepNames:   slices.Clone(e.keepNames),
 		Folders:     slices.Clone(e.stale),
 	}
-	if e.ID == rules.XcodeRuleID {
+	if e.ID == rules.XcodeRuleID || e.ID == rules.TmpDirRuleID {
 		in.FolderBytes = e.Bytes
 	}
 	return in
@@ -118,11 +123,32 @@ func (in Inputs) String() string {
 type Runner struct {
 	Home string
 	GOOS string
+	// TmpDir is the temporary directory for the tmpdir rule,
+	// which does not apply when TmpDir is empty.
+	TmpDir string
+	// TmpAge is how long ago an entry in TmpDir must have last changed.
+	TmpAge time.Duration
+
+	// inspector lists the running processes for the tmpdir rule;
+	// nil uses procs.System.
+	inspector procs.Inspector
+	// now returns the current time; nil uses time.Now.
+	now func() time.Time
+	// statHook, when set, replaces statOf for the tmpdir rule.
+	statHook func(fs.FileInfo) (fileStat, bool)
+	// mountsHook, when set, replaces mountPoints for the tmpdir rule.
+	mountsHook func() ([]string, error)
 }
 
-// New returns a Runner for this machine.
-func New(home string) Runner {
-	return Runner{Home: home, GOOS: runtime.GOOS}
+// New returns a Runner for this machine, whose tmpdir rule selects
+// entries in the temporary directory that last changed tmpAgeHours ago.
+// A tmpAgeHours that rules.TmpDirAge rejects, such as 0, selects DefaultTmpAge.
+func New(home string, tmpAgeHours float64) Runner {
+	age, err := rules.TmpDirAge(tmpAgeHours)
+	if err != nil {
+		age = DefaultTmpAge
+	}
+	return Runner{Home: home, GOOS: runtime.GOOS, TmpDir: os.TempDir(), TmpAge: age}
 }
 
 // run runs argv from the home directory and returns its standard output.
@@ -361,6 +387,9 @@ func (r Runner) List(ctx context.Context, rs []rules.Global) []Entry {
 	if e, ok := r.xcodeEntry(ctx); ok {
 		entries = append(entries, e)
 	}
+	if e, ok := r.tmpEntry(ctx); ok {
+		entries = append(entries, e)
+	}
 	return entries
 }
 
@@ -483,8 +512,12 @@ func (r Runner) apply(ctx context.Context, o *Outcome) {
 		o.Status, o.Reason = Skipped, o.Skipped
 		return
 	}
-	if o.ID == rules.XcodeRuleID {
+	switch o.ID {
+	case rules.XcodeRuleID:
 		applyXcode(ctx, o)
+		return
+	case rules.TmpDirRuleID:
+		r.applyTmp(ctx, o)
 		return
 	}
 	if o.deleteContents {

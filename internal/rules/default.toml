@@ -5,6 +5,12 @@ names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          "vendor/bundle", "venv", "zig-cache"]
 quiet_hours = 24
 
+# The built-in tmpdir rule selects an entry in the temporary directory
+# only when it and everything in it last changed at least this long ago.
+# macOS's dirhelper job runs daily with CLEAN_FILES_OLDER_THAN_DAYS=3,
+# so a period of 3 days or more may select little on macOS.
+tmpdir_age_hours = 24
+
 # .build and DerivedData beside Package.swift, and DerivedData beside
 # one Xcode workspace or project, hold the dependency clones
 # that Swift Package Manager manages. Plonge lets through a clone that SwiftPM

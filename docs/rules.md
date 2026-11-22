@@ -14,6 +14,7 @@ names = [".astro", ".build", ".gradle", ".mypy_cache", ".next", ".nox",
          "bin", "build", "dist", "node_modules", "obj", "target", "tmp/cache",
          "vendor/bundle", "venv", "zig-cache"]
 quiet_hours = 24
+tmpdir_age_hours = 24
 
 # Do not scan inside these directories.
 skip = [".cache", ".git", ".hg", ".jj", ".svn"]
@@ -206,7 +207,8 @@ The check has these limits:
 - On macOS, `ps` joins the words of a command line with spaces,
   so a path with a space in it can be missed.
 
-Global rules do not use this check.
+Global rules do not use this check,
+except the [temporary directory rule](#temporary-directory).
 
 ## Caches that hold a Git repository
 
@@ -426,7 +428,8 @@ Use `plonge disk` to check free space on your home directory's volume.
 
 Global caches are stored outside projects.
 Plonge uses cleanup commands from their tools,
-plus a built-in rule for Xcode build data on macOS.
+plus built-in rules for Xcode build data on macOS
+and for the [temporary directory](#temporary-directory).
 A rule for a cache without a cleanup command,
 or whose command also removes user state,
 can delete the contents of its path instead,
@@ -466,7 +469,7 @@ so the space that a prune frees can be much smaller.
 `scan --global` and `clean --global` mark such a size `(whole cache)`,
 and with `--json`, the rule has `"whole_cache": true`.
 A prune rule that lists what it removes, as `mise-tools` does,
-and `xcode-derived-data` report the size of what they would remove instead,
+`xcode-derived-data`, and `tmpdir` report the size of what they would remove instead,
 without the mark.
 A clear rule's size is the size of its cache, without the mark.
 
@@ -491,6 +494,7 @@ A clear rule's size is the size of its cache, without the mark.
 | `swiftpm-macos` | clear | `swift package purge-cache` (macOS) |
 | `swiftpm-linux` | clear | `swift package purge-cache` (Linux) |
 | `xcode-derived-data` | prune | Built-in deletion of stale Xcode build directories (macOS) |
+| `tmpdir` | prune | Built-in deletion of stale entries in the temporary directory (macOS and Linux) |
 | `zig-global-cache` | clear | Built-in deletion of the contents of Zig's global cache |
 | `hex-packages` | clear | Built-in deletion of the contents of `~/.hex/packages` |
 | `rebar3-hex` | clear | Built-in deletion of the contents of `~/.cache/rebar3/hex` |
@@ -849,3 +853,135 @@ to keep them.
 For `mise-tools` with `tool = "mise"` and a `clean` command,
 `path` is used only when mise cannot report its installs directory.
 A `delete_contents` rule always uses its own `path`, or its `path_env`.
+
+### Temporary directory
+
+The built-in `tmpdir` prune rule deletes stale entries
+in the temporary directory on macOS and Linux.
+Plonge uses the directory that `$TMPDIR` names,
+or `/tmp` when `TMPDIR` is not set, and resolves symlinks in that path.
+On macOS, `TMPDIR` is a directory for each user under `/var/folders`;
+on Linux, `/tmp` is usually shared by all users.
+Plonge skips the rule when the path is not absolute, does not exist,
+is `/` or the home directory, contains the home directory,
+or is in a Git repository.
+It also skips the rule when it cannot list the processes,
+for the [same reasons as for project caches](#caches-that-a-running-process-uses).
+
+The rule looks only at the entries directly in the directory,
+both files and folders.
+An entry is stale when it and everything in it
+last changed at least 24 hours ago.
+To change that period, set `tmpdir_age_hours` in your rules file:
+
+```toml
+tmpdir_age_hours = 72
+```
+
+The value must be a positive number of hours that is at least one nanosecond
+and at most 2,562,047 hours, the longest period that Plonge can represent.
+
+For each file and folder, Plonge uses the later of its modification time
+and its status change time,
+because a file extracted from an archive can keep an old modification time.
+Reading a file does not change either time.
+
+The rule leaves these names alone without checking them,
+because the system creates and manages them:
+
+| Name | Why |
+| --- | --- |
+| `com.apple.*` | macOS frameworks, launchd, XPC services, and app sandboxes keep data for running processes in directories named for their bundle IDs. |
+| `TemporaryItems` | macOS's Foundation framework stages documents that apps are saving here. |
+| `.AddressBookLocks` | macOS Contacts keeps its lock files here. |
+| `cryptex*` | macOS stages cryptex personalization data here. |
+| `.X11-unix`, `.ICE-unix`, `.XIM-unix`, `.font-unix`, `.Test-unix` | X11 and the session manager listen on sockets in these directories, which `systemd-tmpfiles` creates at boot. |
+| `.X*-lock` | The X server locks its display number with these files. |
+| `systemd-private-*` | systemd gives each service with `PrivateTmp=` its own directory here. |
+| `snap-private-tmp` | snapd keeps the private temporary directories of snaps here. |
+
+The report counts the entries that it leaves alone
+and the entries that changed within the period.
+Plonge refuses a stale entry and lists it with the reason when it:
+
+- is a symlink;
+- is or holds a file or folder that belongs to another user,
+  or whose owner Plonge cannot read;
+- is or holds a folder on another file system,
+  or a mount point on the same one, such as a bind mount,
+  because the deletion would reach into the mounted folder.
+  Plonge reads the mount points from `/proc/self/mountinfo` on Linux
+  and from `getfsstat` on macOS,
+  and skips the rule when it cannot read them;
+- is used by a running process, by the
+  [same check as for project caches](#caches-that-a-running-process-uses),
+  through the resolved path or the path that `$TMPDIR` names;
+- is or holds a socket, a named pipe, or a device,
+  which a program can use without holding it open;
+- holds a file or folder that changed within the period;
+- is or holds a Git repository at any depth, with the
+  [same check as for project caches](#caches-that-hold-a-git-repository),
+  or holds a directory that Plonge cannot read.
+
+```console
+Refused /private/var/folders/xy/abc/T/build-123: in use by node (PID 911), which works in it
+```
+
+With `--apply`, Plonge checks each selected entry again
+right before it deletes it,
+and lists the processes again as `clean --apply` does for project caches.
+If that list fails, Plonge deletes no more entries,
+and the rule is skipped when it deleted none.
+The outcome's size and action count only the entries that pass.
+The size is the size of the selected entries, without the `(whole cache)` mark.
+
+Plonge opens the temporary directory before it checks it,
+and reads and deletes each entry through that open directory,
+so a folder that is renamed or replaced by a symlink after the check
+does not change what Plonge deletes.
+The check records the device and inode of every file and folder in the entry,
+and the deletion keeps a file that was replaced or added after the check,
+with the folders that hold it, and reports a failure.
+Before it removes each file or folder,
+Plonge renames it to a random name in the same folder
+and checks its device and inode under that name,
+so a file that takes the original name after the check is kept.
+Plonge renames a replaced file back,
+or a file or folder that it cannot remove, such as a folder that gained a file,
+with a rename that refuses
+an existing destination,
+`renameat2` with `RENAME_NOREPLACE` on Linux
+and `renameatx_np` with `RENAME_EXCL` on macOS.
+When another file has the name, or the file system does not support that rename,
+Plonge keeps the replaced file under the random name
+and reports its path in the outcome.
+Plonge makes a read-only folder writable
+through a handle that it opened and checked.
+The Git, process, and size checks read the entry by its path,
+so Plonge first makes sure that the path still names the checked entry.
+
+The rule has these limits:
+
+- The process check has the
+  [limits described for project caches](#caches-that-a-running-process-uses).
+  Without root, Plonge sees another user's process only through its command line,
+  so on Linux your own entry in a shared `/tmp` can be in use by another user's process.
+- A program can keep a path to use later without holding it open,
+  such as an agent that waits between commands,
+  or a tool that writes a temporary path to its settings.
+  Plonge cannot see such a use;
+  only the period protects the entry.
+- A process can open an entry after the final check and before the deletion.
+- A process that can write to a folder in an entry,
+  and learns the random name before the removal,
+  can put another file under that name.
+- The rule does not ask Paseo or any other agent tool which paths it uses.
+- On macOS, the `com.apple.bsd.dirhelper` launchd job runs every day
+  with `CLEAN_FILES_OLDER_THAN_DAYS` set to 3,
+  as `/System/Library/LaunchDaemons/com.apple.bsd.dirhelper.plist` shows.
+  Apple does not document what it deletes.
+  If it deletes old files from this directory,
+  a period of 3 days or longer selects little on macOS,
+  which is why the default is 24 hours.
+- On many Linux distributions, `systemd-tmpfiles` already deletes files in `/tmp`
+  that have not been used for 10 days.

@@ -67,7 +67,9 @@ func TestCoverageTableIncludesDefaultRules(t *testing.T) {
 			}
 		}
 	}
-	if !listed[XcodeRuleID] {
-		t.Errorf("coverage table is missing built-in global rule ID %q", XcodeRuleID)
+	for _, id := range []string{XcodeRuleID, TmpDirRuleID} {
+		if !listed[id] {
+			t.Errorf("coverage table is missing built-in global rule ID %q", id)
+		}
 	}
 }

@@ -55,6 +55,7 @@ func (r Runner) xcodeEntry(ctx context.Context) (Entry, bool) {
 }
 
 // Folders returns the folders that the Xcode rule would delete,
+// or the entries that the tmpdir rule would delete,
 // or nil for every other rule.
 func (e Entry) Folders() []string {
 	return slices.Clone(e.stale)

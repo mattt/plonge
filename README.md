@@ -208,6 +208,21 @@ On macOS, a prune rule for Xcode selects only build directories
 whose workspace no longer exists,
 and refuses one that holds a Git repository with edits or local commits.
 
+The `tmpdir` prune rule deletes old entries in your temporary directory,
+`$TMPDIR` or `/tmp`, on macOS and Linux.
+It selects a file or folder directly in that directory
+only when it and everything in it last changed at least 24 hours ago;
+`tmpdir_age_hours` in your rules file changes that period.
+It leaves alone names that the system manages, such as `com.apple.*`
+and `systemd-private-*`.
+It refuses an entry that is a symlink, is or holds another user's file or a mount point, including a bind mount,
+holds a socket or a recent file, holds a Git repository,
+or that a running process uses, by the same check as for project caches.
+That check cannot see a program that will use a path later
+without holding it open now,
+so read the [limits of this rule](docs/rules.md#temporary-directory)
+before you apply it.
+
 See the [rule reference](docs/rules.md#global-caches) for every global action,
 its path, and its checks.
 The [coverage table](docs/coverage.md) explains tool-specific limits.
@@ -284,10 +299,12 @@ with their rules, projects, sizes, and modification times.
 For global caches, it is the rules that would run,
 with their paths and actions,
 the names and installation paths that a rule's `targets` lists,
-its `keep_names`, and the folders that the Xcode rule deletes.
+its `keep_names`, the folders that the Xcode rule deletes,
+and the entries that the `tmpdir` rule deletes.
 Plonge compares each of these lists item by item,
 byte for byte, so names that are not valid UTF-8 stay distinct.
-The total size of the Xcode rule's folders is compared too,
+The total size of the Xcode rule's folders and of the `tmpdir` rule's entries
+is compared too,
 because plonge deletes them itself;
 other global cache sizes are left out because every build can change them.
 An external command, such as `mise prune`,
@@ -295,7 +312,8 @@ still decides what it removes when it runs.
 A rule whose `targets` command fails is skipped,
 because the dry run cannot show what it would remove.
 A global dry run lists these paths for each rule:
-`folders` for the Xcode rule and `target_paths` for a rule with `targets`.
+`folders` for the Xcode and `tmpdir` rules
+and `target_paths` for a rule with `targets`.
 Each list shows at most 500 paths,
 and `paths_omitted` counts the rest, which `apply` also removes.
 A path that is not valid UTF-8, or that starts with a double quote,

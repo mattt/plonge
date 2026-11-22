@@ -7,7 +7,8 @@ Later versions aim for one-to-one coverage of mise's core tools.
 This table uses the default [rules](../internal/rules/default.toml),
 the [project scanner](../internal/scan/detect.go),
 and the [global cleanup code](../internal/global/global.go).
-The built-in [Xcode rule](../internal/global/xcode.go) is included.
+The built-in [Xcode rule](../internal/global/xcode.go)
+and [temporary directory rule](../internal/global/tmpdir.go) are included.
 User rules can change this coverage.
 
 The inventory was checked with mise **2026.10.14** on macOS ARM64,
@@ -474,6 +475,7 @@ so a project-specific cache setting may not be used.
 These tools can be installed independently of mise.
 Project matches use the same Git and activity checks as the core table.
 Global rules require their command to be available, except for the Xcode rule.
+The temporary directory rule requires `lsof` and `ps` on macOS, and a readable `/proc` on Linux.
 
 | Tool | Project cache names | Global rule ID | Command or action | Kind and default behavior |
 | --- | --- | --- | --- | --- |
@@ -500,6 +502,7 @@ Global rules require their command to be available, except for the Xcode rule.
 | RubyGems | none | `rubygems-cache` | `delete_contents` of `cache` in the directory that `gem env gemdir` prints, except `cache/bundler`, which holds Bundler's Git clones; Plonge does not run `gem cleanup`, which uninstalls old gem versions | clear; requires `clean --global --include-clear --apply` to run. Installed gems stay; only the copies of their `.gem` files are deleted. |
 | Homebrew | none yet | `homebrew` | `brew cleanup --prune=all` | clear; requires `clean --global --include-clear --apply` to run. Homebrew can remove old installed versions as well as cached downloads; Plonge measures only `brew --cache`. |
 | Swift Package Manager | `.build` | `swiftpm-macos`, `swiftpm-linux` | `swift package purge-cache`, with `--cache-path` and `--scratch-path` set to the measured cache directory | clear; requires `clean --global --include-clear --apply` to run. Each rule applies only on its system. `artifacts` and `prebuilts` remain. |
+| Temporary directory | none | `tmpdir` | Built-in deletion of stale entries directly in `$TMPDIR`, or `/tmp`; asks the process check which entries are in use | prune; macOS and Linux. Eligible with `clean --global`; requires `--apply` to delete. Selects only entries that, with everything in them, last changed at least `tmpdir_age_hours` (24 by default) ago. Leaves system names such as `com.apple.*` and `systemd-private-*` alone. Refuses symlinks, entries that are or hold files of other users or mount points, entries that a running process uses, and entries that hold a socket, a named pipe, a device, a recent file, or a Git repository. |
 | Xcode | `DerivedData` | `xcode-derived-data` | Built-in deletion of stale directories under `~/Library/Developer/Xcode/DerivedData`; no external command | prune; macOS only, when that directory can be read. Eligible with `clean --global`; requires `--apply` to delete. Refuses a stale directory that holds a Git repository, except unchanged SwiftPM clones in `SourcePackages`, or a directory that it cannot read. |
 
 A global rule can also set `delete_contents` in place of a cleanup command,
@@ -536,6 +539,11 @@ so a checkout's `HEAD` must be a commit that its remote-tracking refs
 or its bare clone's tags hold.
 The project `DerivedData` rule is different: it uses the project checks,
 without checking Xcode workspace metadata.
+
+The temporary directory rule cannot see a program
+that will use a path later without holding it open,
+or the processes of other users without root.
+The [rule reference](rules.md#temporary-directory) lists its exclusions and limits.
 
 ### Cargo
 
