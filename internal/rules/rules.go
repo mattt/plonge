@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -211,10 +213,31 @@ func parse(data, name string) (file, error) {
 	if f.QuietHours != nil && *f.QuietHours < 0 {
 		return f, fmt.Errorf("%s: quiet_hours must not be negative", name)
 	}
-	if f.TmpDirAgeHours != nil && !(*f.TmpDirAgeHours > 0) {
-		return f, fmt.Errorf("%s: tmpdir_age_hours must be positive", name)
+	if f.TmpDirAgeHours != nil {
+		if _, err := TmpDirAge(*f.TmpDirAgeHours); err != nil {
+			return f, fmt.Errorf("%s: %w", name, err)
+		}
 	}
 	return f, nil
+}
+
+// TmpDirAge converts tmpdir_age_hours to a duration.
+// It fails unless hours is finite and converts to a positive duration
+// that time.Duration can represent, about 2.56 million hours at most.
+func TmpDirAge(hours float64) (time.Duration, error) {
+	if !(hours > 0) {
+		return 0, errors.New("tmpdir_age_hours must be positive")
+	}
+	ns := hours * float64(time.Hour)
+	// float64(math.MaxInt64) rounds up to 2^63, which does not fit.
+	if math.IsInf(hours, 0) || ns >= float64(math.MaxInt64) {
+		return 0, fmt.Errorf("tmpdir_age_hours must be at most %d", int64(math.MaxInt64/int64(time.Hour)))
+	}
+	d := time.Duration(ns)
+	if d <= 0 {
+		return 0, errors.New("tmpdir_age_hours must be at least one nanosecond")
+	}
+	return d, nil
 }
 
 func (g Global) validate() error {

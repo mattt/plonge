@@ -90,11 +90,11 @@ type Runner struct {
 
 // New returns a Runner for this machine, whose tmpdir rule selects
 // entries in the temporary directory that last changed tmpAgeHours ago.
-// A tmpAgeHours that is not positive selects DefaultTmpAge.
+// A tmpAgeHours that rules.TmpDirAge rejects, such as 0, selects DefaultTmpAge.
 func New(home string, tmpAgeHours float64) Runner {
-	age := DefaultTmpAge
-	if tmpAgeHours > 0 {
-		age = time.Duration(tmpAgeHours * float64(time.Hour))
+	age, err := rules.TmpDirAge(tmpAgeHours)
+	if err != nil {
+		age = DefaultTmpAge
 	}
 	return Runner{Home: home, GOOS: runtime.GOOS, TmpDir: os.TempDir(), TmpAge: age}
 }

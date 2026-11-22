@@ -82,6 +82,10 @@ func TestLoad(t *testing.T) {
 		{name: "zero tmpdir age", body: "tmpdir_age_hours = 0", wantErr: true},
 		{name: "negative tmpdir age", body: "tmpdir_age_hours = -1", wantErr: true},
 		{name: "NaN tmpdir age", body: "tmpdir_age_hours = nan", wantErr: true},
+		{name: "infinite tmpdir age", body: "tmpdir_age_hours = inf", wantErr: true},
+		{name: "overflowing tmpdir age", body: "tmpdir_age_hours = 3e6", wantErr: true},
+		{name: "tmpdir age that rounds to zero", body: "tmpdir_age_hours = 1e-13", wantErr: true},
+		{name: "small tmpdir age", body: "tmpdir_age_hours = 1e-12", wantQuiet: 24, wantTmp: 1e-12},
 		{name: "bad toml", body: "names = [", wantErr: true},
 	}
 	for _, tt := range tests {

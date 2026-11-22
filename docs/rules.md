@@ -875,6 +875,9 @@ To change that period, set `tmpdir_age_hours` in your rules file:
 tmpdir_age_hours = 72
 ```
 
+The value must be a positive number of hours that is at least one nanosecond
+and at most 2,562,047 hours, the longest period that Plonge can represent.
+
 For each file and folder, Plonge uses the later of its modification time
 and its status change time,
 because a file extracted from an archive can keep an old modification time.
