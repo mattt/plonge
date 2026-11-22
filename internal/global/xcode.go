@@ -60,6 +60,12 @@ func (e Entry) Folders() []string {
 	return slices.Clone(e.stale)
 }
 
+// TargetPaths returns the installation paths that the rule's targets command listed,
+// or nil when the rule has no targets.
+func (e Entry) TargetPaths() []string {
+	return slices.Clone(e.targetPaths)
+}
+
 // xcodeCommand is the Command of the Xcode rule when it deletes n folders.
 func xcodeCommand(n int) string {
 	return fmt.Sprintf("delete %d stale DerivedData directories (built in)", n)

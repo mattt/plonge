@@ -293,6 +293,10 @@ An external command, such as `mise prune`,
 still decides what it removes when it runs.
 A rule whose `targets` command fails is skipped,
 because the dry run cannot show what it would remove.
+A global dry run lists these paths for each rule:
+`folders` for the Xcode rule and `target_paths` for a rule with `targets`.
+Each list shows at most 500 paths,
+and `paths_omitted` counts the rest, which `apply` also removes.
 The paths and actions that pass are still subject to every safety check
 that `clean --apply` runs.
 

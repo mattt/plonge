@@ -27,7 +27,7 @@ A dry run returns preview_token. apply requires that token and the same include_
 
 A quiet project has known activity at least quiet_hours old (default: 24 hours). Active projects have newer or unknown activity; include_active selects them too. min_size (such as "100MiB") leaves out smaller caches. A busy project has a running or initializing Paseo agent and is excluded. If paseo is on PATH but its status cannot be read, the paseo entry in activity_sources has status "failed" and every project is busy, so nothing is deleted; tell the user the reason. If paseo is not on PATH, the busy check provides no protection.
 
-With global, it selects only global cleanup actions, without checking project activity. apply runs eligible actions. A prune rule uses the tool's cleanup policy; a clear rule can also remove cached data still in use. Clear rules require include_clear. Later commands may need to download dependencies or rebuild files. Show this effect before asking for approval. Sizes and freed space are estimates. When a rule has whole_cache: true, bytes is the size of a prune rule's whole cache, and the tool's policy removes only part of it; do not present it as the space to free. With apply, home_volume has the free space on the home directory's volume before and after the cleanup; other processes can change it too. Report gained_bytes next to freed_bytes.`
+With global, it selects only global cleanup actions, without checking project activity. apply runs eligible actions. A prune rule uses the tool's cleanup policy; a clear rule can also remove cached data still in use. Clear rules require include_clear. Later commands may need to download dependencies or rebuild files. Show this effect before asking for approval. In a global dry run, folders lists the folders that the Xcode rule deletes, and target_paths lists the installation paths that a rule's targets removes; show these paths to the user. Each list shows at most 500 paths, and paths_omitted counts the rest, which apply also removes; tell the user how many paths were not shown. Sizes and freed space are estimates. When a rule has whole_cache: true, bytes is the size of a prune rule's whole cache, and the tool's policy removes only part of it; do not present it as the space to free. With apply, home_volume has the free space on the home directory's volume before and after the cleanup; other processes can change it too. Report gained_bytes next to freed_bytes.`
 
 const diskDescription = `Report the free space on the volume of the user's home directory. It only reads.`
 
@@ -56,10 +56,48 @@ type cleanPreview struct {
 }
 
 // globalPreview is a global dry run with its token.
+// Its outcomes also list the paths that each rule selected.
 type globalPreview struct {
 	global.Result
-	PreviewToken   string    `json:"preview_token"`
-	PreviewExpires time.Time `json:"preview_expires"`
+	Outcomes       []previewOutcome `json:"outcomes"`
+	PreviewToken   string           `json:"preview_token"`
+	PreviewExpires time.Time        `json:"preview_expires"`
+}
+
+// maxPreviewPaths limits each list of paths in a global dry run,
+// so that a very large selection does not make the result too long to read.
+// The preview token still covers every path, including those not shown.
+const maxPreviewPaths = 500
+
+// previewOutcome is a global outcome with the paths that it selected,
+// which the outcome keeps out of its own JSON.
+type previewOutcome struct {
+	global.Outcome
+	// Folders are the folders that the Xcode rule deletes.
+	Folders []string `json:"folders,omitempty"`
+	// TargetPaths are the installation paths that a rule's targets lists.
+	TargetPaths []string `json:"target_paths,omitempty"`
+	// PathsOmitted counts the paths left out of Folders and TargetPaths.
+	PathsOmitted int `json:"paths_omitted,omitempty"`
+}
+
+func previewOutcomes(res global.Result) []previewOutcome {
+	out := make([]previewOutcome, len(res.Outcomes))
+	for i, o := range res.Outcomes {
+		folders, n := firstPaths(o.Folders())
+		targets, m := firstPaths(o.TargetPaths())
+		out[i] = previewOutcome{Outcome: o, Folders: folders, TargetPaths: targets, PathsOmitted: n + m}
+	}
+	return out
+}
+
+// firstPaths returns at most maxPreviewPaths of paths, in order,
+// and how many it left out.
+func firstPaths(paths []string) ([]string, int) {
+	if len(paths) <= maxPreviewPaths {
+		return paths, 0
+	}
+	return paths[:maxPreviewPaths], len(paths) - maxPreviewPaths
 }
 
 type diskInput struct{}
@@ -174,7 +212,7 @@ func (c *cleaner) handleClean(ctx context.Context, _ *mcp.CallToolRequest, in cl
 			return jsonResult(res)
 		}
 		token, expires := c.previews.add(args, globalSelection(res))
-		return jsonResult(globalPreview{Result: res, PreviewToken: token, PreviewExpires: expires})
+		return jsonResult(globalPreview{Result: res, Outcomes: previewOutcomes(res), PreviewToken: token, PreviewExpires: expires})
 	}
 	res, _, err := engine.Clean(ctx, engine.CleanOptions{
 		Apply:         in.Apply,

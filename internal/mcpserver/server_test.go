@@ -584,3 +584,51 @@ func TestPreviewsKeepOnlyTheNewest(t *testing.T) {
 		t.Errorf("kept %d tokens, %d in order", len(p.tokens), len(p.order))
 	}
 }
+
+func TestCleanToolGlobalPreviewListsXcodeFolders(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the Xcode rule runs only on macOS")
+	}
+	home, _ := env(t)
+	derived := filepath.Join(home, "Library", "Developer", "Xcode", "DerivedData")
+	var folders []string
+	for _, name := range []string{"Gone-abc", "Lost-def"} {
+		folder := filepath.Join(derived, name)
+		mkfile(t, filepath.Join(folder, "Build", "blob"), "x")
+		mkfile(t, filepath.Join(folder, "info.plist"), fmt.Sprintf(`<plist version="1.0"><dict>
+<key>WorkspacePath</key><string>%s</string>
+</dict></plist>`, filepath.Join(home, name+".xcworkspace")))
+		folders = append(folders, folder)
+	}
+	type outcome struct {
+		ID      string
+		Folders []string `json:"folders"`
+		Omitted int      `json:"paths_omitted"`
+	}
+	var res struct{ Outcomes []outcome }
+	s := connect(t)
+	if msg := call(t, s, "clean", map[string]any{"global": true}, &res); msg != "" {
+		t.Fatal(msg)
+	}
+	i := slices.IndexFunc(res.Outcomes, func(o outcome) bool { return o.ID == "xcode-derived-data" })
+	if i < 0 || !slices.Equal(res.Outcomes[i].Folders, folders) || res.Outcomes[i].Omitted != 0 {
+		t.Errorf("outcomes = %+v, want folders %v", res.Outcomes, folders)
+	}
+}
+
+func TestFirstPathsBoundsThePreview(t *testing.T) {
+	paths := make([]string, maxPreviewPaths+3)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("/p/%d", i)
+	}
+	shown, omitted := firstPaths(paths)
+	if len(shown) != maxPreviewPaths || shown[0] != "/p/0" || omitted != 3 {
+		t.Errorf("shown %d from %s, omitted %d", len(shown), shown[0], omitted)
+	}
+	if shown, omitted := firstPaths(paths[:2]); len(shown) != 2 || omitted != 0 {
+		t.Errorf("small list: shown %v, omitted %d", shown, omitted)
+	}
+	if !strings.Contains(cleanDescription, fmt.Sprintf("at most %d paths", maxPreviewPaths)) {
+		t.Error("the clean description does not give the limit")
+	}
+}

@@ -181,6 +181,9 @@ func TestMiseSizeIsThePrunableVersions(t *testing.T) {
 	if strings.Join(e.Targets, "|") != "bun@1.3.10|rust@1.81.0" || e.Note != "" || e.WholeCache {
 		t.Fatalf("entry = %+v", e)
 	}
+	if want := []string{filepath.Join(installs, "bun", "1.3.10"), link}; !slices.Equal(e.TargetPaths(), want) {
+		t.Errorf("TargetPaths = %q, want %q", e.TargetPaths(), want)
+	}
 	if e.Bytes < 40_000 || e.Bytes >= 900_000 {
 		t.Errorf("Bytes = %d, want only the size of bun 1.3.10", e.Bytes)
 	}
