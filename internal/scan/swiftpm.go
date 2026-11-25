@@ -552,10 +552,16 @@ func stashReason(g gitFunc) string {
 // changesReason returns why a work tree has files that its HEAD
 // would not restore, or "": a changed, untracked, or ignored file,
 // or a file with a flag that hides its changes from git status.
+// A folder that holds no files, such as the empty .swiftpm/xcode folder
+// that Xcode makes in a checkout, holds no work, so it does not count,
+// whether or not it is ignored.
 func changesReason(g gitFunc) string {
 	// Set every option that would hide a change, in case configuration changes it.
+	// With --untracked-files=all, --ignored=traditional lists each ignored file,
+	// and lists no folder that holds no files.
+	// --ignored=matching would also list an ignored folder that holds no files.
 	out, _, err := g("status", "--porcelain=v1", "-z", "--untracked-files=all",
-		"--ignored=matching", "--ignore-submodules=none")
+		"--ignored=traditional", "--ignore-submodules=none")
 	if err != nil {
 		return gitFail(err)
 	}

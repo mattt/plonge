@@ -44,7 +44,7 @@ func newSwiftPackage(t *testing.T, cacheName, packages string) swiftPackage {
 	tmp := t.TempDir()
 	upstream := filepath.Join(tmp, "dep")
 	newRepo(t, upstream, map[string]string{
-		".gitignore":            "*.log\n",
+		".gitignore":            "*.log\n.swiftpm/\n",
 		"Package.swift":         "// swift-tools-version:5.9\n",
 		"Sources/Dep/Dep.swift": "public let x = 1\n",
 	})
@@ -326,6 +326,52 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 			name: "ignored file",
 			setup: func(t *testing.T, p swiftPackage) {
 				write(t, filepath.Join(p.checkout, "notes.log"), "")
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
+			name: "empty ignored folder",
+			setup: func(t *testing.T, p swiftPackage) {
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode"))
+			},
+		},
+		{
+			name:  "empty ignored folder in DerivedData beside an Xcode project",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode"))
+			},
+		},
+		{
+			name: "empty untracked folder",
+			setup: func(t *testing.T, p swiftPackage) {
+				mkdirAll(t, filepath.Join(p.checkout, "Sources", "New"))
+			},
+		},
+		{
+			name: "ignored folder that holds a file",
+			setup: func(t *testing.T, p swiftPackage) {
+				write(t, filepath.Join(p.checkout, ".swiftpm", "xcode", "xcuserdata", "me.xcuserdatad", "xcschemes", "xcschememanagement.plist"), "")
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
+			name:  "ignored folder that holds a file in DerivedData beside an Xcode project",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+				write(t, filepath.Join(p.checkout, ".swiftpm", "xcode", "package.xcworkspace", "contents.xcworkspacedata"), "")
+			},
+			reason: derived + " that has changed, untracked, or ignored files",
+		},
+		{
+			name: "ignored folder that holds a symlink",
+			setup: func(t *testing.T, p swiftPackage) {
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm"))
+				if err := os.Symlink(p.upstream, filepath.Join(p.checkout, ".swiftpm", "link")); err != nil {
+					t.Fatal(err)
+				}
 			},
 			reason: checkout + "that has changed, untracked, or ignored files",
 		},
@@ -688,4 +734,12 @@ func statOrNil(path string) os.FileInfo {
 		return nil
 	}
 	return info
+}
+
+// mkdirAll makes the folder at path and any missing parents.
+func mkdirAll(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
 }
