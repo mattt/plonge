@@ -16,6 +16,11 @@ type fileStat struct {
 	id  fileID
 	// changed is the time that the file's status last changed.
 	changed time.Time
+	// noUnlink reports the macOS system flag SF_NOUNLINK,
+	// which ls -lO shows as sunlnk. macOS sets it on folders that
+	// System Integrity Protection guards, and refuses to rename or remove them.
+	// It is always false on Linux.
+	noUnlink bool
 }
 
 // stat returns the system status of the file that info describes,
