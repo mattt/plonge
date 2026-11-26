@@ -147,7 +147,7 @@ func checkSubmodules(ctx context.Context, tree, gitDir string, claimed map[strin
 		if strings.TrimSpace(string(out)) != l.oid {
 			return sub, "whose HEAD is not the commit that the repository above it records"
 		}
-		if why := changesReason(sg); why != "" {
+		if why := changesReason(sg, sub); why != "" {
 			return sub, why
 		}
 

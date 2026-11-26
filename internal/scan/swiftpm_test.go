@@ -376,6 +376,49 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 			reason: checkout + "that has changed, untracked, or ignored files",
 		},
 		{
+			name: "file named .GIT in an ignored folder with core.ignorecase",
+			setup: func(t *testing.T, p swiftPackage) {
+				// With core.ignorecase, git status --ignored=traditional
+				// takes the file for a repository and lists nothing.
+				run(t, p.checkout, "config", "core.ignorecase", "true")
+				write(t, filepath.Join(p.checkout, ".swiftpm", "xcode", ".GIT"), "work")
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
+			name: "named pipe in an ignored folder with core.ignorecase",
+			setup: func(t *testing.T, p swiftPackage) {
+				run(t, p.checkout, "config", "core.ignorecase", "true")
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode"))
+				mkfifo(t, filepath.Join(p.checkout, ".swiftpm", "xcode", "pipe"))
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
+			name: "ignored folder that holds only folders",
+			setup: func(t *testing.T, p swiftPackage) {
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode", "xcuserdata", "me.xcuserdatad"))
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "configuration"))
+			},
+		},
+		{
+			name: "ignored folder with more folders than plonge reads",
+			setup: func(t *testing.T, p swiftPackage) {
+				for i := range maxEmptyFolderEntries {
+					mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", fmt.Sprint(i)))
+				}
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
+			name: "ignored file beside the ignored folder",
+			setup: func(t *testing.T, p swiftPackage) {
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode"))
+				write(t, filepath.Join(p.checkout, "build.log"), "")
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
 			name: "assume-unchanged file",
 			setup: func(t *testing.T, p swiftPackage) {
 				run(t, p.checkout, "update-index", "--assume-unchanged", "Sources/Dep/Dep.swift")
@@ -597,6 +640,53 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 			}
 			if c != nil && c.Path != p.cache {
 				t.Errorf("candidate %s, want %s", c.Path, p.cache)
+			}
+		})
+	}
+}
+
+// TestGuardDerivedDataIgnoredFolders checks the ignored folders
+// of a checkout in a folder whose workspace is gone,
+// with core.ignorecase as macOS sets it.
+func TestGuardDerivedDataIgnoredFolders(t *testing.T) {
+	isolateGit(t)
+	const refused = "contains a Git repository at SourcePackages/checkouts/dep that has changed, untracked, or ignored files"
+	tests := []struct {
+		name   string
+		setup  func(t *testing.T, xcode string)
+		reason string
+	}{
+		{name: "empty ignored folder"},
+		{
+			name: "file named .GIT",
+			setup: func(t *testing.T, xcode string) {
+				write(t, filepath.Join(xcode, ".GIT"), "work")
+			},
+			reason: refused,
+		},
+		{
+			name: "named pipe",
+			setup: func(t *testing.T, xcode string) {
+				mkfifo(t, filepath.Join(xcode, "pipe"))
+			},
+			reason: refused,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newSwiftPackage(t, "DerivedData", "SourcePackages")
+			run(t, p.checkout, "config", "core.ignorecase", "true")
+			xcode := filepath.Join(p.checkout, ".swiftpm", "xcode")
+			mkdirAll(t, xcode)
+			if tt.setup != nil {
+				tt.setup(t, xcode)
+			}
+			sizes, reasons := GuardDerivedData(context.Background(), []string{p.cache}, true)
+			if reasons[0] != tt.reason {
+				t.Errorf("reason %q, want %q", reasons[0], tt.reason)
+			}
+			if (reasons[0] == "") != (sizes[0] > 0) {
+				t.Errorf("size %d with reason %q", sizes[0], reasons[0])
 			}
 		})
 	}

@@ -263,9 +263,10 @@ Plonge does not refuse these repositories when SwiftPM can make them again:
   Its `HEAD` must be the commit that `Package.resolved` pins for its identity,
   which is the name of its folder in lower case,
   and `git status` must show no changed, untracked, or ignored files.
-  A folder that holds no files does not count, even when it is ignored,
+  A folder that holds only folders does not count, even when it is ignored,
   such as the empty `.swiftpm/xcode` folder that Xcode makes in a checkout.
-  A folder that holds a file, a symlink, or another repository still counts.
+  A folder that holds a file, a symlink, a named pipe, or another repository
+  still counts, and so does an ignored folder with more than 1,000 entries.
   It must have no stash, no linked worktrees,
   no files marked assume-unchanged or skip-worktree,
   and no reflog entry for a push to `origin`.

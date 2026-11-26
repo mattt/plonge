@@ -478,7 +478,7 @@ func checkCheckout(ctx context.Context, dir string, pins map[string]pin, mirrors
 		}
 	}
 
-	if why := changesReason(g); why != "" {
+	if why := changesReason(g, dir); why != "" {
 		return why
 	}
 
@@ -549,24 +549,29 @@ func stashReason(g gitFunc) string {
 	return ""
 }
 
-// changesReason returns why a work tree has files that its HEAD
+// changesReason returns why the work tree dir has files that its HEAD
 // would not restore, or "": a changed, untracked, or ignored file,
 // or a file with a flag that hides its changes from git status.
-// A folder that holds no files, such as the empty .swiftpm/xcode folder
-// that Xcode makes in a checkout, holds no work, so it does not count,
-// whether or not it is ignored.
-func changesReason(g gitFunc) string {
+// An ignored folder that holds only folders, such as the empty
+// .swiftpm/xcode folder that Xcode makes in a checkout, holds no work,
+// so it does not count.
+func changesReason(g gitFunc, dir string) string {
 	// Set every option that would hide a change, in case configuration changes it.
-	// With --untracked-files=all, --ignored=traditional lists each ignored file,
-	// and lists no folder that holds no files.
-	// --ignored=matching would also list an ignored folder that holds no files.
+	// --ignored=matching lists an ignored folder as one record
+	// with everything in it, which emptyFolder then checks.
+	// --ignored=traditional would not do: with core.ignorecase,
+	// it skips a file named .GIT in an ignored folder as if it were
+	// a repository, and lists nothing.
 	out, _, err := g("status", "--porcelain=v1", "-z", "--untracked-files=all",
-		"--ignored=traditional", "--ignore-submodules=none")
+		"--ignored=matching", "--ignore-submodules=none")
 	if err != nil {
 		return gitFail(err)
 	}
-	if len(out) > 0 {
-		return "that has changed, untracked, or ignored files"
+	for _, rec := range splitNUL(out) {
+		path, ok := strings.CutPrefix(rec, "!! ")
+		if !ok || !strings.HasSuffix(path, "/") || !emptyFolder(dir, path) {
+			return "that has changed, untracked, or ignored files"
+		}
 	}
 
 	// assume-unchanged and skip-worktree hide changes from git status.
@@ -580,6 +585,36 @@ func changesReason(g gitFunc) string {
 		}
 	}
 	return ""
+}
+
+// maxEmptyFolderEntries limits the entries that emptyFolder reads.
+// The folders that Xcode and SwiftPM leave in a checkout hold a few
+// entries, and a tree this large is not likely to hold only folders,
+// so a larger tree is refused rather than read without limit.
+const maxEmptyFolderEntries = 1000
+
+// emptyFolder reports whether the ignored folder at rel, a path
+// in the work tree dir that git status gives, holds only folders.
+// It does not follow symlinks, and it returns false for any other entry,
+// such as a file, a symlink, or a named pipe, for an error,
+// and when the folder has more than maxEmptyFolderEntries entries.
+func emptyFolder(dir, rel string) bool {
+	rel = filepath.FromSlash(strings.TrimSuffix(rel, "/"))
+	if !filepath.IsLocal(rel) {
+		return false
+	}
+	n := 0
+	stop := errors.New("not an empty folder")
+	err := filepath.WalkDir(filepath.Join(dir, rel), func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if n++; n > maxEmptyFolderEntries || !d.IsDir() {
+			return stop
+		}
+		return nil
+	})
+	return err == nil
 }
 
 // pushReason returns why a repository has pushed to origin, or "".
