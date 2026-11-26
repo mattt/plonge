@@ -136,6 +136,12 @@ func TestMeasureSwiftPMSubmodules(t *testing.T) {
 			reason: lib + changed,
 		},
 		{
+			name: "submodule with an empty ignored folder",
+			setup: func(t *testing.T, p swiftPackage, s submodules) {
+				mkdirAll(t, filepath.Join(s.lib, "logs.log", "old"))
+			},
+		},
+		{
 			name: "nested submodule with an ignored file",
 			setup: func(t *testing.T, p swiftPackage, s submodules) {
 				write(t, filepath.Join(s.inner, "build.log"), "")
@@ -351,6 +357,11 @@ func TestGuardDerivedDataSubmodules(t *testing.T) {
 	}
 	if reason := guard(); reason != "" {
 		t.Fatalf("clean submodules: reason %q", reason)
+	}
+	// Xcode makes an empty .swiftpm/xcode folder, which the package ignores.
+	mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode"))
+	if reason := guard(); reason != "" {
+		t.Fatalf("empty ignored folder: reason %q", reason)
 	}
 	write(t, filepath.Join(s.inner, "build.log"), "")
 	want := "contains a Git repository at SourcePackages/checkouts/dep/Vendor/lib/deps/inner that has changed, untracked, or ignored files"

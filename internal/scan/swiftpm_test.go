@@ -44,7 +44,7 @@ func newSwiftPackage(t *testing.T, cacheName, packages string) swiftPackage {
 	tmp := t.TempDir()
 	upstream := filepath.Join(tmp, "dep")
 	newRepo(t, upstream, map[string]string{
-		".gitignore":            "*.log\n",
+		".gitignore":            "*.log\n.swiftpm/\n",
 		"Package.swift":         "// swift-tools-version:5.9\n",
 		"Sources/Dep/Dep.swift": "public let x = 1\n",
 	})
@@ -330,6 +330,95 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 			reason: checkout + "that has changed, untracked, or ignored files",
 		},
 		{
+			name: "empty ignored folder",
+			setup: func(t *testing.T, p swiftPackage) {
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode"))
+			},
+		},
+		{
+			name:  "empty ignored folder in DerivedData beside an Xcode project",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode"))
+			},
+		},
+		{
+			name: "empty untracked folder",
+			setup: func(t *testing.T, p swiftPackage) {
+				mkdirAll(t, filepath.Join(p.checkout, "Sources", "New"))
+			},
+		},
+		{
+			name: "ignored folder that holds a file",
+			setup: func(t *testing.T, p swiftPackage) {
+				write(t, filepath.Join(p.checkout, ".swiftpm", "xcode", "xcuserdata", "me.xcuserdatad", "xcschemes", "xcschememanagement.plist"), "")
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
+			name:  "ignored folder that holds a file in DerivedData beside an Xcode project",
+			cache: "DerivedData",
+			setup: func(t *testing.T, p swiftPackage) {
+				p.useXcode(t, projectPins, "App.xcodeproj")
+				write(t, filepath.Join(p.checkout, ".swiftpm", "xcode", "package.xcworkspace", "contents.xcworkspacedata"), "")
+			},
+			reason: derived + " that has changed, untracked, or ignored files",
+		},
+		{
+			name: "ignored folder that holds a symlink",
+			setup: func(t *testing.T, p swiftPackage) {
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm"))
+				if err := os.Symlink(p.upstream, filepath.Join(p.checkout, ".swiftpm", "link")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
+			name: "file named .GIT in an ignored folder with core.ignorecase",
+			setup: func(t *testing.T, p swiftPackage) {
+				// With core.ignorecase, git status --ignored=traditional
+				// takes the file for a repository and lists nothing.
+				run(t, p.checkout, "config", "core.ignorecase", "true")
+				write(t, filepath.Join(p.checkout, ".swiftpm", "xcode", ".GIT"), "work")
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
+			name: "named pipe in an ignored folder with core.ignorecase",
+			setup: func(t *testing.T, p swiftPackage) {
+				run(t, p.checkout, "config", "core.ignorecase", "true")
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode"))
+				mkfifo(t, filepath.Join(p.checkout, ".swiftpm", "xcode", "pipe"))
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
+			name: "ignored folder that holds only folders",
+			setup: func(t *testing.T, p swiftPackage) {
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode", "xcuserdata", "me.xcuserdatad"))
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "configuration"))
+			},
+		},
+		{
+			name: "ignored folder with more folders than plonge reads",
+			setup: func(t *testing.T, p swiftPackage) {
+				for i := range maxEmptyFolderEntries {
+					mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", fmt.Sprint(i)))
+				}
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
+			name: "ignored file beside the ignored folder",
+			setup: func(t *testing.T, p swiftPackage) {
+				mkdirAll(t, filepath.Join(p.checkout, ".swiftpm", "xcode"))
+				write(t, filepath.Join(p.checkout, "build.log"), "")
+			},
+			reason: checkout + "that has changed, untracked, or ignored files",
+		},
+		{
 			name: "assume-unchanged file",
 			setup: func(t *testing.T, p swiftPackage) {
 				run(t, p.checkout, "update-index", "--assume-unchanged", "Sources/Dep/Dep.swift")
@@ -556,6 +645,53 @@ func TestMeasureSwiftPMCheckouts(t *testing.T) {
 	}
 }
 
+// TestGuardDerivedDataIgnoredFolders checks the ignored folders
+// of a checkout in a folder whose workspace is gone,
+// with core.ignorecase as macOS sets it.
+func TestGuardDerivedDataIgnoredFolders(t *testing.T) {
+	isolateGit(t)
+	const refused = "contains a Git repository at SourcePackages/checkouts/dep that has changed, untracked, or ignored files"
+	tests := []struct {
+		name   string
+		setup  func(t *testing.T, xcode string)
+		reason string
+	}{
+		{name: "empty ignored folder"},
+		{
+			name: "file named .GIT",
+			setup: func(t *testing.T, xcode string) {
+				write(t, filepath.Join(xcode, ".GIT"), "work")
+			},
+			reason: refused,
+		},
+		{
+			name: "named pipe",
+			setup: func(t *testing.T, xcode string) {
+				mkfifo(t, filepath.Join(xcode, "pipe"))
+			},
+			reason: refused,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newSwiftPackage(t, "DerivedData", "SourcePackages")
+			run(t, p.checkout, "config", "core.ignorecase", "true")
+			xcode := filepath.Join(p.checkout, ".swiftpm", "xcode")
+			mkdirAll(t, xcode)
+			if tt.setup != nil {
+				tt.setup(t, xcode)
+			}
+			sizes, reasons := GuardDerivedData(context.Background(), []string{p.cache}, true)
+			if reasons[0] != tt.reason {
+				t.Errorf("reason %q, want %q", reasons[0], tt.reason)
+			}
+			if (reasons[0] == "") != (sizes[0] > 0) {
+				t.Errorf("size %d with reason %q", sizes[0], reasons[0])
+			}
+		})
+	}
+}
+
 func TestVerifySwiftPMCheckoutChange(t *testing.T) {
 	isolateGit(t)
 	changes := []struct {
@@ -688,4 +824,12 @@ func statOrNil(path string) os.FileInfo {
 		return nil
 	}
 	return info
+}
+
+// mkdirAll makes the folder at path and any missing parents.
+func mkdirAll(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
 }
