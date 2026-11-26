@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -82,6 +83,9 @@ type rootList []string
 func (r *rootList) String() string { return strings.Join(*r, ",") }
 
 func (r *rootList) Set(v string) error {
+	if v == "" {
+		return errors.New("empty root")
+	}
 	abs, err := filepath.Abs(v)
 	if err != nil {
 		return err
@@ -242,7 +246,7 @@ func runClean(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	var floor int64
-	if *minSize != "" {
+	if flagGiven(fs, "min-size") {
 		var err error
 		if floor, err = disk.ParseSize(*minSize); err != nil {
 			fmt.Fprintf(stderr, "plonge clean: --min-size: %v\n", err)

@@ -600,6 +600,26 @@ func TestDiskWarnBelowExitsZeroWhenHomeIsMissing(t *testing.T) {
 	}
 }
 
+func TestEmptySelectionArguments(t *testing.T) {
+	home := setup(t)
+	t.Chdir(home)
+	// Invalid arguments must fail before Plonge loads the rules or scans.
+	mkfile(t, filepath.Join(home, "config", "plonge", "rules.toml"), "[")
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"scan", "--no-mise", "--root="}, "empty root"},
+		{[]string{"clean", "--no-mise", "--root", ""}, "empty root"},
+		{[]string{"clean", "--no-mise", "--root", ".", "--min-size="}, "invalid size"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(tt.args, &stdout, &stderr); code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), tt.want) {
+			t.Errorf("run(%q) = %d, stdout %q, stderr %q", tt.args, code, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestUsage(t *testing.T) {
 	tests := []struct {
 		args []string

@@ -904,6 +904,20 @@ because the system creates and manages them:
 | `systemd-private-*` | systemd gives each service with `PrivateTmp=` its own directory here. |
 | `snap-private-tmp` | snapd keeps the private temporary directories of snaps here. |
 
+On macOS, the rule also leaves alone any entry with the system flag `SF_NOUNLINK`,
+which `ls -lO` shows as `sunlnk`.
+System Integrity Protection sets this flag on folders
+that macOS creates for its services,
+such as `AudioComponentRegistrar` and `proactived`,
+and refuses to rename or remove them.
+The flag covers these folders whatever their names,
+including names that later versions of macOS add.
+They also have the `com.apple.rootless` extended attribute,
+but Plonge does not read it:
+on macOS 27, each entry in the temporary directory with that attribute
+also had the flag.
+The report counts these entries with the names above.
+
 The report counts the entries that it leaves alone
 and the entries that changed within the period.
 Plonge refuses a stale entry and lists it with the reason when it:
@@ -922,6 +936,8 @@ Plonge refuses a stale entry and lists it with the reason when it:
   through the resolved path or the path that `$TMPDIR` names;
 - is or holds a socket, a named pipe, or a device,
   which a program can use without holding it open;
+- holds a file or folder with `SF_NOUNLINK`,
+  or got that flag after the listing, on macOS;
 - holds a file or folder that changed within the period;
 - is or holds a Git repository at any depth, with the
   [same check as for project caches](#caches-that-hold-a-git-repository),
