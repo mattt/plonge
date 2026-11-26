@@ -4,6 +4,8 @@ import (
 	"io/fs"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // statOf returns the system status of the file that info describes.
@@ -14,8 +16,9 @@ func statOf(info fs.FileInfo) (fileStat, bool) {
 		return fileStat{}, false
 	}
 	return fileStat{
-		uid:     st.Uid,
-		id:      fileID{dev: uint64(st.Dev), ino: uint64(st.Ino)},
-		changed: time.Unix(st.Ctimespec.Unix()),
+		uid:      st.Uid,
+		id:       fileID{dev: uint64(st.Dev), ino: uint64(st.Ino)},
+		changed:  time.Unix(st.Ctimespec.Unix()),
+		noUnlink: st.Flags&unix.SF_NOUNLINK != 0,
 	}, true
 }

@@ -23,8 +23,10 @@ import (
 // or /tmp when TMPDIR is not set, after it resolves symlinks.
 // An entry is stale when it and everything in it last changed,
 // by modification time or status change time, at least TmpAge ago.
-// The rule keeps the names in tmpManagedNames without looking at them.
+// The rule keeps the names in tmpManagedNames without looking at them,
+// and, on macOS, an entry with the system flag SF_NOUNLINK.
 // It refuses a stale entry that is a symlink,
+// is or holds a file with SF_NOUNLINK,
 // is or holds a file of another user, or a file whose owner it cannot read,
 // is or holds a mount point, by its device or the mount table,
 // is used by a running process, as the shared process inspector reports,
@@ -107,9 +109,18 @@ func (r Runner) tmpEntry(ctx context.Context) (Entry, bool) {
 		// An entry whose status cannot be read stays a candidate,
 		// so that the report lists it with the reason.
 		if err == nil {
-			if st, ok := r.stat(info); ok && lastChange(info, st).After(cutoff) {
-				recent++
-				continue
+			if st, ok := r.stat(info); ok {
+				// macOS refuses to remove an entry with SF_NOUNLINK,
+				// such as a folder that it creates for one of its services,
+				// whatever its name.
+				if st.noUnlink {
+					managed++
+					continue
+				}
+				if lastChange(info, st).After(cutoff) {
+					recent++
+					continue
+				}
 			}
 		}
 		candidates = append(candidates, path)
@@ -270,6 +281,9 @@ func (r Runner) tmpInfoRefusal(info fs.FileInfo, rel string, pol tmpPolicy) stri
 	// and removal would delete files on the mounted file system.
 	if st.id.dev != pol.dev {
 		return is + " on another file system"
+	}
+	if st.noUnlink {
+		return is + " protected by macOS (sunlnk)"
 	}
 	if lastChange(info, st).After(pol.cutoff) {
 		if rel == "" {

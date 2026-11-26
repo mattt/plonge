@@ -372,6 +372,64 @@ func foreignStat(owner, mount string) func(fs.FileInfo) (fileStat, bool) {
 	}
 }
 
+// noUnlinkStat returns a stat hook that reports each file named in names
+// with SF_NOUNLINK, which a test cannot set without privileges.
+func noUnlinkStat(names ...string) func(fs.FileInfo) (fileStat, bool) {
+	return func(info fs.FileInfo) (fileStat, bool) {
+		st, ok := statOf(info)
+		st.noUnlink = slices.Contains(names, info.Name())
+		return st, ok
+	}
+}
+
+func TestTmpDirKeepsEntriesThatMacOSProtects(t *testing.T) {
+	r, tmp, _ := tmpSetup(t)
+	// macOS makes empty folders like this one for its services,
+	// with names outside tmpManagedNames.
+	if err := os.Mkdir(filepath.Join(tmp, "AudioComponentRegistrar"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mkfile(t, filepath.Join(tmp, "holder", "a", "guarded"), "x")
+	mkfile(t, filepath.Join(tmp, "later", "file"), "x")
+	mkfile(t, filepath.Join(tmp, "plain", "file"), "x")
+	r.statHook = noUnlinkStat("AudioComponentRegistrar", "guarded")
+	ctx := context.Background()
+
+	listed := r.List(ctx, nil)
+	e := tmpEntryOf(t, r)
+	var stale []string
+	for _, p := range e.stale {
+		stale = append(stale, filepath.Base(p))
+	}
+	if !slices.Equal(stale, []string{"later", "plain"}) {
+		t.Errorf("stale = %q", stale)
+	}
+	want := map[string]string{"holder": "holds a/guarded, which is protected by macOS (sunlnk)"}
+	if got := refusedReasons(e); !maps.Equal(got, want) {
+		t.Errorf("listing refused = %q, want %q", got, want)
+	}
+	if e.Note != "kept without checks: 0 changed in the last 24 hours, 1 managed by the system" {
+		t.Errorf("note = %q", e.Note)
+	}
+
+	// After the listing, macOS protects a listed entry.
+	r.statHook = noUnlinkStat("AudioComponentRegistrar", "guarded", "later")
+	o := tmpOutcome(t, r.Clean(ctx, listed, Options{Apply: true}))
+	want["later"] = "is protected by macOS (sunlnk)"
+	if got := refusedReasons(o.Entry); !maps.Equal(got, want) {
+		t.Errorf("apply refused = %q, want %q", got, want)
+	}
+	if o.Status != Ran {
+		t.Errorf("status = %v, reason = %q", o.Status, o.Reason)
+	}
+	for name, kept := range map[string]bool{"AudioComponentRegistrar": true, "holder": true, "later": true, "plain": false} {
+		_, err := os.Lstat(filepath.Join(tmp, name))
+		if gone := errors.Is(err, os.ErrNotExist); gone == kept {
+			t.Errorf("%s: kept = %v, want %v", name, !gone, kept)
+		}
+	}
+}
+
 func tmpOutcome(t *testing.T, res Result) Outcome {
 	t.Helper()
 	i := slices.IndexFunc(res.Outcomes, func(o Outcome) bool { return o.ID == "tmpdir" })
